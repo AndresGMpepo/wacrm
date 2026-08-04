@@ -1,6 +1,6 @@
-# wacrm — CRM Template for WhatsApp
+# wacrm — Aurionova CRM
 
-> Self-hostable CRM template for WhatsApp® — shared inbox, contacts,
+> Self-hostable Aurionova CRM® — shared inbox, contacts,
 > sales pipelines, broadcasts, and no-code automations. Fork it, brand
 > it, host it.
 
