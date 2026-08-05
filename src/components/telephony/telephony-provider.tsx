@@ -115,6 +115,13 @@ function streamFromEvent(payload: unknown): MediaStream | null {
     : null;
 }
 
+function isSameSession(first: Session | null | undefined, second: Session | null | undefined) {
+  if (!first || !second) return false;
+  const firstCallId = first.status?.callId;
+  const secondCallId = second.status?.callId;
+  return first === second || Boolean(firstCallId && secondCallId && firstCallId === secondCallId);
+}
+
 export function TelephonyProvider({ children }: { children: ReactNode }) {
   const [configured, setConfigured] = useState(false);
   const [connected, setConnected] = useState(false);
@@ -136,10 +143,12 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
   const connectingRef = useRef(false);
   const incomingAnswered = useRef(false);
   const incomingSession = useRef<Session | null>(null);
+  const activeSession = useRef<Session | null>(null);
   const audioContext = useRef<AudioContext | null>(null);
   const ringtone = useRef<ReturnType<typeof setInterval> | null>(null);
   const transferParent = useRef<Session | null>(null);
   const consultation = useRef<Session | null>(null);
+  const finalizedCallIds = useRef(new Set<string>());
 
   const notify = useCallback((title: string, body: string) => {
     if (document.visibilityState === 'visible') return;
@@ -193,6 +202,22 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
     }]));
   }, []);
 
+  const restoreSessionMedia = useCallback((session: Session) => {
+    activeSession.current = session;
+    setActive(session);
+    setLocalStream(session.localStream ?? null);
+    setRemoteStream(session.remoteStream ?? null);
+    // A resumed call can receive its tracks just after the HOLD/UNHOLD SIP
+    // negotiation. Read the SDK streams again after that negotiation settles.
+    for (const delay of [0, 250, 900]) {
+      setTimeout(() => {
+        if (activeSession.current !== session) return;
+        if (session.localStream) setLocalStream(session.localStream);
+        if (session.remoteStream) setRemoteStream(session.remoteStream);
+      }, delay);
+    }
+  }, []);
+
   const refreshHistory = useCallback(async () => {
     if (!pbx.current) return;
     try {
@@ -207,8 +232,14 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const clearSession = useCallback((session?: Session) => {
+    const callId = session?.status?.callId;
+    if (callId && finalizedCallIds.current.has(callId)) return;
+    if (callId) {
+      finalizedCallIds.current.add(callId);
+      if (finalizedCallIds.current.size > 100) finalizedCallIds.current.clear();
+    }
     stopRingtone();
-    const missed = incomingSession.current === session && !incomingAnswered.current;
+    const missed = isSameSession(incomingSession.current, session) && !incomingAnswered.current;
     const callStatus: CallHistoryItem['status'] = missed
       ? 'missed'
       : session?.status?.communicationType === 'outbound'
@@ -216,12 +247,13 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
         : 'incoming';
     if (session) rememberCall(session, callStatus);
 
-    if (consultation.current === session) {
+    if (isSameSession(consultation.current, session)) {
       consultation.current = null;
       setAttendedTransferReady(false);
       const parent = transferParent.current;
       transferParent.current = null;
       parent?.unhold();
+      if (parent) restoreSessionMedia(parent);
     }
     if (missed) {
       setStatus('Llamada perdida');
@@ -233,11 +265,14 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
     incomingSession.current = null;
     incomingAnswered.current = false;
     setIncoming(null);
-    setActive(null);
-    setLocalStream(null);
-    setRemoteStream(null);
+    if (isSameSession(activeSession.current, session)) {
+      activeSession.current = null;
+      setActive(null);
+      setLocalStream(null);
+      setRemoteStream(null);
+    }
     void refreshHistory();
-  }, [notify, refreshHistory, rememberCall, stopRingtone]);
+  }, [notify, refreshHistory, rememberCall, restoreSessionMedia, stopRingtone]);
 
   const connect = useCallback(async () => {
     if (connectingRef.current || !live.current) return;
@@ -283,9 +318,15 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
         startRingtone();
         toast.info('Llamada entrante', { description: session.status?.number ?? 'Contesta desde el softphone.' });
         notify('Llamada entrante', session.status?.number ?? 'Contesta desde WACRM.');
+        // A missed call never reaches startSession. Listen directly to the
+        // incoming session so it is recorded even when Yeastar removes it
+        // before emitting a phone-level deleteSession event.
+        session.on('ended', () => clearSession(session));
+        session.on('failed', () => clearSession(session));
       });
       operator.phone.on('startSession', ({ session }) => {
         stopRingtone();
+        activeSession.current = session;
         setActive(session);
         setIncoming(null);
         setOpen(true);
@@ -454,7 +495,7 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
       transferParent.current = null;
       setAttendedTransferReady(false);
       parent?.unhold();
-      if (parent) setActive(parent);
+      if (parent) restoreSessionMedia(parent);
       setStatus('Consulta cancelada');
     },
     video: async () => {
