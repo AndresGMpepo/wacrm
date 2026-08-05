@@ -30,7 +30,7 @@ export async function GET() {
       // `api_key` is selected only to derive `has_key` — it is stripped
       // out below and never returned to the client.
       .select(
-        'provider, model, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, api_key, embeddings_api_key',
+        'provider, model, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, conversation_analysis_enabled, analysis_on_customer_message, analysis_on_transfer, analysis_on_close, analysis_daily_limit, analysis_monthly_limit, analysis_max_per_conversation, api_key, embeddings_api_key',
       )
       .eq('account_id', accountId)
       .maybeSingle()
@@ -90,6 +90,17 @@ export async function POST(request: Request) {
         : null
     const isActive = body.is_active === true
     const autoReplyEnabled = body.auto_reply_enabled === true
+    const analysisEnabled = body.conversation_analysis_enabled === true
+    const analysisOnCustomerMessage = body.analysis_on_customer_message === true
+    const analysisOnTransfer = body.analysis_on_transfer === true
+    const analysisOnClose = body.analysis_on_close === true
+    const boundedNumber = (value: unknown, fallback: number, max: number) => {
+      const parsed = Number(value)
+      return Number.isFinite(parsed) ? Math.min(max, Math.max(1, Math.floor(parsed))) : fallback
+    }
+    const analysisDailyLimit = boundedNumber(body.analysis_daily_limit, 100, 10_000)
+    const analysisMonthlyLimit = boundedNumber(body.analysis_monthly_limit, 1_000, 100_000)
+    const analysisMaxPerConversation = boundedNumber(body.analysis_max_per_conversation, 6, 100)
 
     let maxPer = Number(body.auto_reply_max_per_conversation)
     if (!Number.isFinite(maxPer)) maxPer = 3
@@ -205,6 +216,13 @@ export async function POST(request: Request) {
       is_active: isActive,
       auto_reply_enabled: autoReplyEnabled,
       auto_reply_max_per_conversation: maxPer,
+      conversation_analysis_enabled: analysisEnabled,
+      analysis_on_customer_message: analysisOnCustomerMessage,
+      analysis_on_transfer: analysisOnTransfer,
+      analysis_on_close: analysisOnClose,
+      analysis_daily_limit: analysisDailyLimit,
+      analysis_monthly_limit: analysisMonthlyLimit,
+      analysis_max_per_conversation: analysisMaxPerConversation,
     }
     // Only touch the handoff target when the form actually sent the field,
     // so a partial save (e.g. flipping a toggle) doesn't wipe it.

@@ -71,6 +71,13 @@ export function AiConfig() {
   const [systemPrompt, setSystemPrompt] = useState('');
   const [isActive, setIsActive] = useState(false);
   const [autoReplyEnabled, setAutoReplyEnabled] = useState(false);
+  const [conversationAnalysisEnabled, setConversationAnalysisEnabled] = useState(false);
+  const [analysisOnCustomerMessage, setAnalysisOnCustomerMessage] = useState(false);
+  const [analysisOnTransfer, setAnalysisOnTransfer] = useState(false);
+  const [analysisOnClose, setAnalysisOnClose] = useState(false);
+  const [analysisDailyLimit, setAnalysisDailyLimit] = useState(100);
+  const [analysisMonthlyLimit, setAnalysisMonthlyLimit] = useState(1000);
+  const [analysisMaxPerConversation, setAnalysisMaxPerConversation] = useState(6);
   const [maxPerConversation, setMaxPerConversation] = useState(3);
   // Empty string = leave unassigned (shared queue).
   const [handoffAgentId, setHandoffAgentId] = useState('');
@@ -98,6 +105,13 @@ export function AiConfig() {
         setSystemPrompt(data.system_prompt ?? '');
         setIsActive(data.is_active);
         setAutoReplyEnabled(data.auto_reply_enabled);
+        setConversationAnalysisEnabled(Boolean(data.conversation_analysis_enabled));
+        setAnalysisOnCustomerMessage(Boolean(data.analysis_on_customer_message));
+        setAnalysisOnTransfer(Boolean(data.analysis_on_transfer));
+        setAnalysisOnClose(Boolean(data.analysis_on_close));
+        setAnalysisDailyLimit(data.analysis_daily_limit ?? 100);
+        setAnalysisMonthlyLimit(data.analysis_monthly_limit ?? 1000);
+        setAnalysisMaxPerConversation(data.analysis_max_per_conversation ?? 6);
         setMaxPerConversation(data.auto_reply_max_per_conversation ?? 3);
         setHandoffAgentId(data.handoff_agent_id ?? '');
         setHasStoredKey(Boolean(data.has_key));
@@ -151,6 +165,13 @@ export function AiConfig() {
     auto_reply_enabled: autoReplyEnabled,
     auto_reply_max_per_conversation: maxPerConversation,
     handoff_agent_id: handoffAgentId || null,
+    conversation_analysis_enabled: conversationAnalysisEnabled,
+    analysis_on_customer_message: analysisOnCustomerMessage,
+    analysis_on_transfer: analysisOnTransfer,
+    analysis_on_close: analysisOnClose,
+    analysis_daily_limit: analysisDailyLimit,
+    analysis_monthly_limit: analysisMonthlyLimit,
+    analysis_max_per_conversation: analysisMaxPerConversation,
   });
 
   const handleTest = async () => {
@@ -482,6 +503,32 @@ export function AiConfig() {
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Análisis automático de conversaciones</CardTitle>
+            <CardDescription>
+              Política administrada por la cuenta. Los agentes no pueden omitir los análisis configurados.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center justify-between gap-4 rounded-md border border-border p-3">
+              <div><p className="text-sm font-medium">Habilitar análisis automático</p><p className="text-xs text-muted-foreground">Guarda los trabajos en una cola sin bloquear WhatsApp.</p></div>
+              <Switch checked={conversationAnalysisEnabled} onCheckedChange={setConversationAnalysisEnabled} disabled={disabled || !isActive} />
+            </div>
+            <div className="space-y-3 rounded-md border border-border p-3">
+              <p className="text-sm font-medium">Cuándo analizar</p>
+              <label className="flex items-center justify-between gap-4 text-sm"><span>Tras 2 minutos sin respuesta del cliente</span><Switch checked={analysisOnCustomerMessage} onCheckedChange={setAnalysisOnCustomerMessage} disabled={disabled || !conversationAnalysisEnabled} /></label>
+              <label className="flex items-center justify-between gap-4 text-sm"><span>Al transferir o asignar a otro agente</span><Switch checked={analysisOnTransfer} onCheckedChange={setAnalysisOnTransfer} disabled={disabled || !conversationAnalysisEnabled} /></label>
+              <label className="flex items-center justify-between gap-4 text-sm"><span>Al cerrar la conversación</span><Switch checked={analysisOnClose} onCheckedChange={setAnalysisOnClose} disabled={disabled || !conversationAnalysisEnabled} /></label>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-3">
+              <div className="space-y-2"><Label>Límite diario</Label><Input type="number" min={1} max={10000} value={analysisDailyLimit} onChange={(e) => setAnalysisDailyLimit(Number(e.target.value) || 1)} disabled={disabled || !conversationAnalysisEnabled} /></div>
+              <div className="space-y-2"><Label>Límite mensual</Label><Input type="number" min={1} max={100000} value={analysisMonthlyLimit} onChange={(e) => setAnalysisMonthlyLimit(Number(e.target.value) || 1)} disabled={disabled || !conversationAnalysisEnabled} /></div>
+              <div className="space-y-2"><Label>Máximo por conversación</Label><Input type="number" min={1} max={100} value={analysisMaxPerConversation} onChange={(e) => setAnalysisMaxPerConversation(Number(e.target.value) || 1)} disabled={disabled || !conversationAnalysisEnabled} /></div>
             </div>
           </CardContent>
         </Card>
