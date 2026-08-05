@@ -107,8 +107,11 @@ function mergeHistory(current: CallHistoryItem[], next: CallHistoryItem[]) {
 }
 
 function streamFromEvent(payload: unknown): MediaStream | null {
-  const candidate = payload && typeof payload === 'object' && 'stream' in payload
-    ? (payload as { stream?: unknown }).stream
+  const candidate = payload && typeof payload === 'object'
+    ? (payload as { stream?: unknown; remoteStream?: unknown; localStream?: unknown }).stream
+      ?? (payload as { remoteStream?: unknown }).remoteStream
+      ?? (payload as { localStream?: unknown }).localStream
+      ?? payload
     : payload;
   return candidate && typeof candidate === 'object' && 'getTracks' in candidate
     ? candidate as MediaStream
