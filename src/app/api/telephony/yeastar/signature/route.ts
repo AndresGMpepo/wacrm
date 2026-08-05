@@ -7,6 +7,8 @@ import { requireRole, toErrorResponse } from '@/lib/auth/account';
 type TokenResponse = { errcode: number; errmsg?: string; access_token?: string };
 type SignResponse = { errcode: number; errmsg?: string; data?: { sign?: string } };
 type CachedCredential = { accessToken: string; accessExpiresAt: number; signature: string; signatureExpiresAt: number; extension: string; pbxUrl: string };
+// A Linkus signature authenticates one extension. Never cache it at the
+// account level or one member could receive another member's signature.
 const credentialCache = new Map<string, CachedCredential>();
 
 function admin() {
@@ -15,20 +17,33 @@ function admin() {
 
 export async function POST() {
   try {
-    const { accountId } = await requireRole('agent');
-    const { data: config, error } = await admin()
+    const { accountId, userId } = await requireRole('agent');
+    const [integration, userConfig] = await Promise.all([
+      admin()
       .from('telephony_configs')
-      .select('pbx_url, extension, yeastar_access_id, yeastar_access_key')
+      .select('pbx_url, yeastar_access_id, yeastar_access_key')
       .eq('account_id', accountId)
       .eq('provider', 'yeastar')
-      .maybeSingle();
-    if (error) throw error;
-    if (!config?.extension || !config.yeastar_access_id || !config.yeastar_access_key) {
-      return NextResponse.json({ error: 'Yeastar is not configured.' }, { status: 409 });
+      .maybeSingle(),
+      admin()
+        .from('telephony_user_configs')
+        .select('extension')
+        .eq('account_id', accountId)
+        .eq('user_id', userId)
+        .eq('provider', 'yeastar')
+        .maybeSingle(),
+    ]);
+    if (integration.error) throw integration.error;
+    if (userConfig.error) throw userConfig.error;
+    const config = integration.data;
+    const extension = userConfig.data?.extension;
+    if (!config?.pbx_url || !extension || !config.yeastar_access_id || !config.yeastar_access_key) {
+      return NextResponse.json({ error: 'Configura tu extensión personal antes de conectar el softphone.' }, { status: 409 });
     }
-    const cached = credentialCache.get(accountId);
+    const cacheKey = `${accountId}:${userId}`;
+    const cached = credentialCache.get(cacheKey);
     const now = Math.floor(Date.now() / 1000);
-    if (cached && cached.extension === config.extension && cached.pbxUrl === config.pbx_url && cached.signatureExpiresAt > now + 30) {
+    if (cached && cached.extension === extension && cached.pbxUrl === config.pbx_url && cached.signatureExpiresAt > now + 30) {
       return NextResponse.json({ extension: cached.extension, pbxUrl: cached.pbxUrl, secret: cached.signature, expiresAt: cached.signatureExpiresAt });
     }
     const accessId = decrypt(config.yeastar_access_id);
@@ -51,15 +66,15 @@ export async function POST() {
     const signResponse = await fetch(`${config.pbx_url}/openapi/v1.0/sign/create?access_token=${encodeURIComponent(accessToken)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'User-Agent': 'wacrm-telephony/1.0' },
-      body: JSON.stringify({ username: config.extension, sign_type: 'sdk', expire_time: expiresAt }),
+      body: JSON.stringify({ username: extension, sign_type: 'sdk', expire_time: expiresAt }),
       cache: 'no-store',
     });
     const sign = (await signResponse.json()) as SignResponse;
     if (!signResponse.ok || sign.errcode !== 0 || !sign.data?.sign) {
       return NextResponse.json({ error: sign.errmsg || 'Could not create Linkus signature.' }, { status: 502 });
     }
-    credentialCache.set(accountId, { accessToken, accessExpiresAt: now + 1500, signature: sign.data.sign, signatureExpiresAt: expiresAt, extension: config.extension, pbxUrl: config.pbx_url });
-    return NextResponse.json({ extension: config.extension, pbxUrl: config.pbx_url, secret: sign.data.sign, expiresAt });
+    credentialCache.set(cacheKey, { accessToken, accessExpiresAt: now + 1500, signature: sign.data.sign, signatureExpiresAt: expiresAt, extension, pbxUrl: config.pbx_url });
+    return NextResponse.json({ extension, pbxUrl: config.pbx_url, secret: sign.data.sign, expiresAt });
   } catch (error) {
     return toErrorResponse(error);
   }

@@ -4,14 +4,6 @@ import { createClient as createAdminClient } from '@supabase/supabase-js';
 import { encrypt } from '@/lib/whatsapp/encryption';
 import { requireRole, toErrorResponse } from '@/lib/auth/account';
 
-type SavedConfig = {
-  provider: 'yeastar' | 'sip';
-  pbx_url: string;
-  extension: string | null;
-  sip_websocket_url: string | null;
-  sip_username: string | null;
-};
-
 function admin() {
   return createAdminClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
 }
@@ -27,15 +19,31 @@ function validHttpsUrl(value: unknown): value is string {
 
 export async function GET() {
   try {
-    const { accountId } = await requireRole('agent');
-    const { data, error } = await admin()
-      .from('telephony_configs')
-      .select('provider, pbx_url, extension, sip_websocket_url, sip_username')
-      .eq('account_id', accountId)
-      .eq('provider', 'yeastar')
-      .maybeSingle();
-    if (error) throw error;
-    return NextResponse.json({ config: (data as SavedConfig | null) ?? null });
+    const { accountId, userId } = await requireRole('agent');
+    const [integration, userConfig] = await Promise.all([
+      admin()
+        .from('telephony_configs')
+        .select('provider, pbx_url, sip_websocket_url, sip_username')
+        .eq('account_id', accountId)
+        .eq('provider', 'yeastar')
+        .maybeSingle(),
+      admin()
+        .from('telephony_user_configs')
+        .select('extension')
+        .eq('account_id', accountId)
+        .eq('user_id', userId)
+        .eq('provider', 'yeastar')
+        .maybeSingle(),
+    ]);
+    if (integration.error) throw integration.error;
+    if (userConfig.error) throw userConfig.error;
+    if (!integration.data) return NextResponse.json({ config: null });
+    return NextResponse.json({
+      config: {
+        ...integration.data,
+        extension: userConfig.data?.extension ?? null,
+      },
+    });
   } catch (error) {
     return toErrorResponse(error);
   }
@@ -43,31 +51,55 @@ export async function GET() {
 
 export async function PUT(request: Request) {
   try {
-    const { accountId, userId } = await requireRole('admin');
-    const body = await request.json();
-    const { pbxUrl, accessId, accessKey, extension } = body as Record<string, unknown>;
-    if (!validHttpsUrl(pbxUrl) || typeof extension !== 'string' || !extension.trim()) {
-      return NextResponse.json({ error: 'PBX URL HTTPS and extension are required.' }, { status: 400 });
+    const { accountId, userId, role } = await requireRole('agent');
+    const body = await request.json() as Record<string, unknown>;
+    const extension = typeof body.extension === 'string' ? body.extension.trim() : '';
+    if (!extension) return NextResponse.json({ error: 'La extensión es obligatoria.' }, { status: 400 });
+
+    const existingResult = await admin()
+      .from('telephony_configs')
+      .select('pbx_url, yeastar_access_id, yeastar_access_key')
+      .eq('account_id', accountId)
+      .eq('provider', 'yeastar')
+      .maybeSingle();
+    if (existingResult.error) throw existingResult.error;
+    const existing = existingResult.data;
+
+    const isAdmin = role === 'owner' || role === 'admin';
+    if (!existing && !isAdmin) {
+      return NextResponse.json({ error: 'Un administrador debe configurar primero la integración Yeastar.' }, { status: 409 });
     }
-    const { data: existing, error: existingError } = await admin().from('telephony_configs').select('yeastar_access_id, yeastar_access_key').eq('account_id', accountId).eq('provider', 'yeastar').maybeSingle();
-    if (existingError) throw existingError;
-    const nextAccessId = typeof accessId === 'string' && accessId.trim() ? encrypt(accessId.trim()) : existing?.yeastar_access_id;
-    const nextAccessKey = typeof accessKey === 'string' && accessKey ? encrypt(accessKey) : existing?.yeastar_access_key;
-    if (!nextAccessId || !nextAccessKey) return NextResponse.json({ error: 'Linkus SDK Access ID and Access Key are required.' }, { status: 400 });
-    const { error } = await admin().from('telephony_configs').upsert(
-      {
+
+    if (isAdmin && (body.pbxUrl || body.accessId || body.accessKey)) {
+      const pbxUrl = validHttpsUrl(body.pbxUrl) ? body.pbxUrl.replace(/\/$/, '') : existing?.pbx_url;
+      const accessId = typeof body.accessId === 'string' && body.accessId.trim() ? encrypt(body.accessId.trim()) : existing?.yeastar_access_id;
+      const accessKey = typeof body.accessKey === 'string' && body.accessKey ? encrypt(body.accessKey) : existing?.yeastar_access_key;
+      if (!pbxUrl || !accessId || !accessKey) {
+        return NextResponse.json({ error: 'URL HTTPS, Access ID y Access Key son obligatorios para la primera conexión.' }, { status: 400 });
+      }
+      const { error } = await admin().from('telephony_configs').upsert({
         account_id: accountId,
         provider: 'yeastar',
-        pbx_url: pbxUrl.replace(/\/$/, ''),
-        extension: extension.trim(),
-        yeastar_access_id: nextAccessId,
-        yeastar_access_key: nextAccessKey,
+        pbx_url: pbxUrl,
+        // Extensions moved to telephony_user_configs. Clear the legacy value
+        // so it can never be mistaken for an account-wide login again.
+        extension: null,
+        yeastar_access_id: accessId,
+        yeastar_access_key: accessKey,
         created_by: userId,
         updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'account_id,provider' },
-    );
-    if (error) throw error;
+      }, { onConflict: 'account_id,provider' });
+      if (error) throw error;
+    }
+
+    const { error: extensionError } = await admin().from('telephony_user_configs').upsert({
+      account_id: accountId,
+      user_id: userId,
+      provider: 'yeastar',
+      extension,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'account_id,user_id,provider' });
+    if (extensionError) throw extensionError;
     return NextResponse.json({ ok: true });
   } catch (error) {
     return toErrorResponse(error);
@@ -76,8 +108,13 @@ export async function PUT(request: Request) {
 
 export async function DELETE() {
   try {
-    const { accountId } = await requireRole('admin');
-    const { error } = await admin().from('telephony_configs').delete().eq('account_id', accountId).eq('provider', 'yeastar');
+    const { accountId, userId } = await requireRole('agent');
+    const { error } = await admin()
+      .from('telephony_user_configs')
+      .delete()
+      .eq('account_id', accountId)
+      .eq('user_id', userId)
+      .eq('provider', 'yeastar');
     if (error) throw error;
     return NextResponse.json({ ok: true });
   } catch (error) {

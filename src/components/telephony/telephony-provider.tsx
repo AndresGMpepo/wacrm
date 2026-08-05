@@ -268,8 +268,11 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
     fetch('/api/telephony/config')
       .then((response) => response.json())
       .then((data) => {
-        setConfigured(Boolean(data.config));
-        if (data.config) void connect();
+        // The PBX integration can exist before this particular user has an
+        // extension. Do not show/connect a softphone until their personal
+        // extension assignment is present.
+        setConfigured(Boolean(data.config?.extension));
+        if (data.config?.extension) void connect();
       })
       .catch(() => undefined);
     return () => {
