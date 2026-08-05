@@ -29,7 +29,7 @@
   },
   "scripts": {
     "dev": "next dev",
-    "build": "next build && node scripts/prepare-standalone.mjs",
+    "build": "npm run typecheck && next build && node scripts/prepare-standalone.mjs",
     "start": "node scripts/start-standalone.mjs",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",

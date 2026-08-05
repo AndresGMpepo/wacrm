@@ -65,6 +65,14 @@ const SECURITY_HEADERS = [
 ] as const;
 
 const nextConfig: NextConfig = {
+  // Nixpacks builds this project in a constrained worker where Next's own
+  // post-compile type-check can stall. package.json runs `tsc --noEmit`
+  // immediately before `next build`, so type errors still fail the build;
+  // this only prevents the duplicate Next worker from running afterward.
+  typescript: {
+    ignoreBuildErrors: true,
+  },
+
   // Emit a self-contained server bundle (.next/standalone) so the
   // Docker image can run without node_modules or the Next CLI.
   // Harmless outside Docker: `next start` keeps working as before.
