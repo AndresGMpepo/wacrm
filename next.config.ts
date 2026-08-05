@@ -28,12 +28,13 @@ const SECURITY_HEADERS = [
   { key: "X-Frame-Options", value: "DENY" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
   {
-    // Microphone is allowed for same-origin (`self`) so the inbox
-    // composer can record voice notes via MediaRecorder. Everything
-    // else stays denied — a compromised dependency can't silently grab
-    // the camera / geolocation / etc.
+    // Microphone and camera are allowed for same-origin (`self`). The
+    // softphone needs the microphone for WebRTC and requests the camera only
+    // when the user explicitly starts a video call. Everything else stays
+    // denied.
     key: "Permissions-Policy",
-    value: "camera=(), microphone=(self), geolocation=(), payment=(), usb=()",
+    value:
+      "camera=(self), microphone=(self), geolocation=(), payment=(), usb=()",
   },
   {
     key: "Content-Security-Policy-Report-Only",
@@ -115,12 +116,10 @@ const nextConfig: NextConfig = {
    *     the correct production headers for hashed assets.
    *   - /api/*          — no-store. API responses are per-user and
    *     must never be shared across requests at the edge.
-   *   - Everything else — public, brief s-maxage + generous
-   *     stale-while-revalidate. The edge serves instantly from cache
-   *     for the first 5 min, then returns cached content while
-   *     refreshing in the background for up to 24 h. A deploy's
-   *     chunk-hash drift self-heals within ~5 min with no user-
-   *     visible latency.
+   *   - Everything else — no-store. This avoids serving HTML from a prior
+   *     deployment that references JavaScript/CSS chunk hashes that no longer
+   *     exist. It is especially important behind a managed proxy where cache
+   *     invalidation is outside this application's control.
    *
    *   Note: dynamic dashboard routes (/inbox, /contacts, /pipelines,
    *   /broadcasts, etc.) are server-rendered per request — Next.js
@@ -145,8 +144,7 @@ const nextConfig: NextConfig = {
         headers: [
           {
             key: "Cache-Control",
-            value:
-              "public, max-age=0, s-maxage=300, stale-while-revalidate=86400",
+            value: "no-store, max-age=0",
           },
         ],
       },
