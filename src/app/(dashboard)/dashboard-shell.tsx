@@ -7,6 +7,8 @@ import { Sidebar } from '@/components/layout/sidebar';
 import { Header } from '@/components/layout/header';
 import { PresenceHeartbeat } from '@/components/presence/presence-heartbeat';
 import { IncomingMessageAlert } from '@/components/notifications/incoming-message-alert';
+import { TelephonyProvider } from '@/components/telephony/telephony-provider';
+import { Softphone } from '@/components/telephony/softphone';
 
 // Auth-gated dashboard shell. Extracted from the layout so the layout
 // itself can stay a server component and export metadata (noindex) —
@@ -46,12 +48,12 @@ function DashboardShellInner({ children }: { children: React.ReactNode }) {
           signed in. Headless — renders nothing. */}
       <PresenceHeartbeat />
       <IncomingMessageAlert />
-      <Sidebar open={sidebarOpen} onClose={closeSidebar} />
+      <TelephonyProvider><Sidebar open={sidebarOpen} onClose={closeSidebar} />
       <div className="flex flex-1 flex-col overflow-hidden">
-        <Header onOpenSidebar={() => setSidebarOpen(true)} />
+        <Header onOpenSidebar={() => setSidebarOpen(true)} extra={<Softphone />} />
         {/* Thinner horizontal padding on mobile so cards have room to breathe. */}
         <main className="flex-1 overflow-y-auto p-4 sm:p-6">{children}</main>
-      </div>
+      </div></TelephonyProvider>
     </div>
   );
 }

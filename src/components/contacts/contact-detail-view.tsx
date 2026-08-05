@@ -39,7 +39,9 @@ import {
   X,
   DollarSign,
   LayoutTemplate,
+  PhoneCall,
 } from 'lucide-react';
+import { useTelephony } from '@/components/telephony/telephony-provider';
 import { useTranslations } from 'next-intl';
 
 interface ContactDetailViewProps {
@@ -58,6 +60,7 @@ export function ContactDetailView({
   const t = useTranslations('Contacts.detailView');
   const supabase = createClient();
   const { accountId, defaultCurrency } = useAuth();
+  const telephony = useTelephony();
 
   const [contact, setContact] = useState<Contact | null>(null);
   const [loading, setLoading] = useState(false);
@@ -417,6 +420,7 @@ export function ContactDetailView({
                         <Copy className="size-3" />
                       )}
                     </button>
+                    <button onClick={() => void telephony.call(contact.phone)} disabled={!telephony.connected} className="flex items-center gap-1 text-primary transition-colors hover:text-primary/80 disabled:opacity-50" title="Llamar por softphone"><PhoneCall className="size-3" /> Llamar</button>
                     {contact.email && (
                       <span className="flex items-center gap-1">
                         <Mail className="size-3" />

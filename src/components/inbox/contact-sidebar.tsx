@@ -15,7 +15,9 @@ import {
   DollarSign,
   StickyNote,
   Plus,
+  PhoneCall,
 } from "lucide-react";
+import { useTelephony } from '@/components/telephony/telephony-provider';
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { format } from "date-fns";
@@ -30,6 +32,7 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
   const tThread = useTranslations("Inbox.messageThread");
 
   const { accountId } = useAuth();
+  const telephony = useTelephony();
   const [copied, setCopied] = useState(false);
   const [deals, setDeals] = useState<Deal[]>([]);
   const [notes, setNotes] = useState<ContactNote[]>([]);
@@ -157,6 +160,7 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
 
           {/* Phone */}
           <div className="mt-4 space-y-2">
+            <button onClick={() => void telephony.call(contact.phone)} disabled={!telephony.connected} className="flex w-full items-center gap-2 rounded-lg bg-primary/10 px-3 py-2 text-sm font-medium text-primary transition-colors hover:bg-primary/20 disabled:opacity-50"><PhoneCall className="h-4 w-4" /><span>Llamar por softphone</span></button>
             <button
               onClick={handleCopyPhone}
               className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted"
