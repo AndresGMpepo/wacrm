@@ -49,6 +49,7 @@ import {
 import { deleteAccountMedia } from "@/lib/storage/upload-media";
 import { TemplatePicker } from "./template-picker";
 import { AiThreadBanner } from "./ai-thread-banner";
+import { ConversationIntelligence } from "./conversation-intelligence";
 import { buildReplyPreview } from "./reply-quote";
 import { toast } from "sonner";
 
@@ -1148,6 +1149,8 @@ export function MessageThread({
           }
         }}
       />
+
+      <ConversationIntelligence conversationId={conversation.id} />
 
       {/* Composer */}
       <MessageComposer
