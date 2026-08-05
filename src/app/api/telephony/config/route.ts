@@ -49,17 +49,19 @@ export async function PUT(request: Request) {
     if (!validHttpsUrl(pbxUrl) || typeof extension !== 'string' || !extension.trim()) {
       return NextResponse.json({ error: 'PBX URL HTTPS and extension are required.' }, { status: 400 });
     }
-    if (typeof accessId !== 'string' || typeof accessKey !== 'string' || !accessId.trim() || !accessKey.trim()) {
-      return NextResponse.json({ error: 'Linkus SDK Access ID and Access Key are required.' }, { status: 400 });
-    }
+    const { data: existing, error: existingError } = await admin().from('telephony_configs').select('yeastar_access_id, yeastar_access_key').eq('account_id', accountId).eq('provider', 'yeastar').maybeSingle();
+    if (existingError) throw existingError;
+    const nextAccessId = typeof accessId === 'string' && accessId.trim() ? encrypt(accessId.trim()) : existing?.yeastar_access_id;
+    const nextAccessKey = typeof accessKey === 'string' && accessKey ? encrypt(accessKey) : existing?.yeastar_access_key;
+    if (!nextAccessId || !nextAccessKey) return NextResponse.json({ error: 'Linkus SDK Access ID and Access Key are required.' }, { status: 400 });
     const { error } = await admin().from('telephony_configs').upsert(
       {
         account_id: accountId,
         provider: 'yeastar',
         pbx_url: pbxUrl.replace(/\/$/, ''),
         extension: extension.trim(),
-        yeastar_access_id: encrypt(accessId.trim()),
-        yeastar_access_key: encrypt(accessKey),
+        yeastar_access_id: nextAccessId,
+        yeastar_access_key: nextAccessKey,
         created_by: userId,
         updated_at: new Date().toISOString(),
       },

@@ -189,9 +189,9 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
         <div className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-border px-4">
           <Link href="/dashboard" className="flex items-center gap-2">
           <img 
-            src="/logo-eslogan.png" 
+            src="/Logo-eslogan.png" 
             alt="Aurionova Logo" 
-            className="h-8 object-contain" 
+            className="h-9 w-9 rounded-md bg-white object-contain p-0.5" 
           />
           <span className="text-sm font-semibold text-foreground">
             Aurionova CRM
