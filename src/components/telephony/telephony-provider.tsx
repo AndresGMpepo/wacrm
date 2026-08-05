@@ -12,7 +12,12 @@ import {
 import { toast } from 'sonner';
 
 type Session = {
-  status?: { number?: string; communicationType?: 'inbound' | 'outbound' };
+  status?: {
+    number?: string;
+    callId?: string;
+    communicationType?: 'inbound' | 'outbound';
+    transferParent?: { callId?: string; number?: string };
+  };
   answer: (options?: { video?: boolean }) => Promise<unknown>;
   reject: () => void;
   hangup: () => void;
@@ -20,16 +25,18 @@ type Session = {
   unmute: () => void;
   blindTransfer: (number: string) => void;
   attendedTransfer: (number: string) => void;
+  hold: () => void;
+  unhold: () => void;
   audioToVideo: (allowNoneCamera?: boolean) => Promise<unknown>;
   dtmf: (tone: string) => void;
-  on: (event: string, listener: (payload?: { stream?: MediaStream }) => void) => unknown;
+  on: (event: string, listener: (payload?: unknown) => void) => unknown;
   localStream?: MediaStream;
   remoteStream?: MediaStream;
 };
 
 type Phone = {
   start: () => unknown;
-  call: (number: string, options?: { video?: boolean }) => Promise<unknown>;
+  call: (number: string, options?: { video?: boolean }, transferId?: string) => Promise<unknown>;
   on: (event: string, listener: (payload: { session: Session }) => void) => unknown;
 };
 
@@ -63,12 +70,16 @@ type State = {
   remoteStream: MediaStream | null;
   history: CallHistoryItem[];
   refreshHistory: () => Promise<void>;
+  refreshConfiguration: () => Promise<void>;
   call: (number: string, video?: boolean) => Promise<void>;
   answer: (video?: boolean) => Promise<void>;
   reject: () => void;
   hangup: () => void;
   mute: (value: boolean) => void;
-  transfer: (number: string, attended?: boolean) => void;
+  transfer: (number: string, attended?: boolean) => Promise<void>;
+  attendedTransferReady: boolean;
+  completeAttendedTransfer: () => void;
+  cancelAttendedTransfer: () => void;
   video: () => Promise<void>;
   dtmf: (tone: string) => void;
 };
@@ -86,6 +97,24 @@ function callHistoryItem(row: Record<string, unknown>): CallHistoryItem {
   };
 }
 
+function mergeHistory(current: CallHistoryItem[], next: CallHistoryItem[]) {
+  const unique = new Map<string, CallHistoryItem>();
+  for (const item of [...next, ...current]) {
+    const key = `${item.status}:${item.number}:${Math.floor(item.timestamp / 60_000)}`;
+    if (!unique.has(key)) unique.set(key, item);
+  }
+  return [...unique.values()].sort((a, b) => b.timestamp - a.timestamp).slice(0, 24);
+}
+
+function streamFromEvent(payload: unknown): MediaStream | null {
+  const candidate = payload && typeof payload === 'object' && 'stream' in payload
+    ? (payload as { stream?: unknown }).stream
+    : payload;
+  return candidate && typeof candidate === 'object' && 'getTracks' in candidate
+    ? candidate as MediaStream
+    : null;
+}
+
 export function TelephonyProvider({ children }: { children: ReactNode }) {
   const [configured, setConfigured] = useState(false);
   const [connected, setConnected] = useState(false);
@@ -97,6 +126,7 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [history, setHistory] = useState<CallHistoryItem[]>([]);
+  const [attendedTransferReady, setAttendedTransferReady] = useState(false);
 
   const phone = useRef<Phone | null>(null);
   const pbx = useRef<Pbx | null>(null);
@@ -108,6 +138,8 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
   const incomingSession = useRef<Session | null>(null);
   const audioContext = useRef<AudioContext | null>(null);
   const ringtone = useRef<ReturnType<typeof setInterval> | null>(null);
+  const transferParent = useRef<Session | null>(null);
+  const consultation = useRef<Session | null>(null);
 
   const notify = useCallback((title: string, body: string) => {
     if (document.visibilityState === 'visible') return;
@@ -150,11 +182,25 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
     ringtone.current = setInterval(ring, 1400);
   }, [ring, stopRingtone]);
 
+  const rememberCall = useCallback((session: Session | undefined, callStatus: CallHistoryItem['status']) => {
+    const number = session?.status?.number ?? 'Número desconocido';
+    const timestamp = Date.now();
+    setHistory((current) => mergeHistory(current, [{
+      id: `local-${session?.status?.callId ?? number}-${timestamp}`,
+      number,
+      status: callStatus,
+      timestamp,
+    }]));
+  }, []);
+
   const refreshHistory = useCallback(async () => {
     if (!pbx.current) return;
     try {
       const result = await pbx.current.cdrQuery({ page: 1, size: 12, sortBy: 'time', orderBy: 'desc' });
-      if (result.errcode === 0) setHistory((result.personal_cdr_list ?? []).map(callHistoryItem));
+      if (result.errcode === 0) {
+        const rawList = result.personal_cdr_list ?? (result as { personalCdrList?: Array<Record<string, unknown>> }).personalCdrList ?? [];
+        setHistory((current) => mergeHistory(current, rawList.map(callHistoryItem)));
+      }
     } catch {
       // The call controls remain available if Yeastar temporarily rejects CDR retrieval.
     }
@@ -163,6 +209,20 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
   const clearSession = useCallback((session?: Session) => {
     stopRingtone();
     const missed = incomingSession.current === session && !incomingAnswered.current;
+    const callStatus: CallHistoryItem['status'] = missed
+      ? 'missed'
+      : session?.status?.communicationType === 'outbound'
+        ? 'outgoing'
+        : 'incoming';
+    if (session) rememberCall(session, callStatus);
+
+    if (consultation.current === session) {
+      consultation.current = null;
+      setAttendedTransferReady(false);
+      const parent = transferParent.current;
+      transferParent.current = null;
+      parent?.unhold();
+    }
     if (missed) {
       setStatus('Llamada perdida');
       toast.error('Llamada perdida', { description: session?.status?.number ?? 'No se atendió la llamada entrante.' });
@@ -177,7 +237,7 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
     setLocalStream(null);
     setRemoteStream(null);
     void refreshHistory();
-  }, [notify, refreshHistory, stopRingtone]);
+  }, [notify, refreshHistory, rememberCall, stopRingtone]);
 
   const connect = useCallback(async () => {
     if (connectingRef.current || !live.current) return;
@@ -229,12 +289,30 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
         setActive(session);
         setIncoming(null);
         setOpen(true);
-        setStatus('Llamada en curso');
+        if (session.status?.transferParent) {
+          consultation.current = session;
+          setAttendedTransferReady(true);
+          setStatus(`Consulta con ${session.status.number ?? 'destino'}`);
+        } else {
+          setStatus('Llamada en curso');
+        }
         setLocalStream(session.localStream ?? null);
         setRemoteStream(session.remoteStream ?? null);
-        session.on('streamAdded', (event: { stream?: MediaStream } | undefined) => {
-          if (event?.stream) setRemoteStream(event.stream);
-        });
+        const updateRemoteStream = (event?: unknown) => {
+          const stream = streamFromEvent(event) ?? session.remoteStream ?? null;
+          if (stream) setRemoteStream(stream);
+        };
+        const updateLocalStream = (event?: unknown) => {
+          const stream = streamFromEvent(event) ?? session.localStream ?? null;
+          if (stream) setLocalStream(stream);
+        };
+        session.on('streamAdded', updateRemoteStream);
+        session.on('updateRemoteStream', updateRemoteStream);
+        session.on('updateLocalStream', updateLocalStream);
+        setTimeout(() => {
+          updateLocalStream();
+          updateRemoteStream();
+        }, 0);
         session.on('ended', () => clearSession(session));
         session.on('failed', () => clearSession(session));
       });
@@ -248,6 +326,19 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
       setConnecting(false);
     }
   }, [clearSession, notify, refreshHistory, startRingtone, stopRingtone]);
+
+  const refreshConfiguration = useCallback(async () => {
+    try {
+      const response = await fetch('/api/telephony/config');
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error);
+      const ready = Boolean(data.config?.extension);
+      setConfigured(ready);
+      if (ready) await connect();
+    } catch {
+      setConfigured(false);
+    }
+  }, [connect]);
 
   useEffect(() => {
     live.current = true;
@@ -265,16 +356,7 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
     window.addEventListener('pagehide', close);
     document.addEventListener('pointerdown', unlockAudio, { once: true });
     document.addEventListener('keydown', unlockAudio, { once: true });
-    fetch('/api/telephony/config')
-      .then((response) => response.json())
-      .then((data) => {
-        // The PBX integration can exist before this particular user has an
-        // extension. Do not show/connect a softphone until their personal
-        // extension assignment is present.
-        setConfigured(Boolean(data.config?.extension));
-        if (data.config?.extension) void connect();
-      })
-      .catch(() => undefined);
+    void refreshConfiguration();
     return () => {
       live.current = false;
       window.removeEventListener('pagehide', close);
@@ -286,7 +368,7 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
       void audioContext.current?.close();
       audioContext.current = null;
     };
-  }, [connect, stopRingtone]);
+  }, [refreshConfiguration, stopRingtone]);
 
   const value: State = {
     configured,
@@ -301,6 +383,7 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
     remoteStream,
     history,
     refreshHistory,
+    refreshConfiguration,
     call: async (number, video) => {
       setOpen(true);
       setStatus(`Llamando a ${number}…`);
@@ -326,11 +409,53 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
       if (muted) active?.mute();
       else active?.unmute();
     },
-    transfer: (number, attended) => {
+    transfer: async (number, attended) => {
       if (!active || !number.trim()) return;
       setStatus(attended ? `Consultando a ${number}…` : `Transfiriendo a ${number}…`);
-      if (attended) active.attendedTransfer(number);
-      else active.blindTransfer(number);
+      if (!attended) {
+        active.blindTransfer(number);
+        return;
+      }
+      const transferId = active.status?.callId;
+      if (!transferId || !phone.current) {
+        toast.error('No se puede iniciar la transferencia atendida.');
+        return;
+      }
+      transferParent.current = active;
+      setAttendedTransferReady(false);
+      active.hold();
+      try {
+        await phone.current.call(number, undefined, transferId);
+      } catch {
+        transferParent.current = null;
+        active.unhold();
+        setStatus('No se pudo iniciar la consulta');
+        toast.error('No se pudo iniciar la transferencia atendida.');
+      }
+    },
+    attendedTransferReady,
+    completeAttendedTransfer: () => {
+      const activeConsultation = consultation.current;
+      const parentNumber = activeConsultation?.status?.transferParent?.number ?? transferParent.current?.status?.number;
+      if (!activeConsultation || !parentNumber) {
+        toast.error('Primero espera a que la llamada de consulta se conecte.');
+        return;
+      }
+      setStatus('Completando transferencia atendida…');
+      activeConsultation.attendedTransfer(parentNumber);
+      consultation.current = null;
+      transferParent.current = null;
+      setAttendedTransferReady(false);
+    },
+    cancelAttendedTransfer: () => {
+      const parent = transferParent.current;
+      consultation.current?.hangup();
+      consultation.current = null;
+      transferParent.current = null;
+      setAttendedTransferReady(false);
+      parent?.unhold();
+      if (parent) setActive(parent);
+      setStatus('Consulta cancelada');
     },
     video: async () => {
       if (!active) return;

@@ -55,7 +55,7 @@ export function TelephonyConfig() {
       setAccessId('');
       setAccessKey('');
       toast.success('Tu extensión fue guardada. El softphone se conectará automáticamente.');
-      await load();
+      await Promise.all([load(), telephony.refreshConfiguration()]);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'No se pudo guardar.');
     } finally {
