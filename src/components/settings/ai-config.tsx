@@ -78,6 +78,8 @@ export function AiConfig() {
   const [analysisDailyLimit, setAnalysisDailyLimit] = useState(100);
   const [analysisMonthlyLimit, setAnalysisMonthlyLimit] = useState(1000);
   const [analysisMaxPerConversation, setAnalysisMaxPerConversation] = useState(6);
+  const [qaScoringEnabled, setQaScoringEnabled] = useState(false);
+  const [qaScoringCriteria, setQaScoringCriteria] = useState('');
   const [maxPerConversation, setMaxPerConversation] = useState(3);
   // Empty string = leave unassigned (shared queue).
   const [handoffAgentId, setHandoffAgentId] = useState('');
@@ -112,6 +114,8 @@ export function AiConfig() {
         setAnalysisDailyLimit(data.analysis_daily_limit ?? 100);
         setAnalysisMonthlyLimit(data.analysis_monthly_limit ?? 1000);
         setAnalysisMaxPerConversation(data.analysis_max_per_conversation ?? 6);
+        setQaScoringEnabled(Boolean(data.qa_scoring_enabled));
+        setQaScoringCriteria(data.qa_scoring_criteria ?? '');
         setMaxPerConversation(data.auto_reply_max_per_conversation ?? 3);
         setHandoffAgentId(data.handoff_agent_id ?? '');
         setHasStoredKey(Boolean(data.has_key));
@@ -172,6 +176,8 @@ export function AiConfig() {
     analysis_daily_limit: analysisDailyLimit,
     analysis_monthly_limit: analysisMonthlyLimit,
     analysis_max_per_conversation: analysisMaxPerConversation,
+    qa_scoring_enabled: qaScoringEnabled,
+    qa_scoring_criteria: qaScoringCriteria.trim() || null,
   });
 
   const handleTest = async () => {
@@ -529,6 +535,40 @@ export function AiConfig() {
               <div className="space-y-2"><Label>Límite diario de análisis</Label><Input type="number" min={1} max={10000} value={analysisDailyLimit} onChange={(e) => setAnalysisDailyLimit(Number(e.target.value) || 1)} disabled={disabled || !conversationAnalysisEnabled} /><p className="text-xs text-muted-foreground">Cantidad total de ejecuciones IA para toda la cuenta por día.</p></div>
               <div className="space-y-2"><Label>Límite mensual de análisis</Label><Input type="number" min={1} max={100000} value={analysisMonthlyLimit} onChange={(e) => setAnalysisMonthlyLimit(Number(e.target.value) || 1)} disabled={disabled || !conversationAnalysisEnabled} /><p className="text-xs text-muted-foreground">Cantidad total de ejecuciones IA para toda la cuenta por mes.</p></div>
               <div className="space-y-2"><Label>Máximo de análisis por conversación</Label><Input type="number" min={1} max={100} value={analysisMaxPerConversation} onChange={(e) => setAnalysisMaxPerConversation(Number(e.target.value) || 1)} disabled={disabled || !conversationAnalysisEnabled} /><p className="text-xs text-muted-foreground">Veces que una conversación puede reanalizarse; no es el número de mensajes.</p></div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Auditoría de calidad automática</CardTitle>
+            <CardDescription>
+              Califica cada análisis sin hacer una segunda llamada a la IA. Los resultados son internos y sirven para mejorar la atención, no para responder al cliente.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center justify-between gap-4 rounded-md border border-border p-3">
+              <div>
+                <p className="text-sm font-medium">Habilitar QA Scoring</p>
+                <p className="text-xs text-muted-foreground">Evalúa empatía, manejo de objeciones y cumplimiento de los criterios de tu cuenta.</p>
+              </div>
+              <Switch
+                checked={qaScoringEnabled}
+                onCheckedChange={setQaScoringEnabled}
+                disabled={disabled || !conversationAnalysisEnabled}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="qa-criteria">Guion y criterios propios de evaluación</Label>
+              <Textarea
+                id="qa-criteria"
+                value={qaScoringCriteria}
+                onChange={(event) => setQaScoringCriteria(event.target.value)}
+                placeholder="Ejemplo: confirmar necesidad, explicar el siguiente paso, no prometer plazos sin verificar y cerrar con una pregunta clara."
+                rows={4}
+                disabled={disabled || !qaScoringEnabled}
+              />
+              <p className="text-xs text-muted-foreground">Opcional. Si lo dejas vacío, se usan criterios generales de servicio. No pegues datos sensibles ni instrucciones para la IA.</p>
             </div>
           </CardContent>
         </Card>

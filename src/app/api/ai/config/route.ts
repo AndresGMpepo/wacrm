@@ -30,7 +30,7 @@ export async function GET() {
       // `api_key` is selected only to derive `has_key` — it is stripped
       // out below and never returned to the client.
       .select(
-        'provider, model, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, conversation_analysis_enabled, analysis_on_customer_message, analysis_on_transfer, analysis_on_close, analysis_daily_limit, analysis_monthly_limit, analysis_max_per_conversation, api_key, embeddings_api_key',
+        'provider, model, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, conversation_analysis_enabled, analysis_on_customer_message, analysis_on_transfer, analysis_on_close, analysis_daily_limit, analysis_monthly_limit, analysis_max_per_conversation, qa_scoring_enabled, qa_scoring_criteria, api_key, embeddings_api_key',
       )
       .eq('account_id', accountId)
       .maybeSingle()
@@ -101,6 +101,11 @@ export async function POST(request: Request) {
     const analysisDailyLimit = boundedNumber(body.analysis_daily_limit, 100, 10_000)
     const analysisMonthlyLimit = boundedNumber(body.analysis_monthly_limit, 1_000, 100_000)
     const analysisMaxPerConversation = boundedNumber(body.analysis_max_per_conversation, 6, 100)
+    const qaScoringEnabled = body.qa_scoring_enabled === true
+    const qaScoringCriteria =
+      typeof body.qa_scoring_criteria === 'string' && body.qa_scoring_criteria.trim()
+        ? body.qa_scoring_criteria.trim().slice(0, 5000)
+        : null
 
     let maxPer = Number(body.auto_reply_max_per_conversation)
     if (!Number.isFinite(maxPer)) maxPer = 3
@@ -223,6 +228,8 @@ export async function POST(request: Request) {
       analysis_daily_limit: analysisDailyLimit,
       analysis_monthly_limit: analysisMonthlyLimit,
       analysis_max_per_conversation: analysisMaxPerConversation,
+      qa_scoring_enabled: qaScoringEnabled,
+      qa_scoring_criteria: qaScoringCriteria,
     }
     // Only touch the handoff target when the form actually sent the field,
     // so a partial save (e.g. flipping a toggle) doesn't wipe it.

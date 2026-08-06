@@ -16,6 +16,12 @@ type Analysis = {
   sentiment_score: number
   next_best_action: string
   reasons: string[]
+  qa_score: number | null
+  qa_empathy_score: number | null
+  qa_objection_handling_score: number | null
+  qa_script_adherence_score: number | null
+  qa_summary: string | null
+  qa_findings: string[]
 }
 
 function parseAnalysis(raw: string): Analysis {
@@ -30,6 +36,10 @@ function parseAnalysis(raw: string): Analysis {
   if (!Number.isFinite(score) || score < 0 || score > 100) {
     throw new AiError('The AI returned an invalid sentiment score.', { code: 'invalid_analysis' })
   }
+  const qaScore = (value: unknown) => {
+    const parsed = Math.round(Number(value))
+    return Number.isFinite(parsed) && parsed >= 0 && parsed <= 100 ? parsed : null
+  }
   return {
     summary: String(data.summary ?? '').trim().slice(0, 2000),
     sentiment: sentiment as Sentiment,
@@ -37,6 +47,14 @@ function parseAnalysis(raw: string): Analysis {
     next_best_action: String(data.next_best_action ?? '').trim().slice(0, 1000),
     reasons: Array.isArray(data.reasons)
       ? data.reasons.filter((reason): reason is string => typeof reason === 'string').slice(0, 4)
+      : [],
+    qa_score: qaScore(data.qa_score),
+    qa_empathy_score: qaScore(data.qa_empathy_score),
+    qa_objection_handling_score: qaScore(data.qa_objection_handling_score),
+    qa_script_adherence_score: qaScore(data.qa_script_adherence_score),
+    qa_summary: typeof data.qa_summary === 'string' ? data.qa_summary.trim().slice(0, 1500) : null,
+    qa_findings: Array.isArray(data.qa_findings)
+      ? data.qa_findings.filter((finding): finding is string => typeof finding === 'string').slice(0, 5)
       : [],
   }
 }
@@ -61,7 +79,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ conversati
     }
     const { data, error } = await supabase
       .from('ai_conversation_analyses')
-      .select('summary, sentiment, sentiment_score, next_best_action, reasons, status, analyzed_message_count, analyzed_at')
+      .select('summary, sentiment, sentiment_score, next_best_action, reasons, qa_score, qa_empathy_score, qa_objection_handling_score, qa_script_adherence_score, qa_summary, qa_findings, status, analyzed_message_count, analyzed_at')
       .eq('conversation_id', conversationId)
       .eq('source', 'whatsapp')
       .maybeSingle()
@@ -91,11 +109,23 @@ export async function POST(_: Request, { params }: { params: Promise<{ conversat
       return NextResponse.json({ error: 'No hay mensajes de texto para analizar.' }, { status: 400 })
     }
 
+    const { data: qaPolicy } = await supabase
+      .from('ai_configs')
+      .select('qa_scoring_enabled, qa_scoring_criteria')
+      .eq('account_id', accountId)
+      .maybeSingle()
+    const qaEnabled = qaPolicy?.qa_scoring_enabled === true
     const systemPrompt = [
       'Analiza esta conversación de atención al cliente. Responde únicamente JSON válido, sin markdown.',
       'Usa exactamente esta forma: {"summary":"...","sentiment":"positive|neutral|negative|mixed","sentiment_score":0,"next_best_action":"...","reasons":["..."]}.',
       'El resumen y la acción deben estar en español, ser breves y basarse solamente en la conversación.',
       'sentiment_score es 0 muy negativo y 100 muy positivo. No inventes datos ni atribuyas intención con certeza.',
+      qaEnabled
+        ? 'Incluye además QA interno: "qa_score":0-100, "qa_empathy_score":0-100, "qa_objection_handling_score":0-100, "qa_script_adherence_score":0-100, "qa_summary":"...", "qa_findings":["..."]. Evalúa solo lo observable. Si no hubo objeciones o no existe un guion aplicable, indícalo y usa puntuación neutral; no inventes penalizaciones.'
+        : '',
+      qaEnabled && qaPolicy?.qa_scoring_criteria
+        ? `Criterios propios de la cuenta para QA: ${qaPolicy.qa_scoring_criteria}`
+        : '',
       config.systemPrompt ? `Contexto del negocio: ${config.systemPrompt}` : '',
     ].filter(Boolean).join('\n\n')
     const result = await generateText({ config, systemPrompt, messages })
@@ -115,7 +145,7 @@ export async function POST(_: Request, { params }: { params: Promise<{ conversat
         analyzed_at: new Date().toISOString(),
         error_message: null,
       }, { onConflict: 'conversation_id,source' })
-      .select('summary, sentiment, sentiment_score, next_best_action, reasons, status, analyzed_message_count, analyzed_at')
+      .select('summary, sentiment, sentiment_score, next_best_action, reasons, qa_score, qa_empathy_score, qa_objection_handling_score, qa_script_adherence_score, qa_summary, qa_findings, status, analyzed_message_count, analyzed_at')
       .single()
     if (error) throw error
     void logAiUsage(admin, { accountId, conversationId, mode: 'analysis', provider: config.provider, model: config.model, usage: result.usage })
