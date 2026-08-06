@@ -1,16 +1,17 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Bot, Sparkles, Settings2, BarChart3 } from 'lucide-react';
+import { Bot, Sparkles, Settings2, BarChart3, ShieldAlert } from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { AiPlayground } from '@/components/agents/ai-playground';
 import { AiUsageCard } from '@/components/agents/ai-usage';
 import { AiAnalysisJobsCard } from '@/components/agents/ai-analysis-jobs';
+import { AiSupervisionCard } from '@/components/agents/ai-supervision';
 import { AiConfig } from '@/components/settings/ai-config';
 import { useAuth } from '@/hooks/use-auth';
 import { canEditSettings } from '@/lib/auth/roles';
 
-type Tab = 'playground' | 'setup' | 'usage';
+type Tab = 'playground' | 'setup' | 'usage' | 'supervision';
 
 export default function AgentsPage() {
   const { accountRole } = useAuth();
@@ -68,6 +69,11 @@ export default function AgentsPage() {
                 <BarChart3 className="mr-1.5 h-4 w-4" /> Usage
               </TabsTrigger>
             )}
+            {canViewUsage && (
+              <TabsTrigger value="supervision">
+                <ShieldAlert className="mr-1.5 h-4 w-4" /> Supervisión
+              </TabsTrigger>
+            )}
           </TabsList>
 
           <TabsContent value="playground" className="mt-4">
@@ -84,6 +90,12 @@ export default function AgentsPage() {
                 <AiUsageCard />
                 <AiAnalysisJobsCard />
               </div>
+            </TabsContent>
+          )}
+
+          {canViewUsage && (
+            <TabsContent value="supervision" className="mt-4">
+              <AiSupervisionCard />
             </TabsContent>
           )}
         </Tabs>
