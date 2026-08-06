@@ -82,7 +82,12 @@ export function IncomingMessageAlert() {
         },
         (payload) => {
           const notification = payload.new as Notification;
-          if (notification.type !== 'incoming_message') return;
+          if (
+            notification.type !== 'incoming_message' &&
+            notification.type !== 'negative_sentiment'
+          ) {
+            return;
+          }
 
           playAlert();
           toast(notification.title, {

@@ -10,6 +10,7 @@ import {
   CheckCheck,
   Loader2,
   MessageSquare,
+  Siren,
   UserPlus,
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
@@ -22,6 +23,7 @@ import { toast } from 'sonner';
 const TYPE_ICON: Record<Notification['type'], typeof Bell> = {
   conversation_assigned: UserPlus,
   incoming_message: MessageSquare,
+  negative_sentiment: Siren,
 };
 
 export default function NotificationsPage() {
@@ -177,7 +179,7 @@ export default function NotificationsPage() {
         <div>
           <h1 className="text-foreground text-2xl font-bold">Notifications</h1>
           <p className="text-muted-foreground mt-1 text-sm">
-            Assignments and new incoming WhatsApp messages appear here.
+            Assignments, new WhatsApp messages and urgent sentiment alerts appear here.
           </p>
         </div>
         <Button
@@ -204,8 +206,8 @@ export default function NotificationsPage() {
             No notifications yet
           </p>
           <p className="text-muted-foreground mt-1 text-xs">
-            You&apos;ll see alerts here when someone assigns you a conversation
-            or a customer sends a message.
+            You&apos;ll see alerts here when someone assigns you a conversation,
+            a customer sends a message, or a supervisor should intervene.
           </p>
         </div>
       ) : (

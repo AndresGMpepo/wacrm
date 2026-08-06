@@ -181,13 +181,22 @@ export interface Conversation {
   ai_autoreply_disabled?: boolean;
   ai_reply_count?: number;
   ai_handoff_summary?: string | null;
+  /** Latest completed AI analysis. Kept on the conversation for a cheap
+   * inbox-level visual signal; the complete result lives in
+   * ai_conversation_analyses. */
+  ai_last_sentiment?: 'positive' | 'neutral' | 'negative' | 'mixed' | null;
+  ai_last_sentiment_score?: number | null;
+  ai_last_analyzed_at?: string | null;
 }
 
 // ============================================================
 // Notifications (migration 027)
 // ============================================================
 
-export type NotificationType = 'conversation_assigned' | 'incoming_message';
+export type NotificationType =
+  | 'conversation_assigned'
+  | 'incoming_message'
+  | 'negative_sentiment';
 
 export interface Notification {
   id: string;
