@@ -38,28 +38,37 @@ export function IncomingMessageAlert() {
     document.addEventListener('pointerdown', unlockAudio, { once: true });
     document.addEventListener('keydown', unlockAudio, { once: true });
 
-    const playAlert = () => {
+    const playAlert = (kind: Notification['type']) => {
       try {
         const context = getAudioContext();
         if (!context) return;
         if (context.state === 'suspended') {
           void context.resume().catch(() => undefined);
         }
-        const playTone = (frequency: number, startAt: number) => {
+        const playTone = (frequency: number, startAt: number, duration = 0.42, volume = 0.24) => {
           const oscillator = context.createOscillator();
           const gain = context.createGain();
-          const endAt = startAt + 0.42;
+          const endAt = startAt + duration;
 
           oscillator.type = 'sine';
           oscillator.frequency.setValueAtTime(frequency, startAt);
           gain.gain.setValueAtTime(0.0001, startAt);
-          gain.gain.exponentialRampToValueAtTime(0.24, startAt + 0.03);
+          gain.gain.exponentialRampToValueAtTime(volume, startAt + 0.03);
           gain.gain.exponentialRampToValueAtTime(0.0001, endAt);
           oscillator.connect(gain);
           gain.connect(context.destination);
           oscillator.start(startAt);
           oscillator.stop(endAt + 0.01);
         };
+
+        if (kind === 'negative_sentiment') {
+          // A three-pulse alarm is intentionally unlike the two-note message
+          // chime, so a supervisor can recognise an escalation by ear.
+          playTone(660, context.currentTime, 0.22, 0.34);
+          playTone(660, context.currentTime + 0.31, 0.22, 0.34);
+          playTone(880, context.currentTime + 0.62, 0.35, 0.36);
+          return;
+        }
 
         // Two clear ascending notes are easier to notice than a short beep,
         // without requiring an audio file or producing a harsh alert.
@@ -89,8 +98,9 @@ export function IncomingMessageAlert() {
             return;
           }
 
-          playAlert();
-          toast(notification.title, {
+          playAlert(notification.type);
+          const notify = notification.type === 'negative_sentiment' ? toast.error : toast;
+          notify(notification.title, {
             description: notification.body,
             action: notification.conversation_id
               ? {

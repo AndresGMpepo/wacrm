@@ -98,10 +98,31 @@ export async function POST(request: Request) {
       latestUserMessage(messages),
     )
 
+    // The latest completed analysis is optional, but when it exists the
+    // draft becomes a true co-pilot: it accounts for the conversation
+    // summary, recommended action and customer tone without exposing them.
+    const { data: analysis, error: analysisErr } = await supabase
+      .from('ai_conversation_analyses')
+      .select('summary, sentiment, next_best_action')
+      .eq('conversation_id', conversationId)
+      .eq('source', 'whatsapp')
+      .eq('status', 'completed')
+      .maybeSingle()
+    if (analysisErr) {
+      console.warn('[ai/draft] copilot context unavailable:', analysisErr.message)
+    }
+
     const systemPrompt = buildSystemPrompt({
       userPrompt: config.systemPrompt,
       mode: 'draft',
       knowledge,
+      copilotContext: analysis
+        ? {
+            summary: analysis.summary,
+            sentiment: analysis.sentiment,
+            nextBestAction: analysis.next_best_action,
+          }
+        : undefined,
     })
 
     const { text, usage } = await generateReply({ config, systemPrompt, messages })

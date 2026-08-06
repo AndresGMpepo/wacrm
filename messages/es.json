@@ -175,7 +175,7 @@
       "noCustomerMessages": "No hay mensajes del cliente"
     },
     "composer": {
-      "draftHint": "Toca el ✨ para redactar una respuesta con IA — podrás editarla antes de enviar",
+      "draftHint": "Toca el ✨ para una respuesta de IA con el contexto, tono y siguiente acción — podrás editarla antes de enviar",
       "sessionExpiredHint": "Sesión de 24 horas expirada. Usa una plantilla para volver a conectar.",
       "templates": "Plantillas",
       "readOnlyPlaceholder": "Solo lectura — los espectadores pueden ver pero no responder",
@@ -191,7 +191,7 @@
       "document": "Documento",
       "voiceNote": "Nota de voz",
       "sendTemplate": "Enviar plantilla",
-      "draftWithAI": "Redactar una respuesta con IA",
+      "draftWithAI": "Redactar respuesta con copiloto IA",
       "addCaption": "Añadir un comentario…",
       "removeAttachment": "Eliminar archivo adjunto",
       "moreActions": "Más",

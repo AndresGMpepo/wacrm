@@ -215,6 +215,7 @@ export default function NotificationsPage() {
           {notifications.map((n) => {
             const Icon = TYPE_ICON[n.type] ?? Bell;
             const isUnread = !n.read_at;
+            const isCritical = n.type === 'negative_sentiment';
             return (
               <li key={n.id}>
                 <button
@@ -222,7 +223,11 @@ export default function NotificationsPage() {
                   onClick={() => handleClick(n)}
                   className={cn(
                     'flex w-full items-start gap-3 rounded-xl border p-4 text-left transition-colors',
-                    isUnread
+                    isCritical && isUnread
+                      ? 'border-destructive/60 bg-destructive/10 hover:border-destructive'
+                      : isCritical
+                        ? 'border-destructive/30 bg-destructive/5 hover:border-destructive/60'
+                      : isUnread
                       ? 'border-primary/30 bg-primary/5 hover:border-primary/50'
                       : 'border-border bg-card hover:border-border/70'
                   )}
@@ -230,14 +235,14 @@ export default function NotificationsPage() {
                   <div
                     className={cn(
                       'flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg',
-                      isUnread ? 'bg-primary/15' : 'bg-muted'
+                      isCritical ? 'bg-destructive/15' : isUnread ? 'bg-primary/15' : 'bg-muted'
                     )}
                     aria-hidden
                   >
                     <Icon
                       className={cn(
                         'h-5 w-5',
-                        isUnread ? 'text-primary' : 'text-muted-foreground'
+                        isCritical ? 'text-destructive' : isUnread ? 'text-primary' : 'text-muted-foreground'
                       )}
                     />
                   </div>
@@ -246,7 +251,7 @@ export default function NotificationsPage() {
                       <span
                         className={cn(
                           'truncate text-sm font-semibold',
-                          isUnread ? 'text-foreground' : 'text-muted-foreground'
+                          isCritical ? 'text-destructive' : isUnread ? 'text-foreground' : 'text-muted-foreground'
                         )}
                       >
                         {n.title}
@@ -254,7 +259,7 @@ export default function NotificationsPage() {
                       {isUnread && (
                         <span
                           aria-label="Unread"
-                          className="bg-primary h-2 w-2 flex-shrink-0 rounded-full"
+                          className={cn('h-2 w-2 flex-shrink-0 rounded-full', isCritical ? 'bg-destructive' : 'bg-primary')}
                         />
                       )}
                     </div>

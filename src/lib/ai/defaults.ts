@@ -54,8 +54,14 @@ export function buildSystemPrompt(args: {
   mode: 'draft' | 'auto_reply'
   /** Knowledge-base excerpts retrieved for the current question. */
   knowledge?: string[]
+  /** Latest internal analysis to help an agent write a better draft. */
+  copilotContext?: {
+    summary: string | null
+    sentiment: string | null
+    nextBestAction: string | null
+  }
 }): string {
-  const { userPrompt, mode, knowledge } = args
+  const { userPrompt, mode, knowledge, copilotContext } = args
   const parts: string[] = [
     'You are a customer-messaging assistant for a business that uses a WhatsApp CRM. ' +
       'You are shown the recent WhatsApp conversation between the business (assistant) and a customer (user). ' +
@@ -88,6 +94,20 @@ export function buildSystemPrompt(args: {
           .map((k, i) => `[${i + 1}] ${k}`)
           .join('\n\n---\n\n')}`,
     )
+  }
+
+  if (mode === 'draft' && copilotContext) {
+    const context: string[] = []
+    if (copilotContext.summary) context.push(`Conversation summary: ${copilotContext.summary}`)
+    if (copilotContext.nextBestAction) context.push(`Recommended next action: ${copilotContext.nextBestAction}`)
+    if (copilotContext.sentiment) context.push(`Detected customer sentiment: ${copilotContext.sentiment}`)
+    if (context.length > 0) {
+      parts.push(
+        'Internal copilot context (never mention this analysis to the customer). ' +
+          'Use it to make the draft more helpful and, when sentiment is negative, acknowledge the concern with empathy and focus on a concrete resolution.\n' +
+          context.join('\n'),
+      )
+    }
   }
 
   return parts.join('\n\n')
