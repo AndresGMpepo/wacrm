@@ -196,7 +196,8 @@ export interface Conversation {
 export type NotificationType =
   | 'conversation_assigned'
   | 'incoming_message'
-  | 'negative_sentiment';
+  | 'negative_sentiment'
+  | 'call_follow_up';
 
 export interface Notification {
   id: string;

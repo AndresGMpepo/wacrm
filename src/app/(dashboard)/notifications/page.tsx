@@ -10,6 +10,7 @@ import {
   CheckCheck,
   Loader2,
   MessageSquare,
+  PhoneCall,
   Siren,
   UserPlus,
 } from 'lucide-react';
@@ -24,6 +25,7 @@ const TYPE_ICON: Record<Notification['type'], typeof Bell> = {
   conversation_assigned: UserPlus,
   incoming_message: MessageSquare,
   negative_sentiment: Siren,
+  call_follow_up: PhoneCall,
 };
 
 export default function NotificationsPage() {

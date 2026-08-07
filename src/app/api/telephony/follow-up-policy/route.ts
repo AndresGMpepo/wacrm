@@ -15,7 +15,9 @@ export async function PUT(request: Request) {
     const { supabase, accountId } = await requireRole('admin')
     const body = await request.json().catch(() => null)
     const enabled = body?.enabled === true
-    const minutes = Math.max(5, Math.min(10080, Math.floor(Number(body?.no_reply_minutes) || 120)))
+    // One minute is useful for a controlled operational test. The unique
+    // pending-task index still prevents repeated tasks for the same chat.
+    const minutes = Math.max(1, Math.min(10080, Math.floor(Number(body?.no_reply_minutes) || 120)))
     const { error } = await supabase.from('call_follow_up_policies').upsert({ account_id: accountId, enabled, no_reply_minutes: minutes })
     if (error) throw error
     return NextResponse.json({ success: true })

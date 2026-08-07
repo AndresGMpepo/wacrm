@@ -93,13 +93,18 @@ export function IncomingMessageAlert() {
           const notification = payload.new as Notification;
           if (
             notification.type !== 'incoming_message' &&
-            notification.type !== 'negative_sentiment'
+            notification.type !== 'negative_sentiment' &&
+            notification.type !== 'call_follow_up'
           ) {
             return;
           }
 
           playAlert(notification.type);
-          const notify = notification.type === 'negative_sentiment' ? toast.error : toast;
+          const notify = notification.type === 'negative_sentiment'
+            ? toast.error
+            : notification.type === 'call_follow_up'
+              ? toast.warning
+              : toast;
           notify(notification.title, {
             description: notification.body,
             action: notification.conversation_id
