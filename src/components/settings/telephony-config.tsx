@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { SettingsPanelHead } from './settings-panel-head';
+import { YeastarMonitoringConfig } from './yeastar-monitoring-config';
 
 export function TelephonyConfig() {
   const { profile } = useAuth();
@@ -132,6 +133,7 @@ export function TelephonyConfig() {
           <p className="rounded-md border border-primary/30 bg-primary/10 p-3 text-primary"><strong>Seguridad:</strong> Access ID y Access Key quedan cifrados en el servidor. WACRM solicita a Yeastar una firma temporal para la extensión del usuario conectado; nunca reutiliza la firma de otro usuario.</p>
         </CardContent>
       </Card> : null}
+      {canManageIntegration ? <YeastarMonitoringConfig /> : null}
     </div>
   );
 }

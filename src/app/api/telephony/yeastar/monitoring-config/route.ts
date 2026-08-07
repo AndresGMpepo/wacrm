@@ -1,0 +1,64 @@
+import { NextResponse } from 'next/server'
+import { createClient as createAdminClient } from '@supabase/supabase-js'
+import { encrypt } from '@/lib/whatsapp/encryption'
+import { requireRole, toErrorResponse } from '@/lib/auth/account'
+
+function admin() {
+  return createAdminClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
+}
+
+function webhookUrl(accountId: string) {
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, '')
+  return siteUrl ? `${siteUrl}/api/telephony/yeastar/events/${accountId}` : null
+}
+
+export async function GET() {
+  try {
+    const { accountId } = await requireRole('admin')
+    const { data, error } = await admin().from('yeastar_monitoring_configs')
+      .select('api_client_id, api_client_secret, webhook_secret')
+      .eq('account_id', accountId).maybeSingle()
+    if (error) throw error
+    return NextResponse.json({
+      webhookUrl: webhookUrl(accountId),
+      config: {
+        webhookConfigured: Boolean(data?.webhook_secret),
+        apiConfigured: Boolean(data?.api_client_id && data?.api_client_secret),
+      },
+    })
+  } catch (error) {
+    return toErrorResponse(error)
+  }
+}
+
+export async function PUT(request: Request) {
+  try {
+    const { accountId, userId } = await requireRole('admin')
+    const body = await request.json().catch(() => null)
+    const current = await admin().from('yeastar_monitoring_configs')
+      .select('api_client_id, api_client_secret, webhook_secret')
+      .eq('account_id', accountId).maybeSingle()
+    if (current.error) throw current.error
+    const clientId = typeof body?.clientId === 'string' && body.clientId.trim()
+      ? encrypt(body.clientId.trim()) : current.data?.api_client_id ?? null
+    const clientSecret = typeof body?.clientSecret === 'string' && body.clientSecret
+      ? encrypt(body.clientSecret) : current.data?.api_client_secret ?? null
+    const webhookSecret = typeof body?.webhookSecret === 'string' && body.webhookSecret
+      ? encrypt(body.webhookSecret) : current.data?.webhook_secret ?? null
+    if (!webhookSecret) {
+      return NextResponse.json({ error: 'El secreto del webhook de Yeastar es obligatorio.' }, { status: 400 })
+    }
+    const { error } = await admin().from('yeastar_monitoring_configs').upsert({
+      account_id: accountId,
+      api_client_id: clientId,
+      api_client_secret: clientSecret,
+      webhook_secret: webhookSecret,
+      created_by: userId,
+      updated_at: new Date().toISOString(),
+    })
+    if (error) throw error
+    return NextResponse.json({ success: true })
+  } catch (error) {
+    return toErrorResponse(error)
+  }
+}
