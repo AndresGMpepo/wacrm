@@ -69,18 +69,18 @@ export function ConversationIntelligence({ conversationId }: { conversationId: s
   const qaScore = analysis?.qa_score ?? null
 
   return (
-    <section className="border-t border-border bg-card px-4 py-3">
-      <div className="flex items-center justify-between gap-3">
+    <section className="border-t border-border bg-card px-3 py-2 sm:px-4">
+      <div className="flex min-w-0 items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
           <Icon className={cn('size-4 shrink-0', meta?.className ?? 'text-primary')} />
-          <p className="text-sm font-medium">Inteligencia de conversación</p>
+          <p className="truncate text-sm font-medium">Análisis IA</p>
           {meta ? <span className={cn('text-xs font-medium', meta.className)}>{meta.label}{analysis?.sentiment_score != null ? ` · ${analysis.sentiment_score}/100` : ''}</span> : null}
           {qaScore != null ? <span className={cn('inline-flex items-center gap-1 text-xs font-medium', qaScore < 50 ? 'text-red-500' : qaScore < 75 ? 'text-amber-500' : 'text-emerald-500')}><ClipboardCheck className="size-3" />QA {qaScore}/100</span> : null}
         </div>
         <div className="flex shrink-0 items-center gap-1">
-          <Button size="sm" variant="ghost" onClick={() => void analyze()} disabled={running || loading}>
+          <Button size="sm" variant="ghost" className="h-8 px-2" onClick={() => void analyze()} disabled={running || loading}>
             <RefreshCw className={cn('size-3.5', running && 'animate-spin')} />
-            {analysis ? 'Actualizar' : 'Analizar'}
+            <span className="hidden sm:inline">{analysis ? 'Actualizar' : 'Analizar'}</span>
           </Button>
           <Button size="icon" variant="ghost" onClick={() => setExpanded((value) => !value)} aria-label={expanded ? 'Ocultar análisis' : 'Mostrar análisis'} title={expanded ? 'Ocultar análisis' : 'Mostrar análisis'}>
             {expanded ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}

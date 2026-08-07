@@ -5,6 +5,8 @@ import { aiContextMessageLimit } from './defaults'
 interface DbMessage {
   sender_type: 'customer' | 'agent' | 'bot'
   content_text: string | null
+  media_transcript: string | null
+  media_description: string | null
 }
 
 /**
@@ -23,9 +25,8 @@ export async function buildConversationContext(
 ): Promise<ChatMessage[]> {
   const { data, error } = await db
     .from('messages')
-    .select('sender_type, content_text')
+    .select('sender_type, content_text, media_transcript, media_description')
     .eq('conversation_id', conversationId)
-    .eq('content_type', 'text')
     .order('created_at', { ascending: false })
     .limit(limit)
 
@@ -33,9 +34,12 @@ export async function buildConversationContext(
 
   const rows = ((data ?? []) as DbMessage[]).reverse()
   return rows
-    .filter((m) => m.content_text && m.content_text.trim())
-    .map((m) => ({
-      role: m.sender_type === 'customer' ? 'user' : 'assistant',
-      content: m.content_text!.trim(),
-    }))
+    .map((m) => {
+      const text = m.content_text?.trim()
+      if (text) return { role: m.sender_type === 'customer' ? 'user' as const : 'assistant' as const, content: text }
+      if (m.media_transcript?.trim()) return { role: m.sender_type === 'customer' ? 'user' as const : 'assistant' as const, content: `[Nota de voz transcrita: ${m.media_transcript.trim()}]` }
+      if (m.media_description?.trim()) return { role: m.sender_type === 'customer' ? 'user' as const : 'assistant' as const, content: `[Imagen recibida: ${m.media_description.trim()}]` }
+      return null
+    })
+    .filter((message): message is ChatMessage => !!message)
 }

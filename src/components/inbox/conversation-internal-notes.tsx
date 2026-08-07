@@ -9,7 +9,7 @@ import { createClient } from '@/lib/supabase/client'
 
 type Note = { id: string; author_user_id: string; author_name: string; body: string; kind: 'note' | 'call_started'; created_at: string }
 
-export function ConversationInternalNotes({ conversationId }: { conversationId: string }) {
+export function ConversationInternalNotes({ conversationId, compact = false }: { conversationId: string; compact?: boolean }) {
   const [notes, setNotes] = useState<Note[]>([])
   const [expanded, setExpanded] = useState(false)
   const [body, setBody] = useState('')
@@ -57,7 +57,7 @@ export function ConversationInternalNotes({ conversationId }: { conversationId: 
     }
   }
 
-  return <section className="border-t border-border bg-card px-4 py-3">
+  return <section className={compact ? 'rounded-lg border border-border bg-muted/20 p-3' : 'border-t border-border bg-card px-4 py-3'}>
     <div className="flex items-center justify-between gap-3">
       <div className="flex min-w-0 items-center gap-2"><StickyNote className="size-4 shrink-0 text-amber-500" /><p className="text-sm font-medium">Notas internas{notes.length ? ` (${notes.length})` : ''}</p><span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground"><LockKeyhole className="size-2.5" />Solo equipo</span></div>
       <Button size="icon" variant="ghost" onClick={() => setExpanded((value) => !value)} aria-label={expanded ? 'Ocultar notas internas' : 'Mostrar notas internas'}>{expanded ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}</Button>

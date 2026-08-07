@@ -262,6 +262,11 @@ export interface Message {
    * badge in the inbox. Migration 033.
    */
   ai_generated?: boolean;
+  /** Optional AI-derived text for inbound media. The original file stays
+   * in WhatsApp/Meta; only this bounded result is stored with the message. */
+  media_analysis_status?: 'queued' | 'processing' | 'completed' | 'skipped' | 'failed';
+  media_transcript?: string;
+  media_description?: string;
 }
 
 export type ReactionActor = 'customer' | 'agent';

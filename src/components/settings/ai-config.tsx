@@ -38,16 +38,6 @@ const MASKED_KEY = '••••••••••••••••';
 // unassigned" choice gets a sentinel that maps to null in the payload.
 const HANDOFF_QUEUE = '__queue__';
 
-const PROVIDER_LABEL: Record<AiProvider, string> = {
-  openai: 'OpenAI',
-  anthropic: 'Anthropic (Claude)',
-};
-
-const KEY_PLACEHOLDER: Record<AiProvider, string> = {
-  openai: 'sk-...',
-  anthropic: 'sk-ant-...',
-};
-
 export function AiConfig() {
   const { accountId, accountRole, profileLoading } = useAuth();
   const canEdit = accountRole ? canEditSettings(accountRole) : false;
@@ -78,6 +68,9 @@ export function AiConfig() {
   const [analysisDailyLimit, setAnalysisDailyLimit] = useState(100);
   const [analysisMonthlyLimit, setAnalysisMonthlyLimit] = useState(1000);
   const [analysisMaxPerConversation, setAnalysisMaxPerConversation] = useState(6);
+  const [analysisImagesEnabled, setAnalysisImagesEnabled] = useState(false);
+  const [analysisVoiceNotesEnabled, setAnalysisVoiceNotesEnabled] = useState(false);
+  const [mediaAnalysisDailyLimit, setMediaAnalysisDailyLimit] = useState(100);
   const [qaScoringEnabled, setQaScoringEnabled] = useState(false);
   const [qaScoringCriteria, setQaScoringCriteria] = useState('');
   const [maxPerConversation, setMaxPerConversation] = useState(3);
@@ -114,6 +107,9 @@ export function AiConfig() {
         setAnalysisDailyLimit(data.analysis_daily_limit ?? 100);
         setAnalysisMonthlyLimit(data.analysis_monthly_limit ?? 1000);
         setAnalysisMaxPerConversation(data.analysis_max_per_conversation ?? 6);
+        setAnalysisImagesEnabled(Boolean(data.analysis_images_enabled));
+        setAnalysisVoiceNotesEnabled(Boolean(data.analysis_voice_notes_enabled));
+        setMediaAnalysisDailyLimit(data.media_analysis_daily_limit ?? 100);
         setQaScoringEnabled(Boolean(data.qa_scoring_enabled));
         setQaScoringCriteria(data.qa_scoring_criteria ?? '');
         setMaxPerConversation(data.auto_reply_max_per_conversation ?? 3);
@@ -142,17 +138,6 @@ export function AiConfig() {
     void fetchAccountMembers().then(setMembers);
   }, [accountId, fetchConfig]);
 
-  // Swap the model default when the provider changes, unless the user
-  // typed a custom model.
-  const handleProviderChange = (next: AiProvider) => {
-    setProvider(next);
-    const isDefaultModel =
-      model === AI_PROVIDER_DEFAULT_MODEL.openai ||
-      model === AI_PROVIDER_DEFAULT_MODEL.anthropic ||
-      model.trim() === '';
-    if (isDefaultModel) setModel(AI_PROVIDER_DEFAULT_MODEL[next]);
-  };
-
   const keyPayload = () => (keyEdited ? apiKey.trim() : undefined);
 
   // undefined = leave unchanged; '' typed = null (clear); text = set.
@@ -176,6 +161,9 @@ export function AiConfig() {
     analysis_daily_limit: analysisDailyLimit,
     analysis_monthly_limit: analysisMonthlyLimit,
     analysis_max_per_conversation: analysisMaxPerConversation,
+    analysis_images_enabled: analysisImagesEnabled,
+    analysis_voice_notes_enabled: analysisVoiceNotesEnabled,
+    media_analysis_daily_limit: mediaAnalysisDailyLimit,
     qa_scoring_enabled: qaScoringEnabled,
     qa_scoring_criteria: qaScoringCriteria.trim() || null,
   });
@@ -294,22 +282,9 @@ export function AiConfig() {
           <CardContent className="space-y-4">
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
-                <Label>{t('provider')}</Label>
-                <Select
-                  value={provider}
-                  onValueChange={(v) => handleProviderChange(v as AiProvider)}
-                  disabled={disabled}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="openai">{PROVIDER_LABEL.openai}</SelectItem>
-                    <SelectItem value="anthropic">
-                      {PROVIDER_LABEL.anthropic}
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
+                <Label>Proveedor de IA</Label>
+                <div className="flex h-10 items-center rounded-md border border-input bg-muted/40 px-3 text-sm font-medium">OpenAI</div>
+                <p className="text-xs text-muted-foreground">Una sola cuenta y una sola factura para respuestas, análisis, imágenes y notas de voz. WACRM elige internamente modelos especializados de OpenAI cuando hace falta.</p>
               </div>
 
               <div className="space-y-2">
@@ -318,7 +293,7 @@ export function AiConfig() {
                   id="ai-model"
                   value={model}
                   onChange={(e) => setModel(e.target.value)}
-                  placeholder={AI_PROVIDER_DEFAULT_MODEL[provider]}
+                  placeholder={AI_PROVIDER_DEFAULT_MODEL.openai}
                   disabled={disabled}
                 />
               </div>
@@ -342,7 +317,7 @@ export function AiConfig() {
                         setKeyEdited(true);
                       }
                     }}
-                    placeholder={KEY_PLACEHOLDER[provider]}
+                    placeholder="sk-..."
                     disabled={disabled}
                     autoComplete="off"
                   />
@@ -401,7 +376,7 @@ export function AiConfig() {
               />
               <p className="text-xs text-muted-foreground">
                 {t('embeddingsHint', {
-                  sameKeyText: provider === 'openai' ? t('sameKeyText') : '',
+                  sameKeyText: t('sameKeyText'),
                 })}
               </p>
             </div>
@@ -535,6 +510,15 @@ export function AiConfig() {
               <div className="space-y-2"><Label>Límite diario de análisis</Label><Input type="number" min={1} max={10000} value={analysisDailyLimit} onChange={(e) => setAnalysisDailyLimit(Number(e.target.value) || 1)} disabled={disabled || !conversationAnalysisEnabled} /><p className="text-xs text-muted-foreground">Cantidad total de ejecuciones IA para toda la cuenta por día.</p></div>
               <div className="space-y-2"><Label>Límite mensual de análisis</Label><Input type="number" min={1} max={100000} value={analysisMonthlyLimit} onChange={(e) => setAnalysisMonthlyLimit(Number(e.target.value) || 1)} disabled={disabled || !conversationAnalysisEnabled} /><p className="text-xs text-muted-foreground">Cantidad total de ejecuciones IA para toda la cuenta por mes.</p></div>
               <div className="space-y-2"><Label>Máximo de análisis por conversación</Label><Input type="number" min={1} max={100} value={analysisMaxPerConversation} onChange={(e) => setAnalysisMaxPerConversation(Number(e.target.value) || 1)} disabled={disabled || !conversationAnalysisEnabled} /><p className="text-xs text-muted-foreground">Veces que una conversación puede reanalizarse; no es el número de mensajes.</p></div>
+            </div>
+            <div className="space-y-3 rounded-md border border-border p-3">
+              <div>
+                <p className="text-sm font-medium">Contenido multimedia recibido</p>
+                <p className="text-xs text-muted-foreground">Opcional. Se procesa en segundo plano y sólo se usa el texto o la descripción resultante en el análisis de la conversación.</p>
+              </div>
+              <label className="flex items-center justify-between gap-4 text-sm"><span><span className="block font-medium">Analizar imágenes</span><span className="text-xs text-muted-foreground">Describe imágenes nuevas enviadas por el cliente.</span></span><Switch checked={analysisImagesEnabled} onCheckedChange={setAnalysisImagesEnabled} disabled={disabled || !conversationAnalysisEnabled} /></label>
+              <label className="flex items-center justify-between gap-4 text-sm"><span><span className="block font-medium">Transcribir notas de voz</span><span className="text-xs text-muted-foreground">Transcribe audios nuevos enviados por el cliente.</span></span><Switch checked={analysisVoiceNotesEnabled} onCheckedChange={setAnalysisVoiceNotesEnabled} disabled={disabled || !conversationAnalysisEnabled} /></label>
+              <div className="max-w-sm space-y-2"><Label>Límite diario de multimedia</Label><Input type="number" min={1} max={10000} value={mediaAnalysisDailyLimit} onChange={(e) => setMediaAnalysisDailyLimit(Number(e.target.value) || 1)} disabled={disabled || !conversationAnalysisEnabled} /><p className="text-xs text-muted-foreground">Cantidad total de imágenes y notas de voz que la cuenta puede procesar por día. Los mensajes anteriores no se reprocesan automáticamente.</p></div>
             </div>
           </CardContent>
         </Card>

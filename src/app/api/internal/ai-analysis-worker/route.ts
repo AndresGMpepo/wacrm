@@ -4,10 +4,15 @@ import { buildConversationContext } from '@/lib/ai/context'
 import { generateText } from '@/lib/ai/generate'
 import { logAiUsage } from '@/lib/ai/usage'
 import { supabaseAdmin } from '@/lib/ai/admin-client'
+import { decrypt } from '@/lib/whatsapp/encryption'
+import { downloadMedia, getMediaUrl } from '@/lib/whatsapp/meta-api'
+import { describeImageWithOpenAi, transcribeAudioWithOpenAi } from '@/lib/ai/media-analysis'
+import { aiRequestTimeoutMs } from '@/lib/ai/defaults'
 
 export const maxDuration = 60
 
 type Job = { id: string; account_id: string; conversation_id: string }
+type MediaJob = Job & { message_id: string; kind: 'image' | 'voice_note' }
 
 function startOfDay() { const d = new Date(); d.setHours(0, 0, 0, 0); return d.toISOString() }
 function startOfMonth() { const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); return d.toISOString() }
@@ -78,5 +83,85 @@ export async function POST(request: Request) {
       failed++
     }
   }
-  return NextResponse.json({ completed, skipped, failed })
+  const mediaResult = await processMediaJobs(db)
+  return NextResponse.json({ completed, skipped, failed, media: mediaResult })
+}
+
+async function processMediaJobs(db: ReturnType<typeof supabaseAdmin>) {
+  const { data: jobs, error } = await db
+    .from('ai_media_analysis_jobs')
+    .select('id, account_id, conversation_id, message_id, kind')
+    .eq('status', 'queued')
+    .order('created_at')
+    .limit(3)
+  if (error) return { completed: 0, skipped: 0, failed: 0 }
+
+  let completed = 0; let skipped = 0; let failed = 0
+  for (const job of (jobs ?? []) as MediaJob[]) {
+    const { data: claimed } = await db.from('ai_media_analysis_jobs')
+      .update({ status: 'processing', attempts: 1, error_message: null })
+      .eq('id', job.id).eq('status', 'queued').select('id').maybeSingle()
+    if (!claimed) continue
+
+    try {
+      const config = await loadAiConfig(db, job.account_id)
+      if (!config) throw new Error('La IA no está activa.')
+      if (config.provider !== 'openai') {
+        await finishMediaJob(db, job, 'skipped_unsupported', 'El análisis de medios requiere OpenAI.', 'skipped')
+        skipped++; continue
+      }
+      const { data: policy } = await db.from('ai_configs')
+        .select('media_analysis_daily_limit')
+        .eq('account_id', job.account_id).single()
+      const { count } = await db.from('ai_media_analysis_jobs').select('id', { count: 'exact', head: true })
+        .eq('account_id', job.account_id).eq('status', 'completed').gte('created_at', startOfDay())
+      if (!policy || (count ?? 0) >= policy.media_analysis_daily_limit) {
+        await finishMediaJob(db, job, 'skipped_limit', 'Límite diario de análisis de medios alcanzado.', 'skipped')
+        skipped++; continue
+      }
+      const { data: message } = await db.from('messages').select('id, media_url, sender_type')
+        .eq('id', job.message_id).eq('conversation_id', job.conversation_id).maybeSingle()
+      const match = typeof message?.media_url === 'string' ? message.media_url.match(/^\/api\/whatsapp\/media\/([^/?#]+)$/) : null
+      if (!message || message.sender_type !== 'customer' || !match?.[1]) {
+        await finishMediaJob(db, job, 'skipped_unsupported', 'El medio ya no está disponible para análisis.', 'skipped')
+        skipped++; continue
+      }
+      const { data: whatsapp } = await db.from('whatsapp_config').select('access_token').eq('account_id', job.account_id).maybeSingle()
+      if (!whatsapp?.access_token) throw new Error('WhatsApp no está configurado para recuperar el medio.')
+      const token = decrypt(whatsapp.access_token)
+      const media = await getMediaUrl({ mediaId: match[1], accessToken: token })
+      const downloaded = await downloadMedia({ downloadUrl: media.url, accessToken: token })
+      const mimeType = downloaded.contentType || media.mimeType
+      const value = job.kind === 'image'
+        ? await describeImageWithOpenAi({ apiKey: config.apiKey, bytes: downloaded.buffer, mimeType, timeoutMs: aiRequestTimeoutMs() })
+        : await transcribeAudioWithOpenAi({ apiKey: config.apiKey, bytes: downloaded.buffer, mimeType, timeoutMs: aiRequestTimeoutMs() })
+      const messagePatch = job.kind === 'image'
+        ? { media_analysis_status: 'completed', media_description: value, media_transcript: null, media_analyzed_at: new Date().toISOString(), media_analysis_error: null }
+        : { media_analysis_status: 'completed', media_transcript: value, media_description: null, media_analyzed_at: new Date().toISOString(), media_analysis_error: null }
+      const { error: messageError } = await db.from('messages').update(messagePatch).eq('id', job.message_id)
+      if (messageError) throw messageError
+      await db.from('ai_media_analysis_jobs').update({ status: 'completed', error_message: null }).eq('id', job.id)
+      // Refresh the conversation intelligence from the safely-derived text,
+      // never from the original binary attachment.
+      await db.rpc('queue_ai_analysis_job', { p_account_id: job.account_id, p_conversation_id: job.conversation_id, p_trigger: 'manual', p_delay: '0 minutes' })
+      completed++
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message.slice(0, 500) : 'Error desconocido'
+      await db.from('ai_media_analysis_jobs').update({ status: 'failed', error_message: message }).eq('id', job.id)
+      await db.from('messages').update({ media_analysis_status: 'failed', media_analysis_error: message }).eq('id', job.message_id)
+      failed++
+    }
+  }
+  return { completed, skipped, failed }
+}
+
+async function finishMediaJob(
+  db: ReturnType<typeof supabaseAdmin>,
+  job: MediaJob,
+  status: 'skipped_limit' | 'skipped_unsupported',
+  error: string,
+  messageStatus: 'skipped',
+) {
+  await db.from('ai_media_analysis_jobs').update({ status, error_message: error }).eq('id', job.id)
+  await db.from('messages').update({ media_analysis_status: messageStatus, media_analysis_error: error }).eq('id', job.message_id)
 }

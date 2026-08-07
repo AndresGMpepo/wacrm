@@ -18,6 +18,7 @@ import {
   PhoneCall,
 } from "lucide-react";
 import { useTelephony } from '@/components/telephony/telephony-provider';
+import { ConversationInternalNotes } from './conversation-internal-notes';
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { format } from "date-fns";
@@ -25,9 +26,10 @@ import { useTranslations } from "next-intl";
 
 interface ContactSidebarProps {
   contact: Contact | null;
+  conversationId?: string | null;
 }
 
-export function ContactSidebar({ contact }: ContactSidebarProps) {
+export function ContactSidebar({ contact, conversationId }: ContactSidebarProps) {
   const tSidebar = useTranslations("Inbox.sidebar");
   const tThread = useTranslations("Inbox.messageThread");
 
@@ -257,6 +259,10 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
 
           {/* Divider */}
           <div className="my-4 border-t border-border" />
+
+          {conversationId ? <ConversationInternalNotes conversationId={conversationId} compact /> : null}
+
+          {conversationId ? <div className="my-4 border-t border-border" /> : null}
 
           {/* Notes */}
           <div>

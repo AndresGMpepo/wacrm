@@ -141,6 +141,7 @@ function MessageContent({ message, t }: { message: Message, t: ReturnType<typeof
               {message.content_text}
             </p>
           )}
+          <MediaInsight label="Descripción de imagen" value={message.media_description} status={message.media_analysis_status} />
         </div>
       );
 
@@ -172,6 +173,7 @@ function MessageContent({ message, t }: { message: Message, t: ReturnType<typeof
           ) : (
             <MediaUnavailable label={t("audio")} t={t} />
           )}
+          <MediaInsight label="Transcripción de nota de voz" value={message.media_transcript} status={message.media_analysis_status} />
         </div>
       );
 
@@ -256,6 +258,16 @@ function MessageContent({ message, t }: { message: Message, t: ReturnType<typeof
         </p>
       );
   }
+}
+
+function MediaInsight({ label, value, status }: { label: string; value?: string; status?: Message['media_analysis_status'] }) {
+  if (value) {
+    return <details className="mt-2 rounded-md bg-background/40 px-2 py-1.5 text-xs text-muted-foreground"><summary className="cursor-pointer select-none font-medium text-foreground">{label}</summary><p className="mt-1 whitespace-pre-wrap">{value}</p></details>
+  }
+  if (status === 'queued' || status === 'processing') {
+    return <p className="mt-2 text-[11px] text-muted-foreground">Procesando con IA…</p>
+  }
+  return null
 }
 
 export function MessageBubble({
