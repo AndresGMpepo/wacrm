@@ -205,6 +205,29 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
     }]));
   }, []);
 
+  // The browser knows which authenticated WACRM extension owns an SDK
+  // session. Send that minimal state to the server as a reliable complement to
+  // PBX webhooks, whose trunk notifications may omit the answering extension.
+  const reportLiveCall = useCallback((session: Session | undefined, callStatus: string, finished = false) => {
+    const callId = session?.status?.callId;
+    if (!callId) return;
+    const body = JSON.stringify({
+      callId,
+      number: session.status?.number,
+      direction: session.status?.communicationType,
+      status: callStatus,
+    });
+    void fetch('/api/telephony/yeastar/live-calls/self', {
+      method: finished ? 'DELETE' : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+      keepalive: finished,
+    }).catch(() => {
+      // The PBX webhook remains the fallback when the browser is closing or
+      // temporarily offline. The agent's call controls must never be blocked.
+    });
+  }, []);
+
   const restoreSessionMedia = useCallback((session: Session) => {
     activeSession.current = session;
     setActive(session);
@@ -248,7 +271,10 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
       : session?.status?.communicationType === 'outbound'
         ? 'outgoing'
         : 'incoming';
-    if (session) rememberCall(session, callStatus);
+    if (session) {
+      reportLiveCall(session, 'BYE', true);
+      rememberCall(session, callStatus);
+    }
 
     if (isSameSession(consultation.current, session)) {
       consultation.current = null;
@@ -275,7 +301,7 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
       setRemoteStream(null);
     }
     void refreshHistory();
-  }, [notify, refreshHistory, rememberCall, restoreSessionMedia, stopRingtone]);
+  }, [notify, refreshHistory, rememberCall, reportLiveCall, restoreSessionMedia, stopRingtone]);
 
   const connect = useCallback(async () => {
     if (connectingRef.current || !live.current) return;
@@ -318,6 +344,7 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
         setIncoming(session);
         setOpen(true);
         setStatus('Llamada entrante');
+        reportLiveCall(session, 'RING');
         startRingtone();
         toast.info('Llamada entrante', { description: session.status?.number ?? 'Contesta desde el softphone.' });
         notify('Llamada entrante', session.status?.number ?? 'Contesta desde WACRM.');
@@ -340,6 +367,7 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
         } else {
           setStatus('Llamada en curso');
         }
+        reportLiveCall(session, session.status?.communicationType === 'inbound' ? 'ANSWER' : 'ANSWERED');
         setLocalStream(session.localStream ?? null);
         setRemoteStream(session.remoteStream ?? null);
         const updateRemoteStream = (event?: unknown) => {
@@ -369,7 +397,7 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
       connectingRef.current = false;
       setConnecting(false);
     }
-  }, [clearSession, notify, refreshHistory, startRingtone, stopRingtone]);
+  }, [clearSession, notify, refreshHistory, reportLiveCall, startRingtone, stopRingtone]);
 
   const refreshConfiguration = useCallback(async () => {
     try {
@@ -396,7 +424,11 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
         void Notification.requestPermission();
       }
     };
-    const close = () => destroy.current?.();
+    const close = () => {
+      const session = activeSession.current ?? incomingSession.current;
+      if (session) reportLiveCall(session, 'BYE', true);
+      destroy.current?.();
+    };
     window.addEventListener('pagehide', close);
     document.addEventListener('pointerdown', unlockAudio, { once: true });
     document.addEventListener('keydown', unlockAudio, { once: true });
@@ -412,7 +444,16 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
       void audioContext.current?.close();
       audioContext.current = null;
     };
-  }, [refreshConfiguration, stopRingtone]);
+  }, [refreshConfiguration, reportLiveCall, stopRingtone]);
+
+  useEffect(() => {
+    const session = active ?? incoming;
+    if (!session) return;
+    const callStatus = active ? (session.status?.communicationType === 'inbound' ? 'ANSWER' : 'ANSWERED') : 'RING';
+    reportLiveCall(session, callStatus);
+    const timer = window.setInterval(() => reportLiveCall(session, callStatus), 15_000);
+    return () => window.clearInterval(timer);
+  }, [active, incoming, reportLiveCall]);
 
   const value: State = {
     configured,
