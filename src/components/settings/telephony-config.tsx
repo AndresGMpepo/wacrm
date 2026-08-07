@@ -11,7 +11,6 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { SettingsPanelHead } from './settings-panel-head';
-import { CallFollowUpQueue } from '@/components/telephony/call-follow-up-queue';
 
 export function TelephonyConfig() {
   const { profile } = useAuth();
@@ -108,10 +107,6 @@ export function TelephonyConfig() {
 
           <Button className="w-fit" onClick={() => void save()} disabled={cannotSave}>{saving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}{extension ? 'Guardar mi extensión' : 'Guardar extensión'}</Button>
         </CardContent>
-      </Card>
-      <Card className="mt-6">
-        <CardHeader><CardTitle>Llamadas pendientes</CardTitle><CardDescription>Seguimientos creados por falta de respuesta. Abre el chat, llama desde el softphone y completa o descarta la tarea.</CardDescription></CardHeader>
-        <CardContent><CallFollowUpQueue /></CardContent>
       </Card>
       {canManageIntegration ? <Card className="mt-6">
         <CardHeader><CardTitle>Reintento por llamada</CardTitle><CardDescription>Crea una tarea para un agente cuando el último mensaje del chat fue del equipo y el cliente no respondió. Nunca marca automáticamente.</CardDescription></CardHeader>

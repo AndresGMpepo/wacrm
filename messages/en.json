@@ -19,6 +19,7 @@
     "dashboard": "Dashboard",
     "inbox": "Inbox",
     "notifications": "Notifications",
+    "callTasks": "Pending calls",
     "contacts": "Contacts",
     "pipelines": "Pipelines",
     "broadcasts": "Broadcasts",

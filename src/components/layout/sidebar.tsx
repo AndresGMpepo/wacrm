@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
 import { useTotalUnread } from "@/hooks/use-total-unread";
 import { useUnreadNotifications } from "@/hooks/use-unread-notifications";
+import { usePendingCallTasks } from "@/hooks/use-pending-call-tasks";
 import {
   Bell,
   Bot,
@@ -23,6 +24,7 @@ import {
   Users,
   UsersRound,
   Workflow,
+  PhoneCall,
   X,
   Zap,
 } from "lucide-react";
@@ -93,6 +95,7 @@ const navItems: NavItem[] = [
   { href: "/dashboard", labelKey: "dashboard", icon: LayoutDashboard },
   { href: "/inbox", labelKey: "inbox", icon: MessageSquare },
   { href: "/notifications", labelKey: "notifications", icon: Bell },
+  { href: "/call-tasks", labelKey: "callTasks", icon: PhoneCall },
   { href: "/contacts", labelKey: "contacts", icon: Users },
   { href: "/pipelines", labelKey: "pipelines", icon: GitBranch },
   { href: "/broadcasts", labelKey: "broadcasts", icon: Radio },
@@ -119,6 +122,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
   const { profile, profileLoading, account, accountRole, signOut } = useAuth();
   const totalUnread = useTotalUnread();
   const unreadNotifications = useUnreadNotifications();
+  const pendingCallTasks = usePendingCallTasks();
   // Only surface the account-name strip when it actually carries
   // information. A solo user's personal account is named after them
   // (the 017 signup trigger seeds it from `full_name`), so showing it
@@ -224,6 +228,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
               // viewing this section".
               const showNotificationBadge =
                 item.href === "/notifications" && unreadNotifications > 0;
+              const showCallTaskBadge = item.href === "/call-tasks" && pendingCallTasks > 0;
 
               return (
                 <li key={item.href}>
@@ -262,6 +267,15 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                         className="flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold text-primary-foreground"
                       >
                         {unreadNotifications > 9 ? "9+" : unreadNotifications}
+                      </span>
+                    )}
+                    {showCallTaskBadge && (
+                      <span
+                        aria-label={`${pendingCallTasks} llamadas pendientes`}
+                        className="relative flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-semibold text-white"
+                      >
+                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-60" />
+                        <span className="relative">{pendingCallTasks > 9 ? "9+" : pendingCallTasks}</span>
                       </span>
                     )}
                   </Link>
