@@ -592,6 +592,20 @@ async function processMessage(
   if (!convResult) return
   const conversation = convResult.conversation
 
+  // Route an inbound thread only while it is unassigned. This also covers a
+  // later customer message after an agent deliberately released a previous
+  // conversation. Existing ownership is never replaced by the policy.
+  if (message.type !== 'reaction') {
+    const { error: assignmentError } = await supabaseAdmin().rpc(
+      'auto_assign_inbound_conversation',
+      { p_account_id: accountId, p_conversation_id: conversation.id },
+    )
+    if (assignmentError) {
+      // Routing is optional and must never make WhatsApp delivery fail.
+      console.error('[webhook] automatic assignment failed:', assignmentError.message)
+    }
+  }
+
   // Emit conversation.created as soon as the thread is opened — BEFORE
   // the reaction short-circuit below — so a conversation first opened by
   // a reaction still fires the event, and a subscriber always sees the

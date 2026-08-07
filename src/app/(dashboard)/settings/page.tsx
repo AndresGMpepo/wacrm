@@ -12,6 +12,7 @@ import { ProfileForm } from '@/components/settings/profile-form';
 import { SecurityPanel } from '@/components/settings/security-panel';
 import { AppearancePanel } from '@/components/settings/appearance-panel';
 import { WhatsAppConfig } from '@/components/settings/whatsapp-config';
+import { ConversationAssignmentConfig } from '@/components/settings/conversation-assignment-config';
 import { TelephonyConfig } from '@/components/settings/telephony-config';
 import { TemplateManager } from '@/components/settings/template-manager';
 import { QuickRepliesManager } from '@/components/settings/quick-replies-manager';
@@ -76,6 +77,7 @@ function SettingsPageInner() {
     security: <SecurityPanel />,
     appearance: <AppearancePanel />,
     whatsapp: <WhatsAppConfig />,
+    assignment: <ConversationAssignmentConfig />,
     telephony: <TelephonyConfig />,
     templates: <TemplateManager />,
     'quick-replies': <QuickRepliesManager />,
