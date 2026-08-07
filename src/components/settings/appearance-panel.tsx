@@ -1,10 +1,16 @@
 "use client";
 
-import { Check, Moon, Palette, SunMoon, Sun } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Building2, Check, ImageUp, Loader2, Moon, Palette, Save, SunMoon, Sun, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { useAuth } from "@/hooks/use-auth";
 import { useTheme } from "@/hooks/use-theme";
 import { MODES, THEMES, type Mode, type ThemeId } from "@/lib/themes";
 import { cn } from "@/lib/utils";
+import { createClient } from "@/lib/supabase/client";
 import { useTranslations } from "next-intl";
 import { SettingsPanelHead } from "./settings-panel-head";
 
@@ -73,8 +79,114 @@ export function AppearancePanel() {
           ))}
         </div>
       </div>
+
+      <AccountBranding />
     </section>
   );
+}
+
+function AccountBranding() {
+  const { account, profile, refreshProfile } = useAuth();
+  const canManage = profile?.account_role === "owner" || profile?.account_role === "admin";
+  const [name, setName] = useState(account?.name ?? "");
+  const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [removeLogo, setRemoveLogo] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const logoUrl = removeLogo ? null : (previewUrl ?? account?.logo_url);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setName(account?.name ?? ""), 0);
+    return () => window.clearTimeout(timer);
+  }, [account?.name]);
+
+  useEffect(() => () => {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+  }, [previewUrl]);
+
+  const selectLogo = (file: File | null) => {
+    if (!file) return;
+    if (!['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(file.type)) {
+      toast.error('Usa una imagen PNG, JPG, WebP o GIF.');
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      toast.error('El logo debe pesar 2 MB o menos.');
+      return;
+    }
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewUrl(URL.createObjectURL(file));
+    setLogoFile(file);
+    setRemoveLogo(false);
+  };
+
+  const saveBranding = async () => {
+    if (!account || !canManage) return;
+    const nextName = name.trim();
+    if (!nextName) {
+      toast.error('El nombre de la cuenta es obligatorio.');
+      return;
+    }
+    setSaving(true);
+    try {
+      const supabase = createClient();
+      let nextLogoUrl: string | null = account.logo_url;
+      const path = `account-${account.id}/brand-logo`;
+      if (logoFile) {
+        const { error: uploadError } = await supabase.storage.from('account-branding').upload(path, logoFile, {
+          upsert: true,
+          cacheControl: '3600',
+          contentType: logoFile.type,
+        });
+        if (uploadError) throw uploadError;
+        const { data } = supabase.storage.from('account-branding').getPublicUrl(path);
+        nextLogoUrl = `${data.publicUrl}?v=${Date.now()}`;
+      } else if (removeLogo) {
+        nextLogoUrl = null;
+      }
+      const { error } = await supabase.from('accounts').update({ name: nextName, logo_url: nextLogoUrl }).eq('id', account.id);
+      if (error) throw error;
+      setLogoFile(null);
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      setPreviewUrl(null);
+      setRemoveLogo(false);
+      await refreshProfile();
+      toast.success('Identidad visual guardada para esta cuenta.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'No se pudo guardar la identidad visual.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return <div className="mt-8 rounded-xl border border-border bg-card p-5">
+    <div className="flex items-start gap-3">
+      <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"><Building2 className="size-4" /></span>
+      <div><h3 className="text-sm font-semibold text-foreground">Identidad de la cuenta</h3><p className="mt-1 text-xs leading-relaxed text-muted-foreground">El nombre y logo se muestran a todos los miembros de esta cuenta, sin afectar otras cuentas de WACRM.</p></div>
+    </div>
+    <div className="mt-5 grid gap-5 sm:grid-cols-[112px_minmax(0,1fr)]">
+      <div className="flex flex-col items-center gap-2">
+        <div className="flex size-22 items-center justify-center overflow-hidden rounded-xl border border-border bg-white p-1">
+          {logoUrl ? <>
+            {/* Dynamic Storage URL; next/image would require a per-tenant remote pattern. */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={logoUrl} alt="Vista previa del logo" className="size-full object-contain" />
+          </> : <Building2 className="size-7 text-muted-foreground" />}
+        </div>
+        <input ref={inputRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden" disabled={!canManage || saving} onChange={(event) => selectLogo(event.target.files?.[0] ?? null)} />
+        <Button type="button" size="sm" variant="outline" disabled={!canManage || saving} onClick={() => inputRef.current?.click()}><ImageUp className="size-3.5" />Cambiar</Button>
+        {account?.logo_url && !removeLogo ? <Button type="button" size="sm" variant="ghost" disabled={!canManage || saving} onClick={() => { if (previewUrl) URL.revokeObjectURL(previewUrl); setPreviewUrl(null); setLogoFile(null); setRemoveLogo(true); }}><Trash2 className="size-3.5" />Quitar</Button> : null}
+      </div>
+      <div className="space-y-2">
+        <label htmlFor="account-brand-name" className="text-sm font-medium text-foreground">Nombre que verá el equipo</label>
+        <Input id="account-brand-name" value={name} onChange={(event) => setName(event.target.value)} maxLength={120} disabled={!canManage || saving} placeholder="Mi empresa" />
+        <p className="text-xs text-muted-foreground">PNG, JPG, WebP o GIF; máximo 2 MB. Se recomienda un logo cuadrado.</p>
+        {!canManage ? <p className="text-xs text-muted-foreground">Solo el propietario o un administrador puede cambiar la identidad.</p> : null}
+      </div>
+    </div>
+    <Button className="mt-5" type="button" disabled={!canManage || saving || !account} onClick={() => void saveBranding()}>{saving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}Guardar identidad</Button>
+  </div>;
 }
 
 function ModeCard({

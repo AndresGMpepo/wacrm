@@ -55,6 +55,7 @@ export interface Profile {
 export interface Account {
   id: string;
   name: string;
+  logo_url?: string | null;
   /** auth.users.id of the immutable owner. */
   owner_user_id: string;
   created_at: string;
