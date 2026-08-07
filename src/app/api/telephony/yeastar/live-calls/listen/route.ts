@@ -90,9 +90,23 @@ export async function POST(request: Request) {
       if (!extension?.channel_id || extension.number !== targetExtension || extension.member_status === 'BYE') return []
       return [{ callId: call.call_id ?? callId, channelId: extension.channel_id }]
     }))[0]
-    // Some Cloud PBX call/query responses omit the extension member while the
-    // state webhook has already provided its channel. Use only a very recent
-    // non-BYE webhook channel as a compatibility fallback.
+    // Linkus callId normally matches the PBX event call_id. Cloud call/query
+    // can omit the extension member, and some webhook payloads omit
+    // member_number, so recover the channel using that exact call association.
+    if (!channel) {
+      const rawCallId = callId.replace(/^wacrm:/, '')
+      const { data: matchedChannels, error: matchedChannelsError } = await db.from('yeastar_live_call_channels')
+        .select('call_id, channel_id, member_type, member_number, from_number, to_number, last_event_at')
+        .eq('account_id', accountId).eq('call_id', rawCallId).neq('status', 'BYE')
+        .order('last_event_at', { ascending: false })
+      if (matchedChannelsError) throw matchedChannelsError
+      const matched = (matchedChannels ?? []).find((item) => item.member_number === targetExtension)
+        ?? (matchedChannels ?? []).find((item) => item.from_number === targetExtension || item.to_number === targetExtension)
+        ?? (matchedChannels ?? []).find((item) => item.member_type === 'extension')
+      if (matched) channel = { callId: matched.call_id, channelId: matched.channel_id }
+    }
+    // Final compatibility fallback for a current event where the PBX used a
+    // different call identifier but did include the configured extension.
     if (!channel) {
       const since = new Date(Date.now() - 45_000).toISOString()
       const { data: channels, error: channelsError } = await db.from('yeastar_live_call_channels')
