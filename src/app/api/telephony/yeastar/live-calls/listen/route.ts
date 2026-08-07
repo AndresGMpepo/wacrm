@@ -53,6 +53,13 @@ function isExtension(value: unknown, extension: string) {
   return number === extension || new RegExp(`(^|[^0-9])${extension}(?![0-9])`).test(number)
 }
 
+function samePhone(first: string | null | undefined, second: string | null | undefined) {
+  const normalize = (value: string | null | undefined) => (value ?? '').replace(/\D/g, '')
+  const a = normalize(first)
+  const b = normalize(second)
+  return Boolean(a && b && (a === b || a.endsWith(b) || b.endsWith(a)))
+}
+
 export async function POST(request: Request) {
   let auditId: string | null = null
   let db: ReturnType<typeof admin> | null = null
@@ -66,7 +73,7 @@ export async function POST(request: Request) {
     db = admin()
     const [supervisorResult, activeCallResult, monitoringResult, integrationResult] = await Promise.all([
       db.from('telephony_user_configs').select('extension').eq('account_id', accountId).eq('user_id', userId).eq('provider', 'yeastar').maybeSingle(),
-      db.from('yeastar_live_calls').select('call_id, extension').eq('account_id', accountId).eq('call_id', callId).eq('extension', targetExtension).maybeSingle(),
+      db.from('yeastar_live_calls').select('call_id, extension, peer_number').eq('account_id', accountId).eq('call_id', callId).eq('extension', targetExtension).maybeSingle(),
       db.from('yeastar_monitoring_configs').select('api_client_id, api_client_secret').eq('account_id', accountId).maybeSingle(),
       db.from('telephony_configs').select('pbx_url').eq('account_id', accountId).eq('provider', 'yeastar').maybeSingle(),
     ])
@@ -78,7 +85,8 @@ export async function POST(request: Request) {
     const supervisorExtension = supervisorResult.data?.extension
     if (!supervisorExtension) return NextResponse.json({ error: 'Configura tu propia extensión Yeastar antes de supervisar.' }, { status: 409 })
     if (supervisorExtension === targetExtension) return NextResponse.json({ error: 'Usa otra extensión de supervisor; no puedes escucharte a ti mismo.' }, { status: 409 })
-    if (!activeCallResult.data) return NextResponse.json({ error: 'La llamada ya finalizó o no está disponible.' }, { status: 409 })
+    const activeCall = activeCallResult.data
+    if (!activeCall) return NextResponse.json({ error: 'La llamada ya finalizó o no está disponible.' }, { status: 409 })
     if (!monitoringResult.data?.api_client_id || !monitoringResult.data.api_client_secret || !integrationResult.data?.pbx_url) {
       return NextResponse.json({ error: 'Falta configurar Client ID y Client Secret de OpenAPI en Telefonía.' }, { status: 409 })
     }
@@ -138,6 +146,19 @@ export async function POST(request: Request) {
       if (channelsError) throw channelsError
       const fallback = channels?.[0]
       if (fallback) channel = { callId: fallback.call_id, channelId: fallback.channel_id }
+    }
+    // When the PBX omits the extension from an event, it still reports the
+    // external leg. Correlate that current leg with Linkus' active peer so a
+    // WebRTC call can still be monitored without guessing a different call.
+    if (!channel && activeCall.peer_number) {
+      const since = new Date(Date.now() - 90_000).toISOString()
+      const { data: peerChannels, error: peerChannelsError } = await db.from('yeastar_live_call_channels')
+        .select('call_id, channel_id, member_type, from_number, to_number, last_event_at')
+        .eq('account_id', accountId).neq('status', 'BYE').gte('last_event_at', since)
+        .order('last_event_at', { ascending: false }).limit(50)
+      if (peerChannelsError) throw peerChannelsError
+      const peerChannel = (peerChannels ?? []).find((item) => samePhone(item.from_number, activeCall.peer_number) || samePhone(item.to_number, activeCall.peer_number))
+      if (peerChannel) channel = { callId: peerChannel.call_id, channelId: peerChannel.channel_id }
     }
     if (!channel) return NextResponse.json({ error: `Yeastar aún no entregó un canal activo para la extensión ${targetExtension}. Espera unos segundos y vuelve a intentar.` }, { status: 409 })
 
