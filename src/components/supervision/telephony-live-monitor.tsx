@@ -4,7 +4,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
-import { Headphones, Loader2, Mic, PhoneCall, Radio, RefreshCw } from 'lucide-react'
+import { Headphones, Loader2, MessageCircleWarning, Mic, PhoneCall, Radio, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 
@@ -48,8 +48,10 @@ export function TelephonyLiveMonitor() {
     return () => window.clearInterval(timer)
   }, [load])
 
-  const supervise = async (call: Call, mode: 'listen' | 'whisper') => {
-    const prompt = mode === 'whisper'
+  const supervise = async (call: Call, mode: 'listen' | 'whisper' | 'barge') => {
+    const prompt = mode === 'barge'
+      ? `Intervendrás en la llamada de la extensión ${call.extension}. El agente y el cliente te escucharán. ¿Continuar?`
+      : mode === 'whisper'
       ? `Hablarás solo con el agente de la extensión ${call.extension}; el cliente no te escuchará. ¿Iniciar susurro?`
       : `Escucharás la llamada de la extensión ${call.extension}. No podrás hablar con el agente ni con el cliente. ¿Continuar?`
     if (!window.confirm(prompt)) return
@@ -63,7 +65,8 @@ export function TelephonyLiveMonitor() {
       })
       const data = await response.json()
       if (!response.ok) throw new Error(data.error)
-      toast.success('Solicitud de escucha enviada', { description: 'Yeastar llamará a tu extensión como “Monitor”. Abre el softphone y contesta esa llamada para escuchar.' })
+      const label = mode === 'barge' ? 'Solicitud de intervención enviada' : mode === 'whisper' ? 'Solicitud de susurro enviada' : 'Solicitud de escucha enviada'
+      toast.success(label, { description: 'Yeastar llamará a tu extensión como “Monitor”. Abre el softphone y contesta esa llamada.' })
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'No se pudo iniciar la escucha.')
     } finally {
@@ -84,7 +87,8 @@ export function TelephonyLiveMonitor() {
         const key = `${call.call_id}:${call.extension}`
         const pendingListen = supervisionCall === `${key}:listen`
         const pendingWhisper = supervisionCall === `${key}:whisper`
-        const pending = pendingListen || pendingWhisper
+        const pendingBarge = supervisionCall === `${key}:barge`
+        const pending = pendingListen || pendingWhisper || pendingBarge
         const isMonitoring = call.peer_number === 'Monitor'
         // The server verifies the PBX channel immediately before monitoring.
         // A browser/webhook synchronization delay must not block the operator.
@@ -97,6 +101,7 @@ export function TelephonyLiveMonitor() {
           <div className="flex items-center gap-2">
             <Button size="sm" variant="outline" title={isMonitoring ? 'Esta es tu llamada de monitoreo activa.' : 'Verificar y escuchar llamada'} disabled={pending || !canListen} onClick={() => void supervise(call, 'listen')}>{pendingListen ? <Loader2 className="size-4 animate-spin" /> : <Headphones className="size-4" />}{isMonitoring ? 'Escuchando' : pendingListen ? 'Verificando…' : 'Escuchar'}</Button>
             <Button size="sm" variant="secondary" title="Hablar solo con el agente" disabled={pending || !canListen} onClick={() => void supervise(call, 'whisper')}>{pendingWhisper ? <Loader2 className="size-4 animate-spin" /> : <Mic className="size-4" />}{pendingWhisper ? 'Verificando…' : 'Susurrar'}</Button>
+            <Button size="sm" variant="destructive" title="Entrar y hablar con agente y cliente" disabled={pending || !canListen} onClick={() => void supervise(call, 'barge')}>{pendingBarge ? <Loader2 className="size-4 animate-spin" /> : <MessageCircleWarning className="size-4" />}{pendingBarge ? 'Verificando…' : 'Intervenir'}</Button>
           </div>
         </div>
       })}</div>

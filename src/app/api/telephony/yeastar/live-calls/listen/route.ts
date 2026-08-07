@@ -68,7 +68,7 @@ export async function POST(request: Request) {
     const body = await request.json().catch(() => null) as { callId?: unknown; extension?: unknown; mode?: unknown } | null
     const callId = typeof body?.callId === 'string' ? body.callId : ''
     const targetExtension = typeof body?.extension === 'string' ? body.extension : ''
-    const mode = body?.mode === 'whisper' ? 'whisper' : 'listen'
+    const mode = body?.mode === 'whisper' || body?.mode === 'barge' ? body.mode : 'listen'
     if (!callId || !targetExtension) return NextResponse.json({ error: 'La llamada seleccionada no es válida.' }, { status: 400 })
 
     db = admin()
@@ -187,7 +187,12 @@ export async function POST(request: Request) {
     const result = await parseReply(response)
     if (!response.ok || result.errcode !== 0) throw new Error(result.errmsg || 'Yeastar no pudo iniciar la escucha.')
     await db.from('yeastar_call_supervision_audit').update({ outcome: 'succeeded', error_message: null }).eq('id', auditId)
-    return NextResponse.json({ ok: true, message: mode === 'whisper' ? 'Yeastar inició el susurro en tu extensión.' : 'Yeastar inició la escucha en tu extensión.' })
+    const message = mode === 'whisper'
+      ? 'Yeastar inició el susurro en tu extensión.'
+      : mode === 'barge'
+        ? 'Yeastar inició la intervención en tu extensión.'
+        : 'Yeastar inició la escucha en tu extensión.'
+    return NextResponse.json({ ok: true, message })
   } catch (error) {
     if (auditId && db) await db.from('yeastar_call_supervision_audit').update({ outcome: 'failed', error_message: error instanceof Error ? error.message.slice(0, 500) : 'Error desconocido' }).eq('id', auditId)
     if (error instanceof Error && !['Unauthorized', 'Forbidden'].includes(error.message)) return NextResponse.json({ error: error.message }, { status: 502 })
