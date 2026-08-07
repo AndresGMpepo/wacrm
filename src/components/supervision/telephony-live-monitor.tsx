@@ -60,7 +60,7 @@ export function TelephonyLiveMonitor() {
       })
       const data = await response.json()
       if (!response.ok) throw new Error(data.error)
-      toast.success(data.message ?? 'Yeastar inició la escucha en tu extensión.')
+      toast.success('Solicitud de escucha enviada', { description: 'Yeastar llamará a tu extensión como “Monitor”. Abre el softphone y contesta esa llamada para escuchar.' })
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'No se pudo iniciar la escucha.')
     } finally {

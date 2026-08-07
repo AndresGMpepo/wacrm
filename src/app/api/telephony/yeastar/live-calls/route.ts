@@ -28,8 +28,17 @@ export async function GET() {
     // hides any legacy row written before that protection existed.
     const channelCallIds = new Set((channelsResult.data ?? []).map((channel) => channel.call_id))
     const latestByExtension = new Map<string, NonNullable<typeof callsResult.data>[number]>()
+    const staleSoftphoneBefore = Date.now() - 45_000
     for (const call of callsResult.data ?? []) {
       if (!usersByExtension.has(call.extension)) continue
+      const isSoftphoneCall = call.channel_id.startsWith('wacrm:')
+      // PBX rows remain visible only while at least one associated PBX channel
+      // is active. This removes historical ALERT/ANSWER rows once BYE arrives.
+      if (!isSoftphoneCall && !channelCallIds.has(call.call_id)) continue
+      // Browser-originated calls send a heartbeat every 15 seconds. If the
+      // tab closes before its final DELETE reaches us, hide that stale row
+      // without expiring long-running PBX-originated calls.
+      if (isSoftphoneCall && new Date(call.last_event_at).getTime() < staleSoftphoneBefore) continue
       const current = latestByExtension.get(call.extension)
       if (!current || new Date(call.last_event_at).getTime() > new Date(current.last_event_at).getTime()) latestByExtension.set(call.extension, call)
     }
