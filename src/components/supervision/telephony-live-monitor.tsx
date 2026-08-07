@@ -1,5 +1,7 @@
 'use client'
 
+// Deployment marker: forces Easypanel to build the current live-call monitor revision.
+
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { Headphones, Loader2, PhoneCall, Radio, RefreshCw } from 'lucide-react'
