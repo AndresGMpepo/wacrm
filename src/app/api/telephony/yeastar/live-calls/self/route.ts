@@ -16,7 +16,7 @@ async function ownExtension(accountId: string, userId: string) {
 }
 
 function payload(body: unknown) {
-  const value = body as { callId?: unknown; number?: unknown; direction?: unknown; status?: unknown }
+  const value = body as { callId?: unknown; number?: unknown; direction?: unknown; status?: unknown; diagnostic?: unknown }
   const callId = typeof value?.callId === 'string' ? value.callId.trim() : ''
   if (!callId) return null
   return {
@@ -24,6 +24,7 @@ function payload(body: unknown) {
     number: typeof value.number === 'string' ? value.number.trim().slice(0, 80) || null : null,
     direction: value.direction === 'inbound' || value.direction === 'outbound' ? value.direction : 'unknown',
     status: typeof value.status === 'string' ? value.status.trim().slice(0, 40) || 'ANSWER' : 'ANSWER',
+    diagnostic: value.diagnostic === true,
   }
 }
 
@@ -45,6 +46,15 @@ export async function POST(request: Request) {
       last_event_at: new Date().toISOString(),
     }, { onConflict: 'account_id,call_id,extension' })
     if (error) throw error
+    if (call.diagnostic) {
+      await admin().from('yeastar_webhook_event_receipts').insert({
+        account_id: accountId,
+        event_type: 'wacrm-softphone',
+        call_id: call.callId,
+        outcome: 'processed',
+        detail: `Softphone WACRM sincronizado: extensión ${extension} · ${call.direction} · ${call.status}.`,
+      })
+    }
     return NextResponse.json({ ok: true })
   } catch (error) {
     return toErrorResponse(error)

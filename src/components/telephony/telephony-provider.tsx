@@ -152,6 +152,7 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
   const transferParent = useRef<Session | null>(null);
   const consultation = useRef<Session | null>(null);
   const finalizedCallIds = useRef(new Set<string>());
+  const liveReportingError = useRef<string | null>(null);
 
   const notify = useCallback((title: string, body: string) => {
     if (document.visibilityState === 'visible') return;
@@ -208,20 +209,38 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
   // The browser knows which authenticated WACRM extension owns an SDK
   // session. Send that minimal state to the server as a reliable complement to
   // PBX webhooks, whose trunk notifications may omit the answering extension.
-  const reportLiveCall = useCallback((session: Session | undefined, callStatus: string, finished = false) => {
+  const reportLiveCall = useCallback((session: Session | undefined, callStatus: string, finished = false, diagnostic = false) => {
     const callId = session?.status?.callId;
-    if (!callId) return;
+    if (!callId) {
+      if (diagnostic && liveReportingError.current !== 'missing-call-id') {
+        liveReportingError.current = 'missing-call-id';
+        toast.error('No se pudo sincronizar la supervisión', { description: 'Yeastar no entregó el identificador de esta llamada al softphone.' });
+      }
+      return;
+    }
     const body = JSON.stringify({
       callId,
       number: session.status?.number,
       direction: session.status?.communicationType,
       status: callStatus,
+      diagnostic,
     });
     void fetch('/api/telephony/yeastar/live-calls/self', {
       method: finished ? 'DELETE' : 'POST',
       headers: { 'Content-Type': 'application/json' },
       body,
       keepalive: finished,
+    }).then(async (response) => {
+      if (response.ok) {
+        liveReportingError.current = null;
+        return;
+      }
+      const data = await response.json().catch(() => null) as { error?: string } | null;
+      const message = data?.error ?? 'El servidor rechazó el estado de llamada.';
+      if (liveReportingError.current !== message) {
+        liveReportingError.current = message;
+        toast.error('No se pudo sincronizar la supervisión', { description: message });
+      }
     }).catch(() => {
       // The PBX webhook remains the fallback when the browser is closing or
       // temporarily offline. The agent's call controls must never be blocked.
@@ -344,7 +363,7 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
         setIncoming(session);
         setOpen(true);
         setStatus('Llamada entrante');
-        reportLiveCall(session, 'RING');
+        reportLiveCall(session, 'RING', false, true);
         startRingtone();
         toast.info('Llamada entrante', { description: session.status?.number ?? 'Contesta desde el softphone.' });
         notify('Llamada entrante', session.status?.number ?? 'Contesta desde WACRM.');
@@ -367,7 +386,7 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
         } else {
           setStatus('Llamada en curso');
         }
-        reportLiveCall(session, session.status?.communicationType === 'inbound' ? 'ANSWER' : 'ANSWERED');
+        reportLiveCall(session, session.status?.communicationType === 'inbound' ? 'ANSWER' : 'ANSWERED', false, true);
         setLocalStream(session.localStream ?? null);
         setRemoteStream(session.remoteStream ?? null);
         const updateRemoteStream = (event?: unknown) => {
