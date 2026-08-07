@@ -40,12 +40,19 @@ async function notesWithAuthors(
 
 export async function GET(_: Request, { params }: { params: Promise<{ conversationId: string }> }) {
   try {
-    const { supabase, accountId } = await requireRole('agent')
+    const { supabase, accountId, userId } = await requireRole('agent')
     const { conversationId } = await params
     if (!await assertConversation(accountId, conversationId, supabase)) {
       return NextResponse.json({ error: 'Conversation not found' }, { status: 404 })
     }
-    return NextResponse.json({ notes: await notesWithAuthors(accountId, conversationId, supabase) })
+    const [notes, read] = await Promise.all([
+      notesWithAuthors(accountId, conversationId, supabase),
+      supabase.from('conversation_internal_note_reads').select('read_at').eq('conversation_id', conversationId).eq('user_id', userId).maybeSingle(),
+    ])
+    if (read.error) throw read.error
+    const readAt = read.data?.read_at ? new Date(read.data.read_at).getTime() : 0
+    const unreadCount = notes.filter((note) => note.author_user_id !== userId && new Date(note.created_at).getTime() > readAt).length
+    return NextResponse.json({ notes, unread_count: unreadCount })
   } catch (error) {
     return toErrorResponse(error)
   }
@@ -72,7 +79,25 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
       kind,
     })
     if (error) throw error
+    // The author already saw their own note; other agents retain an unread
+    // follow-up marker until they explicitly open this conversation's notes.
+    await supabase.from('conversation_internal_note_reads').upsert({ account_id: accountId, conversation_id: conversationId, user_id: userId, read_at: new Date().toISOString() })
     return NextResponse.json({ success: true }, { status: 201 })
+  } catch (error) {
+    return toErrorResponse(error)
+  }
+}
+
+export async function PATCH(_: Request, { params }: { params: Promise<{ conversationId: string }> }) {
+  try {
+    const { supabase, accountId, userId } = await requireRole('agent')
+    const { conversationId } = await params
+    if (!await assertConversation(accountId, conversationId, supabase)) {
+      return NextResponse.json({ error: 'Conversation not found' }, { status: 404 })
+    }
+    const { error } = await supabase.from('conversation_internal_note_reads').upsert({ account_id: accountId, conversation_id: conversationId, user_id: userId, read_at: new Date().toISOString() })
+    if (error) throw error
+    return NextResponse.json({ success: true })
   } catch (error) {
     return toErrorResponse(error)
   }

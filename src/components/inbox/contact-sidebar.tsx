@@ -27,9 +27,10 @@ import { useTranslations } from "next-intl";
 interface ContactSidebarProps {
   contact: Contact | null;
   conversationId?: string | null;
+  internalNotesOpenSignal?: number;
 }
 
-export function ContactSidebar({ contact, conversationId }: ContactSidebarProps) {
+export function ContactSidebar({ contact, conversationId, internalNotesOpenSignal }: ContactSidebarProps) {
   const tSidebar = useTranslations("Inbox.sidebar");
   const tThread = useTranslations("Inbox.messageThread");
 
@@ -260,7 +261,7 @@ export function ContactSidebar({ contact, conversationId }: ContactSidebarProps)
           {/* Divider */}
           <div className="my-4 border-t border-border" />
 
-          {conversationId ? <ConversationInternalNotes conversationId={conversationId} compact /> : null}
+          {conversationId ? <ConversationInternalNotes conversationId={conversationId} compact openSignal={internalNotesOpenSignal} /> : null}
 
           {conversationId ? <div className="my-4 border-t border-border" /> : null}
 

@@ -50,6 +50,7 @@ import { deleteAccountMedia } from "@/lib/storage/upload-media";
 import { TemplatePicker } from "./template-picker";
 import { AiThreadBanner } from "./ai-thread-banner";
 import { ConversationIntelligence } from "./conversation-intelligence";
+import { InternalNoteAttention } from "./internal-note-attention";
 import { buildReplyPreview } from "./reply-quote";
 import { toast } from "sonner";
 
@@ -110,6 +111,7 @@ interface MessageThreadProps {
    */
   contactPanelOpen?: boolean;
   onToggleContactPanel?: () => void;
+  onShowInternalNotes?: (conversationId: string) => void;
 }
 
 function formatDateSeparator(dateStr: string, t: ReturnType<typeof useTranslations>): string {
@@ -168,6 +170,7 @@ export function MessageThread({
   onRefresh,
   contactPanelOpen,
   onToggleContactPanel,
+  onShowInternalNotes,
 }: MessageThreadProps) {
   const t = useTranslations("Inbox.messageThread");
   const tTimer = useTranslations("Inbox.sessionTimer");
@@ -922,6 +925,7 @@ export function MessageThread({
               smaller laptops; this lets agents reclaim it when they just
               want to read and reply. Hidden on mobile, where the sidebar
               never renders as a permanent panel anyway. Issue #258. */}
+          {onShowInternalNotes ? <InternalNoteAttention conversationId={conversation.id} onOpen={() => onShowInternalNotes(conversation.id)} /> : null}
           {onToggleContactPanel && (
             <button
               type="button"

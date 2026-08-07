@@ -69,6 +69,8 @@ function InboxPageInner() {
    * below reconciles to the stored value right after mount instead.
    */
   const [contactPanelOpen, setContactPanelOpen] = useState(true);
+  const [internalNotesOpenSignal, setInternalNotesOpenSignal] = useState(0);
+  const [internalNotesConversationId, setInternalNotesConversationId] = useState<string | null>(null);
   useEffect(() => {
     try {
       const stored = localStorage.getItem(CONTACT_PANEL_STORAGE_KEY);
@@ -88,6 +90,13 @@ function InboxPageInner() {
       }
       return next;
     });
+  }, []);
+
+  const handleShowInternalNotes = useCallback((conversationId: string) => {
+    setContactPanelOpen(true);
+    try { localStorage.setItem(CONTACT_PANEL_STORAGE_KEY, "true"); } catch {}
+    setInternalNotesConversationId(conversationId);
+    setInternalNotesOpenSignal((value) => value + 1);
   }, []);
 
   // Fire the deep-link auto-select exactly once per URL — subsequent
@@ -623,6 +632,7 @@ function InboxPageInner() {
             onRefresh={handleManualRefresh}
             contactPanelOpen={contactPanelOpen}
             onToggleContactPanel={handleToggleContactPanel}
+            onShowInternalNotes={handleShowInternalNotes}
           />
         </div>
 
@@ -632,7 +642,7 @@ function InboxPageInner() {
             toggle — which is itself desktop-only — never affects it. */}
         {contactPanelOpen && (
           <div className="hidden lg:block">
-            <ContactSidebar contact={activeContact} conversationId={activeConversation?.id} />
+            <ContactSidebar contact={activeContact} conversationId={activeConversation?.id} internalNotesOpenSignal={internalNotesConversationId === activeConversation?.id ? internalNotesOpenSignal : undefined} />
           </div>
         )}
       </div>
