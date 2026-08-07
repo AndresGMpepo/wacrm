@@ -14,6 +14,7 @@ type CallMember = {
 
 type CallParty = { from?: string; to?: string; channel_id?: string; member_status?: string; call_path?: string }
 type TrackedCall = { extension: string; channelId: string; status: string; callPath: string | null; peerNumber: string | null; direction: 'inbound' | 'outbound' | 'internal' | 'unknown' }
+type EventChannel = { channelId: string; memberType: 'extension' | 'inbound' | 'outbound' | 'internal'; memberNumber: string | null; fromNumber: string | null; toNumber: string | null; status: string }
 
 function admin() {
   return createAdminClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
@@ -79,6 +80,60 @@ function trackedCalls(member: CallMember, knownExtensions: Set<string>, fallback
   return [...calls.values()]
 }
 
+function eventChannels(members: CallMember[]): EventChannel[] {
+  const channels = new Map<string, EventChannel>()
+  const add = (memberType: EventChannel['memberType'], party: CallParty | undefined, memberNumber: string | undefined) => {
+    if (!party?.channel_id || !party.member_status) return
+    channels.set(party.channel_id, {
+      channelId: party.channel_id,
+      memberType,
+      memberNumber: memberNumber ?? null,
+      fromNumber: party.from ?? null,
+      toNumber: party.to ?? null,
+      status: party.member_status,
+    })
+  }
+  for (const member of members) {
+    if (member.extension?.channel_id && member.extension.member_status) {
+      channels.set(member.extension.channel_id, {
+        channelId: member.extension.channel_id,
+        memberType: 'extension',
+        memberNumber: member.extension.number ?? null,
+        fromNumber: null,
+        toNumber: null,
+        status: member.extension.member_status,
+      })
+    }
+    add('inbound', member.inbound, member.inbound?.to)
+    add('outbound', member.outbound, member.outbound?.from)
+    add('internal', member.internal, member.internal?.to ?? member.internal?.from)
+  }
+  return [...channels.values()]
+}
+
+async function persistEventChannels(db: ReturnType<typeof admin>, accountId: string, callId: string, members: CallMember[]) {
+  for (const channel of eventChannels(members)) {
+    if (channel.status === 'BYE') {
+      const { error } = await db.from('yeastar_live_call_channels').delete()
+        .eq('account_id', accountId).eq('call_id', callId).eq('channel_id', channel.channelId)
+      if (error) throw error
+      continue
+    }
+    const { error } = await db.from('yeastar_live_call_channels').upsert({
+      account_id: accountId,
+      call_id: callId,
+      channel_id: channel.channelId,
+      member_type: channel.memberType,
+      member_number: channel.memberNumber,
+      from_number: channel.fromNumber,
+      to_number: channel.toNumber,
+      status: channel.status,
+      last_event_at: new Date().toISOString(),
+    }, { onConflict: 'account_id,call_id,channel_id' })
+    if (error) throw error
+  }
+}
+
 export async function POST(request: Request, context: { params: Promise<{ accountId: string }> }) {
   const { accountId } = await context.params
   const rawBody = await request.text()
@@ -112,6 +167,14 @@ export async function POST(request: Request, context: { params: Promise<{ accoun
     const payload = JSON.parse(rawBody) as { type?: unknown; event?: unknown }
     await receipt(db, accountId, 'ignored', 'Evento válido recibido, pero no es 30011 Call State Changed.', payload.type == null ? (payload.event == null ? null : String(payload.event)) : String(payload.type))
     return NextResponse.json({ received: true })
+  }
+
+  try {
+    await persistEventChannels(db, accountId, event.callId, event.members)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Error desconocido'
+    await receipt(db, accountId, 'invalid', `No se pudieron guardar los canales activos: ${message}`, event.eventType, event.callId)
+    return NextResponse.json({ error: 'Could not persist channels' }, { status: 500 })
   }
 
   const { data: configuredExtensions, error: extensionError } = await db.from('telephony_user_configs')
