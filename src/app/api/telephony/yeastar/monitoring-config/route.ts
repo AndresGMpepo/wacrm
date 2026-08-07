@@ -15,16 +15,22 @@ function webhookUrl(accountId: string) {
 export async function GET() {
   try {
     const { accountId } = await requireRole('admin')
-    const { data, error } = await admin().from('yeastar_monitoring_configs')
+    const db = admin()
+    const { data, error } = await db.from('yeastar_monitoring_configs')
       .select('api_client_id, api_client_secret, webhook_secret')
       .eq('account_id', accountId).maybeSingle()
     if (error) throw error
+    const { data: receipts, error: receiptError } = await db.from('yeastar_webhook_event_receipts')
+      .select('event_type, call_id, outcome, detail, received_at').eq('account_id', accountId)
+      .order('received_at', { ascending: false }).limit(5)
+    if (receiptError) throw receiptError
     return NextResponse.json({
       webhookUrl: webhookUrl(accountId),
       config: {
         webhookConfigured: Boolean(data?.webhook_secret),
         apiConfigured: Boolean(data?.api_client_id && data?.api_client_secret),
       },
+      receipts: receipts ?? [],
     })
   } catch (error) {
     return toErrorResponse(error)
