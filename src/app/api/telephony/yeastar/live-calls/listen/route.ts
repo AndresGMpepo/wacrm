@@ -85,12 +85,25 @@ export async function POST(request: Request) {
     })
     const query = await parseReply(queryResponse) as YeastarCallQueryReply
     if (!queryResponse.ok || query.errcode !== 0) throw new Error(query.errmsg || 'Yeastar no pudo consultar las llamadas activas.')
-    const channel = (query.data ?? []).flatMap((call) => (call.members ?? []).flatMap((member) => {
+    let channel: { callId: string; channelId: string } | undefined = (query.data ?? []).flatMap((call) => (call.members ?? []).flatMap((member) => {
       const extension = member.extension
       if (!extension?.channel_id || extension.number !== targetExtension || extension.member_status === 'BYE') return []
       return [{ callId: call.call_id ?? callId, channelId: extension.channel_id }]
     }))[0]
-    if (!channel) return NextResponse.json({ error: `La extensión ${targetExtension} no tiene una llamada activa en Yeastar. La fila se ocultará al sincronizarse.` }, { status: 409 })
+    // Some Cloud PBX call/query responses omit the extension member while the
+    // state webhook has already provided its channel. Use only a very recent
+    // non-BYE webhook channel as a compatibility fallback.
+    if (!channel) {
+      const since = new Date(Date.now() - 45_000).toISOString()
+      const { data: channels, error: channelsError } = await db.from('yeastar_live_call_channels')
+        .select('call_id, channel_id, last_event_at')
+        .eq('account_id', accountId).eq('member_number', targetExtension).neq('status', 'BYE')
+        .gte('last_event_at', since).order('last_event_at', { ascending: false }).limit(1)
+      if (channelsError) throw channelsError
+      const fallback = channels?.[0]
+      if (fallback) channel = { callId: fallback.call_id, channelId: fallback.channel_id }
+    }
+    if (!channel) return NextResponse.json({ error: `Yeastar aún no entregó un canal activo para la extensión ${targetExtension}. Espera unos segundos y vuelve a intentar.` }, { status: 409 })
 
     const { data: audit, error: auditError } = await db.from('yeastar_call_supervision_audit').insert({
       account_id: accountId,
