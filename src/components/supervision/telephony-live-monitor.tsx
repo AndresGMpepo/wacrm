@@ -4,7 +4,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
-import { Headphones, Loader2, PhoneCall, Radio, RefreshCw } from 'lucide-react'
+import { Headphones, Loader2, Mic, PhoneCall, Radio, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 
@@ -23,7 +23,7 @@ type Call = {
 export function TelephonyLiveMonitor() {
   const [calls, setCalls] = useState<Call[] | null>(null)
   const [loading, setLoading] = useState(true)
-  const [listeningCall, setListeningCall] = useState<string | null>(null)
+  const [supervisionCall, setSupervisionCall] = useState<string | null>(null)
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true)
@@ -48,15 +48,18 @@ export function TelephonyLiveMonitor() {
     return () => window.clearInterval(timer)
   }, [load])
 
-  const listen = async (call: Call) => {
-    if (!window.confirm(`Escucharás la llamada de la extensión ${call.extension}. No podrás hablar con el agente ni con el cliente. ¿Continuar?`)) return
+  const supervise = async (call: Call, mode: 'listen' | 'whisper') => {
+    const prompt = mode === 'whisper'
+      ? `Hablarás solo con el agente de la extensión ${call.extension}; el cliente no te escuchará. ¿Iniciar susurro?`
+      : `Escucharás la llamada de la extensión ${call.extension}. No podrás hablar con el agente ni con el cliente. ¿Continuar?`
+    if (!window.confirm(prompt)) return
     const key = `${call.call_id}:${call.extension}`
-    setListeningCall(key)
+    setSupervisionCall(`${key}:${mode}`)
     try {
       const response = await fetch('/api/telephony/yeastar/live-calls/listen', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ callId: call.call_id, extension: call.extension }),
+        body: JSON.stringify({ callId: call.call_id, extension: call.extension, mode }),
       })
       const data = await response.json()
       if (!response.ok) throw new Error(data.error)
@@ -64,7 +67,7 @@ export function TelephonyLiveMonitor() {
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'No se pudo iniciar la escucha.')
     } finally {
-      setListeningCall(null)
+      setSupervisionCall(null)
     }
   }
 
@@ -79,7 +82,9 @@ export function TelephonyLiveMonitor() {
     {loading && calls === null ? <div className="flex h-28 items-center justify-center"><Loader2 className="size-5 animate-spin text-muted-foreground" /></div>
       : calls?.length ? <div className="mt-4 divide-y rounded-lg border border-border">{calls.map((call) => {
         const key = `${call.call_id}:${call.extension}`
-        const pending = listeningCall === key
+        const pendingListen = supervisionCall === `${key}:listen`
+        const pendingWhisper = supervisionCall === `${key}:whisper`
+        const pending = pendingListen || pendingWhisper
         const isMonitoring = call.peer_number === 'Monitor'
         // The server verifies the PBX channel immediately before monitoring.
         // A browser/webhook synchronization delay must not block the operator.
@@ -89,7 +94,10 @@ export function TelephonyLiveMonitor() {
           <PhoneCall className="size-4 text-primary" />
           <div className="min-w-36 flex-1"><p className="text-sm font-medium">{call.agent?.name ?? `Extensión ${call.extension}`} <span className="text-muted-foreground">· {call.extension}</span></p><p className="mt-0.5 text-xs text-muted-foreground">{call.direction === 'inbound' ? 'Entrante' : call.direction === 'outbound' ? 'Saliente' : 'Llamada'} {call.peer_number ? `· ${call.peer_number}` : ''}</p></div>
           <span className="rounded-full bg-emerald-500/12 px-2 py-1 text-xs font-medium text-emerald-600 dark:text-emerald-400">{call.status}</span>
-          <Button size="sm" variant="outline" title={isMonitoring ? 'Esta es tu llamada de monitoreo activa.' : 'Verificar y escuchar llamada'} disabled={pending || !canListen} onClick={() => void listen(call)}>{pending ? <Loader2 className="size-4 animate-spin" /> : <Headphones className="size-4" />}{isMonitoring ? 'Escuchando' : pending ? 'Verificando…' : 'Escuchar'}</Button>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="outline" title={isMonitoring ? 'Esta es tu llamada de monitoreo activa.' : 'Verificar y escuchar llamada'} disabled={pending || !canListen} onClick={() => void supervise(call, 'listen')}>{pendingListen ? <Loader2 className="size-4 animate-spin" /> : <Headphones className="size-4" />}{isMonitoring ? 'Escuchando' : pendingListen ? 'Verificando…' : 'Escuchar'}</Button>
+            <Button size="sm" variant="secondary" title="Hablar solo con el agente" disabled={pending || !canListen} onClick={() => void supervise(call, 'whisper')}>{pendingWhisper ? <Loader2 className="size-4 animate-spin" /> : <Mic className="size-4" />}{pendingWhisper ? 'Verificando…' : 'Susurrar'}</Button>
+          </div>
         </div>
       })}</div>
       : <div className="mt-4 rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">No hay llamadas activas. Configura el webhook de Yeastar en <Link className="text-primary hover:underline" href="/settings?tab=telephony">Telefonía</Link> y prueba el envío desde el PBX.</div>}

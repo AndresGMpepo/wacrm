@@ -65,9 +65,10 @@ export async function POST(request: Request) {
   let db: ReturnType<typeof admin> | null = null
   try {
     const { accountId, userId } = await requireRole('admin')
-    const body = await request.json().catch(() => null) as { callId?: unknown; extension?: unknown } | null
+    const body = await request.json().catch(() => null) as { callId?: unknown; extension?: unknown; mode?: unknown } | null
     const callId = typeof body?.callId === 'string' ? body.callId : ''
     const targetExtension = typeof body?.extension === 'string' ? body.extension : ''
+    const mode = body?.mode === 'whisper' ? 'whisper' : 'listen'
     if (!callId || !targetExtension) return NextResponse.json({ error: 'La llamada seleccionada no es válida.' }, { status: 400 })
 
     db = admin()
@@ -169,7 +170,7 @@ export async function POST(request: Request) {
       target_extension: targetExtension,
       call_id: channel.callId,
       channel_id: channel.channelId,
-      mode: 'listen',
+      mode,
       outcome: 'requested',
     }).select('id').single()
     if (auditError) throw auditError
@@ -180,13 +181,13 @@ export async function POST(request: Request) {
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'User-Agent': 'WACRM-Yeastar-Supervision/1.0' },
-      body: JSON.stringify({ monitor: supervisorExtension, channel_id: channel.channelId, type: 'listen' }),
+      body: JSON.stringify({ monitor: supervisorExtension, channel_id: channel.channelId, type: mode }),
       signal: AbortSignal.timeout(15_000),
     })
     const result = await parseReply(response)
     if (!response.ok || result.errcode !== 0) throw new Error(result.errmsg || 'Yeastar no pudo iniciar la escucha.')
     await db.from('yeastar_call_supervision_audit').update({ outcome: 'succeeded', error_message: null }).eq('id', auditId)
-    return NextResponse.json({ ok: true, message: 'Yeastar inició la escucha en tu extensión.' })
+    return NextResponse.json({ ok: true, message: mode === 'whisper' ? 'Yeastar inició el susurro en tu extensión.' : 'Yeastar inició la escucha en tu extensión.' })
   } catch (error) {
     if (auditId && db) await db.from('yeastar_call_supervision_audit').update({ outcome: 'failed', error_message: error instanceof Error ? error.message.slice(0, 500) : 'Error desconocido' }).eq('id', auditId)
     if (error instanceof Error && !['Unauthorized', 'Forbidden'].includes(error.message)) return NextResponse.json({ error: error.message }, { status: 502 })
