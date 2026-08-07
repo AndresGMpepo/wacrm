@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import { SettingsPanelHead } from './settings-panel-head';
 
 export function TelephonyConfig() {
@@ -22,6 +23,8 @@ export function TelephonyConfig() {
   const [extension, setExtension] = useState('');
   const [accessId, setAccessId] = useState('');
   const [accessKey, setAccessKey] = useState('');
+  const [followUpEnabled, setFollowUpEnabled] = useState(false);
+  const [noReplyMinutes, setNoReplyMinutes] = useState(120);
 
   const load = useCallback(async () => {
     try {
@@ -33,6 +36,9 @@ export function TelephonyConfig() {
         setPbxUrl(payload.config.pbx_url);
         setExtension(payload.config.extension ?? '');
       }
+      const policyResponse = await fetch('/api/telephony/follow-up-policy');
+      const policyPayload = await policyResponse.json();
+      if (policyResponse.ok) { setFollowUpEnabled(Boolean(policyPayload.policy?.enabled)); setNoReplyMinutes(policyPayload.policy?.no_reply_minutes ?? 120); }
     } catch {
       toast.error('No se pudo cargar la configuración de telefonía.');
     } finally {
@@ -63,6 +69,17 @@ export function TelephonyConfig() {
     }
   };
 
+  const saveFollowUpPolicy = async () => {
+    setSaving(true);
+    try {
+      const response = await fetch('/api/telephony/follow-up-policy', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: followUpEnabled, no_reply_minutes: noReplyMinutes }) });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error);
+      toast.success('Política de seguimiento guardada.');
+    } catch (error) { toast.error(error instanceof Error ? error.message : 'No se pudo guardar la política.'); }
+    finally { setSaving(false); }
+  };
+
   const led = telephony.connected ? 'bg-emerald-500' : telephony.connecting ? 'animate-pulse bg-amber-400' : 'bg-red-500';
   const firstIntegration = canManageIntegration && !integrationReady;
   const cannotSave = saving || loading || !extension.trim() || (firstIntegration && (!pbxUrl || !accessId || !accessKey));
@@ -91,6 +108,14 @@ export function TelephonyConfig() {
           <Button className="w-fit" onClick={() => void save()} disabled={cannotSave}>{saving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}{extension ? 'Guardar mi extensión' : 'Guardar extensión'}</Button>
         </CardContent>
       </Card>
+      {canManageIntegration ? <Card className="mt-6">
+        <CardHeader><CardTitle>Reintento por llamada</CardTitle><CardDescription>Crea una tarea para un agente cuando el último mensaje del chat fue del equipo y el cliente no respondió. Nunca marca automáticamente.</CardDescription></CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between gap-4 rounded-md border border-border p-3"><div><p className="text-sm font-medium">Crear tareas de llamada por falta de respuesta</p><p className="text-xs text-muted-foreground">La tarea queda pendiente hasta que un agente la complete o descarte.</p></div><Switch checked={followUpEnabled} onCheckedChange={setFollowUpEnabled} disabled={saving || loading} /></div>
+          <div className="max-w-sm space-y-2"><Label htmlFor="no-reply-minutes">Minutos sin respuesta</Label><Input id="no-reply-minutes" type="number" min={5} max={10080} value={noReplyMinutes} onChange={(event) => setNoReplyMinutes(Number(event.target.value) || 5)} disabled={saving || loading || !followUpEnabled} /><p className="text-xs text-muted-foreground">Por ejemplo, 120 equivale a dos horas. Solo se crea una tarea pendiente por conversación.</p></div>
+          <Button className="w-fit" onClick={() => void saveFollowUpPolicy()} disabled={saving || loading}>{saving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}Guardar política</Button>
+        </CardContent>
+      </Card> : null}
       {canManageIntegration ? <Card className="mt-6">
         <CardHeader>
           <CardTitle>Guía de integración: Yeastar Linkus SDK</CardTitle>
