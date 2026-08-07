@@ -21,7 +21,10 @@ export async function GET() {
     if (membersResult.error) throw membersResult.error
     const usersByExtension = new Map((extensionsResult.data ?? []).map((row) => [row.extension, row.user_id]))
     const memberById = new Map((membersResult.data ?? []).map((row) => [row.user_id, row]))
-    const calls = (callsResult.data ?? []).map((call) => {
+    // A customer number must never be rendered as an agent extension. The
+    // webhook handler persists only configured extensions; this filter also
+    // hides any legacy row written before that protection existed.
+    const calls = (callsResult.data ?? []).filter((call) => usersByExtension.has(call.extension)).map((call) => {
       const member = memberById.get(usersByExtension.get(call.extension) ?? '')
       return { ...call, agent: member ? { name: member.full_name, avatarUrl: member.avatar_url } : null }
     })

@@ -7,10 +7,13 @@ export const dynamic = 'force-dynamic'
 
 type CallMember = {
   extension?: { number?: string; channel_id?: string; member_status?: string; call_path?: string }
-  inbound?: { from?: string; to?: string; member_status?: string }
-  outbound?: { from?: string; to?: string; member_status?: string }
-  internal?: { from?: string; to?: string; member_status?: string }
+  inbound?: CallParty
+  outbound?: CallParty
+  internal?: CallParty
 }
+
+type CallParty = { from?: string; to?: string; channel_id?: string; member_status?: string; call_path?: string }
+type TrackedCall = { extension: string; channelId: string; status: string; callPath: string | null; peerNumber: string | null; direction: 'inbound' | 'outbound' | 'internal' | 'unknown' }
 
 function admin() {
   return createAdminClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
@@ -45,19 +48,35 @@ async function receipt(db: ReturnType<typeof admin>, accountId: string, outcome:
   await db.from('yeastar_webhook_event_receipts').insert({ account_id: accountId, outcome, detail: detail.slice(0, 500), event_type: eventType ?? null, call_id: callId ?? null })
 }
 
-function callPeer(members: CallMember[]) {
+function callPeer(members: CallMember[], extensions: Set<string>) {
   for (const member of members) {
-    if (member.inbound) return { peerNumber: member.inbound.from ?? member.inbound.to ?? null, direction: 'inbound' as const }
-    if (member.outbound) return { peerNumber: member.outbound.to ?? member.outbound.from ?? null, direction: 'outbound' as const }
-    if (member.internal) return { peerNumber: member.internal.to ?? member.internal.from ?? null, direction: 'internal' as const }
+    for (const party of [member.inbound, member.outbound, member.internal]) {
+      if (!party) continue
+      for (const number of [party.from, party.to]) if (number && !extensions.has(number)) return number
+    }
   }
-  return { peerNumber: null, direction: 'unknown' as const }
+  return null
 }
 
-function details(member: CallMember, peer: ReturnType<typeof callPeer>) {
+function trackedCalls(member: CallMember, knownExtensions: Set<string>, fallbackPeer: string | null): TrackedCall[] {
+  const calls = new Map<string, TrackedCall>()
+  const add = (extension: string | undefined, channelId: string | undefined, status: string | undefined, callPath: string | undefined, peerNumber: string | undefined, direction: TrackedCall['direction']) => {
+    if (!extension || !channelId || !status || !knownExtensions.has(extension)) return
+    calls.set(extension, { extension, channelId, status, callPath: callPath ?? null, peerNumber: peerNumber ?? fallbackPeer, direction })
+  }
+
   const extension = member.extension
-  if (!extension?.number || !extension.channel_id || !extension.member_status) return null
-  return { extension, ...peer }
+  add(extension?.number, extension?.channel_id, extension?.member_status, extension?.call_path, undefined, 'unknown')
+  // A Yeastar inbound/outbound member can be the only member reported in a
+  // notification. Resolve the WACRM agent from the extension side of that leg
+  // rather than treating the customer's number as an extension.
+  add(member.inbound?.to, member.inbound?.channel_id, member.inbound?.member_status, member.inbound?.call_path, member.inbound?.from, 'inbound')
+  add(member.inbound?.from, member.inbound?.channel_id, member.inbound?.member_status, member.inbound?.call_path, member.inbound?.to, 'inbound')
+  add(member.outbound?.from, member.outbound?.channel_id, member.outbound?.member_status, member.outbound?.call_path, member.outbound?.to, 'outbound')
+  add(member.outbound?.to, member.outbound?.channel_id, member.outbound?.member_status, member.outbound?.call_path, member.outbound?.from, 'outbound')
+  add(member.internal?.from, member.internal?.channel_id, member.internal?.member_status, member.internal?.call_path, member.internal?.to, 'internal')
+  add(member.internal?.to, member.internal?.channel_id, member.internal?.member_status, member.internal?.call_path, member.internal?.from, 'internal')
+  return [...calls.values()]
 }
 
 export async function POST(request: Request, context: { params: Promise<{ accountId: string }> }) {
@@ -95,36 +114,45 @@ export async function POST(request: Request, context: { params: Promise<{ accoun
     return NextResponse.json({ received: true })
   }
 
-  const peer = callPeer(event.members)
+  const { data: configuredExtensions, error: extensionError } = await db.from('telephony_user_configs')
+    .select('extension').eq('account_id', accountId).eq('provider', 'yeastar')
+  if (extensionError) {
+    await receipt(db, accountId, 'invalid', `No se pudieron consultar las extensiones WACRM: ${extensionError.message}`, event.eventType, event.callId)
+    return NextResponse.json({ error: 'Could not load extensions' }, { status: 500 })
+  }
+  const knownExtensions = new Set((configuredExtensions ?? []).map((row) => row.extension))
+  const peer = callPeer(event.members, knownExtensions)
   const transitions: string[] = []
   for (const member of event.members) {
-    const call = details(member, peer)
-    if (!call) {
-      transitions.push('Miembro sin extensión, canal o estado; no se muestra.')
+    const calls = trackedCalls(member, knownExtensions, peer)
+    if (!calls.length) {
+      transitions.push('Miembro sin una extensión configurada en WACRM; no se muestra.')
       continue
     }
-    if (call.extension.member_status === 'BYE') {
-      await db.from('yeastar_live_calls').delete()
-        .eq('account_id', accountId).eq('call_id', event.callId).eq('extension', call.extension.number)
-      transitions.push(`Extensión ${call.extension.number}: BYE, eliminada por finalización.`)
-      continue
+    for (const call of calls) {
+      if (call.status === 'BYE') {
+        await db.from('yeastar_live_calls').delete()
+          .eq('account_id', accountId).eq('call_id', event.callId).eq('extension', call.extension)
+        transitions.push(`Extensión ${call.extension}: BYE, eliminada por finalización.`)
+        continue
+      }
+      const { error } = await db.from('yeastar_live_calls').upsert({
+        account_id: accountId,
+        call_id: event.callId,
+        extension: call.extension,
+        channel_id: call.channelId,
+        peer_number: call.peerNumber,
+        direction: call.direction,
+        status: call.status,
+        call_path: call.callPath,
+        last_event_at: new Date().toISOString(),
+      }, { onConflict: 'account_id,call_id,extension' })
+      if (error) {
+        await receipt(db, accountId, 'invalid', `No se pudo guardar el estado de llamada: ${error.message}`, event.eventType, event.callId)
+        return NextResponse.json({ error: 'Could not persist event' }, { status: 500 })
+      }
+      transitions.push(`Extensión ${call.extension}: ${call.status}, visible en Supervisión.`)
     }
-    const { error } = await db.from('yeastar_live_calls').upsert({
-      account_id: accountId,
-      call_id: event.callId,
-      extension: call.extension.number,
-      channel_id: call.extension.channel_id,
-      peer_number: call.peerNumber,
-      direction: call.direction,
-      status: call.extension.member_status,
-      call_path: call.extension.call_path ?? null,
-      last_event_at: new Date().toISOString(),
-    }, { onConflict: 'account_id,call_id,extension' })
-    if (error) {
-      await receipt(db, accountId, 'invalid', `No se pudo guardar el estado de llamada: ${error.message}`, event.eventType, event.callId)
-      return NextResponse.json({ error: 'Could not persist event' }, { status: 500 })
-    }
-    transitions.push(`Extensión ${call.extension.number}: ${call.extension.member_status}, visible en Supervisión.`)
   }
   await receipt(db, accountId, 'processed', transitions.join(' ') || `Evento 30011 procesado con ${event.members.length} miembro(s), sin una extensión supervisable.`, event.eventType, event.callId)
   return NextResponse.json({ received: true })
