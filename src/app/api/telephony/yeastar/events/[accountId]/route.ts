@@ -96,12 +96,17 @@ export async function POST(request: Request, context: { params: Promise<{ accoun
   }
 
   const peer = callPeer(event.members)
+  const transitions: string[] = []
   for (const member of event.members) {
     const call = details(member, peer)
-    if (!call) continue
+    if (!call) {
+      transitions.push('Miembro sin extensión, canal o estado; no se muestra.')
+      continue
+    }
     if (call.extension.member_status === 'BYE') {
       await db.from('yeastar_live_calls').delete()
         .eq('account_id', accountId).eq('call_id', event.callId).eq('extension', call.extension.number)
+      transitions.push(`Extensión ${call.extension.number}: BYE, eliminada por finalización.`)
       continue
     }
     const { error } = await db.from('yeastar_live_calls').upsert({
@@ -119,7 +124,8 @@ export async function POST(request: Request, context: { params: Promise<{ accoun
       await receipt(db, accountId, 'invalid', `No se pudo guardar el estado de llamada: ${error.message}`, event.eventType, event.callId)
       return NextResponse.json({ error: 'Could not persist event' }, { status: 500 })
     }
+    transitions.push(`Extensión ${call.extension.number}: ${call.extension.member_status}, visible en Supervisión.`)
   }
-  await receipt(db, accountId, 'processed', `Evento 30011 procesado con ${event.members.length} miembro(s).`, event.eventType, event.callId)
+  await receipt(db, accountId, 'processed', transitions.join(' ') || `Evento 30011 procesado con ${event.members.length} miembro(s), sin una extensión supervisable.`, event.eventType, event.callId)
   return NextResponse.json({ received: true })
 }
