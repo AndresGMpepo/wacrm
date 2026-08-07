@@ -81,13 +81,15 @@ export function TelephonyLiveMonitor() {
         const key = `${call.call_id}:${call.extension}`
         const pending = listeningCall === key
         const isMonitoring = call.peer_number === 'Monitor'
-        const canListen = call.listenReady && !isMonitoring
+        // The server verifies the PBX channel immediately before monitoring.
+        // A browser/webhook synchronization delay must not block the operator.
+        const canListen = !isMonitoring
         return <div key={key} className="flex flex-wrap items-center gap-3 p-3">
           <span className="relative flex size-2"><span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-500 opacity-70" /><span className="relative inline-flex size-2 rounded-full bg-emerald-500" /></span>
           <PhoneCall className="size-4 text-primary" />
           <div className="min-w-36 flex-1"><p className="text-sm font-medium">{call.agent?.name ?? `Extensión ${call.extension}`} <span className="text-muted-foreground">· {call.extension}</span></p><p className="mt-0.5 text-xs text-muted-foreground">{call.direction === 'inbound' ? 'Entrante' : call.direction === 'outbound' ? 'Saliente' : 'Llamada'} {call.peer_number ? `· ${call.peer_number}` : ''}</p></div>
           <span className="rounded-full bg-emerald-500/12 px-2 py-1 text-xs font-medium text-emerald-600 dark:text-emerald-400">{call.status}</span>
-          <Button size="sm" variant="outline" title={!call.listenReady ? 'Esperando el canal de Yeastar…' : isMonitoring ? 'Esta es tu llamada de monitoreo activa.' : 'Escuchar llamada'} disabled={pending || !canListen} onClick={() => void listen(call)}>{pending ? <Loader2 className="size-4 animate-spin" /> : <Headphones className="size-4" />}{isMonitoring ? 'Escuchando' : !call.listenReady ? 'Sincronizando…' : 'Escuchar'}</Button>
+          <Button size="sm" variant="outline" title={isMonitoring ? 'Esta es tu llamada de monitoreo activa.' : 'Verificar y escuchar llamada'} disabled={pending || !canListen} onClick={() => void listen(call)}>{pending ? <Loader2 className="size-4 animate-spin" /> : <Headphones className="size-4" />}{isMonitoring ? 'Escuchando' : pending ? 'Verificando…' : 'Escuchar'}</Button>
         </div>
       })}</div>
       : <div className="mt-4 rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">No hay llamadas activas. Configura el webhook de Yeastar en <Link className="text-primary hover:underline" href="/settings?tab=telephony">Telefonía</Link> y prueba el envío desde el PBX.</div>}

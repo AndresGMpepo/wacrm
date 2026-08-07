@@ -470,9 +470,14 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
     if (!session) return;
     const callStatus = active ? (session.status?.communicationType === 'inbound' ? 'ANSWER' : 'ANSWERED') : 'RING';
     reportLiveCall(session, callStatus);
+    // Linkus can retain a finished session in browser memory. Only renew the
+    // direct softphone row while WebRTC still exposes live media tracks.
+    // Without a renewal, the API TTL removes a stale row automatically.
+    const hasLiveMedia = [localStream, remoteStream].some((stream) => stream?.active && stream.getTracks().some((track) => track.readyState === 'live'));
+    if (!hasLiveMedia) return;
     const timer = window.setInterval(() => reportLiveCall(session, callStatus), 15_000);
     return () => window.clearInterval(timer);
-  }, [active, incoming, reportLiveCall]);
+  }, [active, incoming, localStream, remoteStream, reportLiveCall]);
 
   const value: State = {
     configured,

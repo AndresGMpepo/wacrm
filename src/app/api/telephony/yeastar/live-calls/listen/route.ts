@@ -6,6 +6,12 @@ import { requireRole, toErrorResponse } from '@/lib/auth/account'
 export const dynamic = 'force-dynamic'
 
 type YeastarReply = { errcode?: number; errmsg?: string; access_token?: string; access_token_expire_time?: number }
+type YeastarCallQueryReply = YeastarReply & {
+  data?: Array<{
+    call_id?: string
+    members?: Array<{ extension?: { number?: string; channel_id?: string; member_status?: string } }>
+  }>
+}
 type CachedToken = { value: string; expiresAt: number }
 const tokenCache = new Map<string, CachedToken>()
 
@@ -67,36 +73,44 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Falta configurar Client ID y Client Secret de OpenAPI en Telefonía.' }, { status: 409 })
     }
 
-    const rawCallId = callId.replace(/^wacrm:/, '')
-    const { data: channels, error: channelsError } = await db.from('yeastar_live_call_channels')
-      .select('channel_id, member_type, member_number, from_number, to_number, status')
-      .eq('account_id', accountId).eq('call_id', rawCallId).order('last_event_at', { ascending: false })
-    if (channelsError) throw channelsError
-    const channel = (channels ?? []).find((item) => item.member_number === targetExtension)
-      ?? (channels ?? []).find((item) => item.from_number === targetExtension || item.to_number === targetExtension)
-      ?? (channels ?? []).find((item) => item.member_type === 'extension')
-    if (!channel) return NextResponse.json({ error: 'Yeastar aún no entregó un canal PBX para esta llamada. Espera unos segundos y vuelve a intentar.' }, { status: 409 })
+    const token = await accessToken(accountId, integrationResult.data.pbx_url, decrypt(monitoringResult.data.api_client_id), decrypt(monitoringResult.data.api_client_secret))
+    // A browser session ID is not a PBX channel ID. Resolve the exact active
+    // extension channel at the moment the supervisor starts monitoring.
+    const queryUrl = apiUrl(integrationResult.data.pbx_url, 'call/query')
+    queryUrl.searchParams.set('access_token', token)
+    queryUrl.searchParams.set('extension', targetExtension)
+    const queryResponse = await fetch(queryUrl, {
+      headers: { 'User-Agent': 'WACRM-Yeastar-Supervision/1.0' },
+      signal: AbortSignal.timeout(15_000),
+    })
+    const query = await parseReply(queryResponse) as YeastarCallQueryReply
+    if (!queryResponse.ok || query.errcode !== 0) throw new Error(query.errmsg || 'Yeastar no pudo consultar las llamadas activas.')
+    const channel = (query.data ?? []).flatMap((call) => (call.members ?? []).flatMap((member) => {
+      const extension = member.extension
+      if (!extension?.channel_id || extension.number !== targetExtension || extension.member_status === 'BYE') return []
+      return [{ callId: call.call_id ?? callId, channelId: extension.channel_id }]
+    }))[0]
+    if (!channel) return NextResponse.json({ error: `La extensión ${targetExtension} no tiene una llamada activa en Yeastar. La fila se ocultará al sincronizarse.` }, { status: 409 })
 
     const { data: audit, error: auditError } = await db.from('yeastar_call_supervision_audit').insert({
       account_id: accountId,
       supervisor_user_id: userId,
       supervisor_extension: supervisorExtension,
       target_extension: targetExtension,
-      call_id: callId,
-      channel_id: channel.channel_id,
+      call_id: channel.callId,
+      channel_id: channel.channelId,
       mode: 'listen',
       outcome: 'requested',
     }).select('id').single()
     if (auditError) throw auditError
     auditId = audit.id
 
-    const token = await accessToken(accountId, integrationResult.data.pbx_url, decrypt(monitoringResult.data.api_client_id), decrypt(monitoringResult.data.api_client_secret))
     const url = apiUrl(integrationResult.data.pbx_url, 'call/listen')
     url.searchParams.set('access_token', token)
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'User-Agent': 'WACRM-Yeastar-Supervision/1.0' },
-      body: JSON.stringify({ monitor: supervisorExtension, channel_id: channel.channel_id, type: 'listen' }),
+      body: JSON.stringify({ monitor: supervisorExtension, channel_id: channel.channelId, type: 'listen' }),
       signal: AbortSignal.timeout(15_000),
     })
     const result = await parseReply(response)
