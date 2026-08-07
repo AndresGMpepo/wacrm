@@ -23,7 +23,7 @@ async function notesWithAuthors(
 ) {
   const { data: notes, error } = await supabase
     .from('conversation_internal_notes')
-    .select('id, author_user_id, body, created_at')
+    .select('id, author_user_id, body, kind, created_at')
     .eq('account_id', accountId)
     .eq('conversation_id', conversationId)
     .order('created_at', { ascending: false })
@@ -57,6 +57,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
     const { conversationId } = await params
     const payload = await request.json().catch(() => null)
     const body = typeof payload?.body === 'string' ? payload.body.trim() : ''
+    const kind = payload?.kind === 'call_started' ? 'call_started' : 'note'
     if (!body || body.length > 2000) {
       return NextResponse.json({ error: 'La nota debe contener entre 1 y 2000 caracteres.' }, { status: 400 })
     }
@@ -68,6 +69,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
       conversation_id: conversationId,
       author_user_id: userId,
       body,
+      kind,
     })
     if (error) throw error
     return NextResponse.json({ success: true }, { status: 201 })

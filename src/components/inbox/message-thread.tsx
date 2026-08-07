@@ -27,6 +27,7 @@ import {
   RefreshCw,
   PanelRightOpen,
   PanelRightClose,
+  PhoneCall,
 } from "lucide-react";
 import { format, isToday, isYesterday, differenceInHours } from "date-fns";
 import { useTranslations } from "next-intl";
@@ -51,6 +52,7 @@ import { TemplatePicker } from "./template-picker";
 import { AiThreadBanner } from "./ai-thread-banner";
 import { ConversationIntelligence } from "./conversation-intelligence";
 import { ConversationInternalNotes } from "./conversation-internal-notes";
+import { useTelephony } from "@/components/telephony/telephony-provider";
 import { buildReplyPreview } from "./reply-quote";
 import { toast } from "sonner";
 
@@ -170,6 +172,7 @@ export function MessageThread({
   contactPanelOpen,
   onToggleContactPanel,
 }: MessageThreadProps) {
+  const telephony = useTelephony();
   const t = useTranslations("Inbox.messageThread");
   const tTimer = useTranslations("Inbox.sessionTimer");
   const tQuote = useTranslations("Inbox.replyQuote");
@@ -870,6 +873,25 @@ export function MessageThread({
     ? (currentAssignee?.full_name ?? t("assigned"))
     : t("assign");
 
+  const handleConversationCall = async () => {
+    if (!telephony.connected) {
+      toast.error('El softphone no está conectado. Revisa Telefonía en Configuración.');
+      return;
+    }
+    try {
+      await telephony.call(contact.phone);
+      // Best-effort activity record. A call must never fail just because
+      // its internal timeline write temporarily cannot be completed.
+      void fetch(`/api/conversations/${conversation.id}/internal-notes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind: 'call_started', body: `Llamada iniciada al ${contact.phone} desde el softphone.` }),
+      });
+    } catch {
+      toast.error('No se pudo iniciar la llamada desde el softphone.');
+    }
+  };
+
   return (
     // `min-w-0` is load-bearing: the page already puts min-w-0 on the
     // thread's flex *wrapper* (issue #165), but this root keeps the
@@ -918,6 +940,16 @@ export function MessageThread({
         </div>
 
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void handleConversationCall()}
+            disabled={!telephony.connected}
+            aria-label="Llamar a este contacto"
+            title={telephony.connected ? 'Llamar desde este chat' : 'Softphone desconectado'}
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-primary transition-colors hover:bg-primary/10 disabled:cursor-not-allowed disabled:text-muted-foreground"
+          >
+            <PhoneCall className="h-4 w-4" />
+          </button>
           {/* Contact-panel toggle — desktop only. The contact sidebar
               eats a chunk of horizontal width that crowds the thread on
               smaller laptops; this lets agents reclaim it when they just
