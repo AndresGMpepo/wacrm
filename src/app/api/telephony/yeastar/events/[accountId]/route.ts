@@ -6,13 +6,13 @@ import { decrypt } from '@/lib/whatsapp/encryption'
 export const dynamic = 'force-dynamic'
 
 type CallMember = {
-  extension?: { number?: string; channel_id?: string; member_status?: string; call_path?: string }
+  extension?: { number?: unknown; channel_id?: string; member_status?: string; call_path?: string }
   inbound?: CallParty
   outbound?: CallParty
   internal?: CallParty
 }
 
-type CallParty = { from?: string; to?: string; channel_id?: string; member_status?: string; call_path?: string }
+type CallParty = { from?: unknown; to?: unknown; channel_id?: string; member_status?: string; call_path?: string }
 type TrackedCall = { extension: string; channelId: string; status: string; callPath: string | null; peerNumber: string | null; direction: 'inbound' | 'outbound' | 'internal' | 'unknown' }
 type EventChannel = { channelId: string; memberType: 'extension' | 'inbound' | 'outbound' | 'internal'; memberNumber: string | null; fromNumber: string | null; toNumber: string | null; status: string }
 
@@ -53,17 +53,34 @@ function callPeer(members: CallMember[], extensions: Set<string>) {
   for (const member of members) {
     for (const party of [member.inbound, member.outbound, member.internal]) {
       if (!party) continue
-      for (const number of [party.from, party.to]) if (number && !extensions.has(number)) return number
+      for (const number of [party.from, party.to]) {
+        const value = phoneValue(number)
+        if (value && !resolveExtension(value, extensions)) return value
+      }
     }
   }
   return null
 }
 
+function phoneValue(value: unknown) {
+  return value == null ? undefined : String(value).trim() || undefined
+}
+
+function resolveExtension(value: unknown, knownExtensions: Set<string>) {
+  const number = phoneValue(value)
+  if (!number) return undefined
+  if (knownExtensions.has(number)) return number
+  // Yeastar variants can report a member as PJSIP/1008, 1008@domain, or a
+  // numeric JSON value. Match only an exact configured extension token.
+  return [...knownExtensions].find((extension) => new RegExp(`(^|[^0-9])${extension}(?![0-9])`).test(number))
+}
+
 function trackedCalls(member: CallMember, knownExtensions: Set<string>, fallbackPeer: string | null): TrackedCall[] {
   const calls = new Map<string, TrackedCall>()
-  const add = (extension: string | undefined, channelId: string | undefined, status: string | undefined, callPath: string | undefined, peerNumber: string | undefined, direction: TrackedCall['direction']) => {
-    if (!extension || !channelId || !status || !knownExtensions.has(extension)) return
-    calls.set(extension, { extension, channelId, status, callPath: callPath ?? null, peerNumber: peerNumber ?? fallbackPeer, direction })
+  const add = (extension: unknown, channelId: string | undefined, status: string | undefined, callPath: string | undefined, peerNumber: unknown, direction: TrackedCall['direction']) => {
+    const configuredExtension = resolveExtension(extension, knownExtensions)
+    if (!configuredExtension || !channelId || !status) return
+    calls.set(configuredExtension, { extension: configuredExtension, channelId, status, callPath: callPath ?? null, peerNumber: phoneValue(peerNumber) ?? fallbackPeer, direction })
   }
 
   const extension = member.extension
@@ -82,14 +99,14 @@ function trackedCalls(member: CallMember, knownExtensions: Set<string>, fallback
 
 function eventChannels(members: CallMember[]): EventChannel[] {
   const channels = new Map<string, EventChannel>()
-  const add = (memberType: EventChannel['memberType'], party: CallParty | undefined, memberNumber: string | undefined) => {
+  const add = (memberType: EventChannel['memberType'], party: CallParty | undefined, memberNumber: unknown) => {
     if (!party?.channel_id || !party.member_status) return
     channels.set(party.channel_id, {
       channelId: party.channel_id,
       memberType,
-      memberNumber: memberNumber ?? null,
-      fromNumber: party.from ?? null,
-      toNumber: party.to ?? null,
+      memberNumber: phoneValue(memberNumber) ?? null,
+      fromNumber: phoneValue(party.from) ?? null,
+      toNumber: phoneValue(party.to) ?? null,
       status: party.member_status,
     })
   }
@@ -98,7 +115,7 @@ function eventChannels(members: CallMember[]): EventChannel[] {
       channels.set(member.extension.channel_id, {
         channelId: member.extension.channel_id,
         memberType: 'extension',
-        memberNumber: member.extension.number ?? null,
+        memberNumber: phoneValue(member.extension.number) ?? null,
         fromNumber: null,
         toNumber: null,
         status: member.extension.member_status,

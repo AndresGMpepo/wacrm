@@ -9,7 +9,12 @@ type YeastarReply = { errcode?: number; errmsg?: string; access_token?: string; 
 type YeastarCallQueryReply = YeastarReply & {
   data?: Array<{
     call_id?: string
-    members?: Array<{ extension?: { number?: string; channel_id?: string; member_status?: string } }>
+    members?: Array<{
+      extension?: { number?: unknown; channel_id?: string; member_status?: string }
+      inbound?: { from?: unknown; to?: unknown; channel_id?: string; member_status?: string }
+      outbound?: { from?: unknown; to?: unknown; channel_id?: string; member_status?: string }
+      internal?: { from?: unknown; to?: unknown; channel_id?: string; member_status?: string }
+    }>
   }>
 }
 type CachedToken = { value: string; expiresAt: number }
@@ -41,6 +46,11 @@ async function accessToken(accountId: string, pbxUrl: string, clientId: string, 
   const ttl = Math.max(60, (data.access_token_expire_time ?? 1800) - 60)
   tokenCache.set(accountId, { value: data.access_token, expiresAt: Date.now() + ttl * 1000 })
   return data.access_token
+}
+
+function isExtension(value: unknown, extension: string) {
+  const number = value == null ? '' : String(value).trim()
+  return number === extension || new RegExp(`(^|[^0-9])${extension}(?![0-9])`).test(number)
 }
 
 export async function POST(request: Request) {
@@ -85,11 +95,23 @@ export async function POST(request: Request) {
     })
     const query = await parseReply(queryResponse) as YeastarCallQueryReply
     if (!queryResponse.ok || query.errcode !== 0) throw new Error(query.errmsg || 'Yeastar no pudo consultar las llamadas activas.')
-    let channel: { callId: string; channelId: string } | undefined = (query.data ?? []).flatMap((call) => (call.members ?? []).flatMap((member) => {
-      const extension = member.extension
-      if (!extension?.channel_id || extension.number !== targetExtension || extension.member_status === 'BYE') return []
-      return [{ callId: call.call_id ?? callId, channelId: extension.channel_id }]
-    }))[0]
+    let channel: { callId: string; channelId: string } | undefined
+    for (const liveCall of query.data ?? []) {
+      for (const member of liveCall.members ?? []) {
+        const parties = [
+          member.extension && { number: member.extension.number, channelId: member.extension.channel_id, status: member.extension.member_status },
+          member.inbound && { number: member.inbound.from, other: member.inbound.to, channelId: member.inbound.channel_id, status: member.inbound.member_status },
+          member.outbound && { number: member.outbound.from, other: member.outbound.to, channelId: member.outbound.channel_id, status: member.outbound.member_status },
+          member.internal && { number: member.internal.from, other: member.internal.to, channelId: member.internal.channel_id, status: member.internal.member_status },
+        ]
+        const match = parties.find((party) => party?.channelId && party.status !== 'BYE' && (isExtension(party.number, targetExtension) || isExtension(party.other, targetExtension)))
+        if (match?.channelId) {
+          channel = { callId: liveCall.call_id ?? callId, channelId: match.channelId }
+          break
+        }
+      }
+      if (channel) break
+    }
     // Linkus callId normally matches the PBX event call_id. Cloud call/query
     // can omit the extension member, and some webhook payloads omit
     // member_number, so recover the channel using that exact call association.
