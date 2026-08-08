@@ -4,7 +4,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
-import { Headphones, Loader2, MessageCircleWarning, Mic, PhoneCall, Radio, RefreshCw } from 'lucide-react'
+import { CheckCircle2, Headphones, History, Loader2, MessageCircleWarning, Mic, PhoneCall, Radio, RefreshCw, XCircle } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 
@@ -20,10 +20,25 @@ type Call = {
   agent: { name: string | null; avatarUrl: string | null } | null
 }
 
+type AuditEntry = {
+  id: string
+  supervisor: string
+  supervisor_extension: string
+  target_extension: string
+  mode: 'listen' | 'whisper' | 'barge'
+  outcome: 'requested' | 'succeeded' | 'failed'
+  error_message: string | null
+  created_at: string
+}
+
+const modeLabel: Record<AuditEntry['mode'], string> = { listen: 'Escuchó', whisper: 'Susurró', barge: 'Intervino' }
+
 export function TelephonyLiveMonitor() {
   const [calls, setCalls] = useState<Call[] | null>(null)
   const [loading, setLoading] = useState(true)
   const [supervisionCall, setSupervisionCall] = useState<string | null>(null)
+  const [history, setHistory] = useState<AuditEntry[] | null>(null)
+  const [historyLoading, setHistoryLoading] = useState(false)
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true)
@@ -39,10 +54,28 @@ export function TelephonyLiveMonitor() {
     }
   }, [])
 
+  const loadHistory = useCallback(async (silent = false) => {
+    if (!silent) setHistoryLoading(true)
+    try {
+      const response = await fetch('/api/telephony/yeastar/supervision-audit', { cache: 'no-store' })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error)
+      setHistory(data.entries ?? [])
+    } catch (error) {
+      if (!silent) toast.error(error instanceof Error ? error.message : 'No se pudo cargar el historial de supervisión.')
+    } finally {
+      if (!silent) setHistoryLoading(false)
+    }
+  }, [])
+
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 0)
     return () => window.clearTimeout(timer)
   }, [load])
+  useEffect(() => {
+    const timer = window.setTimeout(() => void loadHistory(), 0)
+    return () => window.clearTimeout(timer)
+  }, [loadHistory])
   useEffect(() => {
     const timer = window.setInterval(() => void load(true), 5_000)
     return () => window.clearInterval(timer)
@@ -67,6 +100,7 @@ export function TelephonyLiveMonitor() {
       if (!response.ok) throw new Error(data.error)
       const label = mode === 'barge' ? 'Solicitud de intervención enviada' : mode === 'whisper' ? 'Solicitud de susurro enviada' : 'Solicitud de escucha enviada'
       toast.success(label, { description: 'Yeastar llamará a tu extensión como “Monitor”. Abre el softphone y contesta esa llamada.' })
+      void loadHistory(true)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'No se pudo iniciar la escucha.')
     } finally {
@@ -74,7 +108,7 @@ export function TelephonyLiveMonitor() {
     }
   }
 
-  return <section className="rounded-xl border border-border bg-card p-5">
+  return <div className="space-y-5"><section className="rounded-xl border border-border bg-card p-5">
     <div className="flex items-start justify-between gap-3">
       <div>
         <h2 className="flex items-center gap-2 text-base font-semibold"><Radio className="size-4 text-emerald-500" />Llamadas Yeastar en vivo</h2>
@@ -107,4 +141,13 @@ export function TelephonyLiveMonitor() {
       })}</div>
       : <div className="mt-4 rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">No hay llamadas activas. Configura el webhook de Yeastar en <Link className="text-primary hover:underline" href="/settings?tab=telephony">Telefonía</Link> y prueba el envío desde el PBX.</div>}
   </section>
+  <section className="rounded-xl border border-border bg-card p-5">
+    <div className="flex items-start justify-between gap-3">
+      <div><h2 className="flex items-center gap-2 text-base font-semibold"><History className="size-4 text-primary" />Historial de supervisión</h2><p className="mt-1 text-sm text-muted-foreground">Últimas 30 acciones de escuchar, susurrar e intervenir.</p></div>
+      <Button size="icon" variant="ghost" title="Actualizar historial" disabled={historyLoading} onClick={() => void loadHistory()}><RefreshCw className={historyLoading ? 'size-4 animate-spin' : 'size-4'} /></Button>
+    </div>
+    {history === null ? <div className="flex h-20 items-center justify-center"><Loader2 className="size-5 animate-spin text-muted-foreground" /></div>
+      : history.length ? <div className="mt-4 divide-y rounded-lg border border-border">{history.map((entry) => <div key={entry.id} className="flex flex-wrap items-center gap-3 p-3 text-sm"><span>{entry.outcome === 'failed' ? <XCircle className="size-4 text-destructive" /> : <CheckCircle2 className="size-4 text-emerald-500" />}</span><p className="min-w-48 flex-1"><span className="font-medium">{entry.supervisor}</span> <span className="text-muted-foreground">({entry.supervisor_extension})</span> {modeLabel[entry.mode].toLowerCase()} la extensión <span className="font-medium">{entry.target_extension}</span>{entry.outcome === 'failed' ? <span className="block text-xs text-destructive">{entry.error_message ?? 'Yeastar rechazó la acción.'}</span> : null}</p><span className="text-xs text-muted-foreground">{new Date(entry.created_at).toLocaleString('es-MX')}</span></div>)}</div>
+        : <p className="mt-4 rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">Aún no hay acciones de supervisión registradas.</p>}
+  </section></div>
 }
