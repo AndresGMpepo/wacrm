@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { AlertTriangle, Loader2, PhoneCall, RefreshCw, UsersRound } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -16,11 +17,14 @@ type Agent = {
   in_call: boolean
   open_conversations: number
   negative_conversations: number
+  critical_conversation_id: string | null
 }
 
 export function AgentOperationalPanel() {
+  const router = useRouter()
   const [agents, setAgents] = useState<Agent[] | null>(null)
   const [loading, setLoading] = useState(true)
+  const [takingFollowUp, setTakingFollowUp] = useState<string | null>(null)
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true)
@@ -46,6 +50,26 @@ export function AgentOperationalPanel() {
   const calls = agents?.filter((agent) => agent.in_call).length ?? 0
   const critical = agents?.reduce((sum, agent) => sum + agent.negative_conversations, 0) ?? 0
 
+  const takeFollowUp = async (agent: Agent) => {
+    if (!agent.critical_conversation_id) return
+    setTakingFollowUp(agent.id)
+    try {
+      const response = await fetch(`/api/conversations/${agent.critical_conversation_id}/internal-notes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body: `Seguimiento de supervisión iniciado para una conversación con alerta de sentimiento negativo.`, kind: 'note' }),
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error ?? 'No se pudo registrar el seguimiento.')
+      toast.success('Seguimiento registrado. Abriendo conversación.')
+      router.push(`/inbox?c=${agent.critical_conversation_id}`)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'No se pudo registrar el seguimiento.')
+    } finally {
+      setTakingFollowUp(null)
+    }
+  }
+
   return (
     <section className="rounded-xl border border-border bg-card p-5">
       <div className="flex items-start justify-between gap-3">
@@ -70,7 +94,7 @@ export function AgentOperationalPanel() {
               <div className="min-w-40 flex-1"><p className="text-sm font-medium">{agent.name} <span className="text-xs text-muted-foreground">· {agent.role}</span></p><p className="text-xs text-muted-foreground">{agent.extension ? `Extensión ${agent.extension}` : 'Sin extensión configurada'}</p></div>
               {agent.in_call && <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-1 text-xs font-medium text-emerald-500"><PhoneCall className="size-3" />En llamada</span>}
               <span className="text-sm text-muted-foreground">{agent.open_conversations} chats abiertos</span>
-              {agent.negative_conversations > 0 && <span className="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-2 py-1 text-xs font-medium text-destructive"><AlertTriangle className="size-3" />{agent.negative_conversations} crítico{agent.negative_conversations === 1 ? '' : 's'}</span>}
+              {agent.negative_conversations > 0 && <><span className="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-2 py-1 text-xs font-medium text-destructive"><AlertTriangle className="size-3" />{agent.negative_conversations} crítico{agent.negative_conversations === 1 ? '' : 's'}</span><Button size="sm" variant="outline" className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive" disabled={takingFollowUp === agent.id} onClick={() => void takeFollowUp(agent)}>{takingFollowUp === agent.id ? <Loader2 className="size-3.5 animate-spin" /> : 'Tomar seguimiento'}</Button></>}
             </div>
           ))}
         </div>
