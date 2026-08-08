@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
-import { requireRole, toErrorResponse } from '@/lib/auth/account'
+import { toErrorResponse } from '@/lib/auth/account'
+import { requireEntitlement } from '@/lib/account/entitlements'
 
 export const dynamic = 'force-dynamic'
 
@@ -10,7 +11,7 @@ function admin() {
 
 export async function GET() {
   try {
-    const { accountId } = await requireRole('admin')
+    const { accountId } = await requireEntitlement('yeastar_telephony', 'admin')
     const db = admin()
     const { data: entries, error } = await db.from('yeastar_call_supervision_audit')
       .select('id, supervisor_user_id, supervisor_extension, target_extension, mode, outcome, error_message, created_at')

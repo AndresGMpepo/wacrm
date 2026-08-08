@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { decrypt } from '@/lib/whatsapp/encryption'
-import { requireRole, toErrorResponse } from '@/lib/auth/account'
+import { toErrorResponse } from '@/lib/auth/account'
+import { requireEntitlement } from '@/lib/account/entitlements'
 
 export const dynamic = 'force-dynamic'
 
@@ -64,7 +65,7 @@ export async function POST(request: Request) {
   let auditId: string | null = null
   let db: ReturnType<typeof admin> | null = null
   try {
-    const { accountId, userId } = await requireRole('admin')
+    const { accountId, userId } = await requireEntitlement('yeastar_telephony', 'admin')
     const body = await request.json().catch(() => null) as { callId?: unknown; extension?: unknown; mode?: unknown } | null
     const callId = typeof body?.callId === 'string' ? body.callId : ''
     const targetExtension = typeof body?.extension === 'string' ? body.extension : ''

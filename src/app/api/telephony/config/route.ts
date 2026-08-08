@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server';
 import { createClient as createAdminClient } from '@supabase/supabase-js';
 
 import { encrypt } from '@/lib/whatsapp/encryption';
-import { requireRole, toErrorResponse } from '@/lib/auth/account';
+import { toErrorResponse } from '@/lib/auth/account';
+import { requireEntitlement } from '@/lib/account/entitlements';
 
 function admin() {
   return createAdminClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
@@ -19,7 +20,7 @@ function validHttpsUrl(value: unknown): value is string {
 
 export async function GET() {
   try {
-    const { accountId, userId } = await requireRole('agent');
+    const { accountId, userId } = await requireEntitlement('yeastar_telephony', 'agent');
     const [integration, userConfig] = await Promise.all([
       admin()
         .from('telephony_configs')
@@ -51,7 +52,7 @@ export async function GET() {
 
 export async function PUT(request: Request) {
   try {
-    const { accountId, userId, role } = await requireRole('agent');
+    const { accountId, userId, role } = await requireEntitlement('yeastar_telephony', 'agent');
     const body = await request.json() as Record<string, unknown>;
     const extension = typeof body.extension === 'string' ? body.extension.trim() : '';
     if (!extension) return NextResponse.json({ error: 'La extensión es obligatoria.' }, { status: 400 });
@@ -108,7 +109,7 @@ export async function PUT(request: Request) {
 
 export async function DELETE() {
   try {
-    const { accountId, userId } = await requireRole('agent');
+    const { accountId, userId } = await requireEntitlement('yeastar_telephony', 'agent');
     const { error } = await admin()
       .from('telephony_user_configs')
       .delete()

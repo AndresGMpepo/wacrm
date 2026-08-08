@@ -28,7 +28,6 @@ import {
   Loader2,
   Mail,
   MailX,
-  Plus,
   Trash2,
   UsersRound,
 } from 'lucide-react';
@@ -39,13 +38,13 @@ import {
   AvatarFallback,
   AvatarImage,
 } from '@/components/ui/avatar';
-import { Badge } from '@/components/ui/badge';
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import {
   Dialog,
@@ -72,7 +71,6 @@ import {
   PRESENCE_DOT_CLASS,
   PresenceDot,
 } from '@/components/presence/presence-dot';
-import { InviteMemberDialog } from './invite-member-dialog';
 import { SettingsPanelHead } from './settings-panel-head';
 import { ROLE_META } from './role-meta';
 
@@ -120,8 +118,7 @@ function fmtExpiresIn(iso: string, t: (key: string, values?: Record<string, stri
   if (ms <= 0) return t('expired');
   const days = Math.floor(ms / (24 * 60 * 60 * 1000));
   if (days >= 1) return t('expiresInDays', { days });
-  const hours = Math.max(1, Math.floor(ms / (60 * 60 * 1000)));
-  return t('expiresInHours', { hours });
+  return t('expiresInHours', { hours: Math.max(1, Math.floor(ms / (60 * 60 * 1000))) });
 }
 
 export function MembersTab() {
@@ -131,10 +128,11 @@ export function MembersTab() {
   const { getPresence, getRow, now } = usePresence();
 
   const [members, setMembers] = useState<Member[]>([]);
+  // New tenant-created invitations are disabled. Keeping this empty state
+  // lets the roster explain that access is provisioned by the platform.
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const [inviteOpen, setInviteOpen] = useState(false);
   const [removingMember, setRemovingMember] = useState<Member | null>(null);
   const [pendingMemberAction, setPendingMemberAction] = useState<string | null>(
     null,
@@ -142,12 +140,7 @@ export function MembersTab() {
 
   const loadEverything = useCallback(async () => {
     try {
-      const [mres, ires] = await Promise.all([
-        fetch('/api/account/members', { cache: 'no-store' }),
-        canManageMembers
-          ? fetch('/api/account/invitations', { cache: 'no-store' })
-          : Promise.resolve(null),
-      ]);
+      const mres = await fetch('/api/account/members', { cache: 'no-store' });
 
       if (!mres.ok) {
         const payload = await mres.json().catch(() => ({}));
@@ -157,24 +150,13 @@ export function MembersTab() {
       const mdata = (await mres.json()) as { members: Member[] };
       setMembers(mdata.members);
 
-      if (ires) {
-        if (!ires.ok) {
-          const payload = await ires.json().catch(() => ({}));
-          toast.error(payload.error || 'Failed to load invitations');
-          return;
-        }
-        const idata = (await ires.json()) as { invitations: Invitation[] };
-        setInvitations(idata.invitations);
-      } else {
-        setInvitations([]);
-      }
     } catch (err) {
       console.error('[MembersTab] load error:', err);
       toast.error('Could not reach the server');
     } finally {
       setLoading(false);
     }
-  }, [canManageMembers]);
+  }, []);
 
   useEffect(() => {
     void loadEverything();
@@ -256,19 +238,12 @@ export function MembersTab() {
 
   async function handleRevoke(invite: Invitation) {
     try {
-      const res = await fetch(`/api/account/invitations/${invite.id}`, {
-        method: 'DELETE',
-      });
-      if (!res.ok) {
-        const payload = await res.json().catch(() => ({}));
-        toast.error(payload.error || 'Failed to revoke invitation');
-        return;
-      }
-      toast.success(t('revokedToast'));
-      setInvitations((prev) => prev.filter((i) => i.id !== invite.id));
-    } catch (err) {
-      console.error('[MembersTab] revoke error:', err);
-      toast.error('Could not reach the server');
+      const res = await fetch(`/api/account/invitations/${invite.id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Failed to revoke invitation');
+      setInvitations((previous) => previous.filter((item) => item.id !== invite.id));
+    } catch (error) {
+      console.error('[MembersTab] revoke error:', error);
+      toast.error('No se pudo revocar la invitación');
     }
   }
 
@@ -284,15 +259,7 @@ export function MembersTab() {
     <section className="animate-in fade-in-50 space-y-6 duration-200">
       <SettingsPanelHead
         title={t('title')}
-        description={t('description')}
-        action={
-          <RequireRole min="admin">
-            <Button onClick={() => setInviteOpen(true)}>
-              <Plus className="size-4" />
-              {t('inviteMember')}
-            </Button>
-          </RequireRole>
-        }
+        description="Consulta los accesos actuales. Los nuevos usuarios se aprovisionan por el equipo de plataforma según los asientos contratados."
       />
 
       {/* Live presence summary across the roster. Updates without a
@@ -479,10 +446,10 @@ export function MembersTab() {
           <div className="mb-2 flex items-center gap-2">
             <UsersRound className="size-4 text-muted-foreground" />
             <h3 className="text-sm font-semibold text-foreground">
-              {t('pendingInvitations')}
+              Gestión de nuevos accesos
             </h3>
             <Badge className="bg-muted text-muted-foreground border-border">
-              {invitations.length}
+              Plataforma
             </Badge>
           </div>
           {/* P10 — make the no-resend design explicit. Admins were
@@ -501,10 +468,10 @@ export function MembersTab() {
               <CardContent className="flex flex-col items-center justify-center py-8 text-center">
                 <Mail className="size-6 text-muted-foreground" />
                 <p className="mt-2 text-sm text-muted-foreground">
-                  {t('noPendingTitle')}
+                  Los usuarios se administran por asientos
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {t.rich('noPendingDesc', { bold: (chunks) => <strong>{chunks}</strong> })}
+                  Solicita al equipo de plataforma un nuevo acceso o un ajuste de usuarios contratados.
                 </p>
               </CardContent>
             </Card>
@@ -559,12 +526,6 @@ export function MembersTab() {
           )}
         </div>
       </RequireRole>
-
-      <InviteMemberDialog
-        open={inviteOpen}
-        onOpenChange={setInviteOpen}
-        onCreated={loadEverything}
-      />
 
       <Dialog
         open={removingMember !== null}

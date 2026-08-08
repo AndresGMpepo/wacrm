@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server';
 import { createClient as createAdminClient } from '@supabase/supabase-js';
 
 import { decrypt } from '@/lib/whatsapp/encryption';
-import { requireRole, toErrorResponse } from '@/lib/auth/account';
+import { toErrorResponse } from '@/lib/auth/account';
+import { requireEntitlement } from '@/lib/account/entitlements';
 
 type TokenResponse = { errcode: number; errmsg?: string; access_token?: string };
 type SignResponse = { errcode: number; errmsg?: string; data?: { sign?: string } };
@@ -17,7 +18,7 @@ function admin() {
 
 export async function POST() {
   try {
-    const { accountId, userId } = await requireRole('agent');
+    const { accountId, userId } = await requireEntitlement('yeastar_telephony', 'agent');
     const [integration, userConfig] = await Promise.all([
       admin()
       .from('telephony_configs')

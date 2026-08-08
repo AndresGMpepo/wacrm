@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
-import { requireRole, toErrorResponse } from '@/lib/auth/account'
+import { toErrorResponse } from '@/lib/auth/account'
+import { requireEntitlement } from '@/lib/account/entitlements'
 
 export const dynamic = 'force-dynamic'
 
@@ -30,7 +31,7 @@ function payload(body: unknown) {
 
 export async function POST(request: Request) {
   try {
-    const { accountId, userId } = await requireRole('agent')
+    const { accountId, userId } = await requireEntitlement('yeastar_telephony', 'agent')
     const call = payload(await request.json().catch(() => null))
     if (!call) return NextResponse.json({ error: 'callId es obligatorio.' }, { status: 400 })
     const extension = await ownExtension(accountId, userId)
@@ -63,7 +64,7 @@ export async function POST(request: Request) {
 
 export async function DELETE(request: Request) {
   try {
-    const { accountId, userId } = await requireRole('agent')
+    const { accountId, userId } = await requireEntitlement('yeastar_telephony', 'agent')
     const call = payload(await request.json().catch(() => null))
     if (!call) return NextResponse.json({ error: 'callId es obligatorio.' }, { status: 400 })
     const extension = await ownExtension(accountId, userId)

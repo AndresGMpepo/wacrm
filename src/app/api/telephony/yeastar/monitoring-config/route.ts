@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { encrypt } from '@/lib/whatsapp/encryption'
-import { requireRole, toErrorResponse } from '@/lib/auth/account'
+import { toErrorResponse } from '@/lib/auth/account'
+import { requireEntitlement } from '@/lib/account/entitlements'
 
 function admin() {
   return createAdminClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
@@ -14,7 +15,7 @@ function webhookUrl(accountId: string) {
 
 export async function GET() {
   try {
-    const { accountId } = await requireRole('admin')
+    const { accountId } = await requireEntitlement('yeastar_telephony', 'admin')
     const db = admin()
     const { data, error } = await db.from('yeastar_monitoring_configs')
       .select('api_client_id, api_client_secret, webhook_secret')
@@ -39,7 +40,7 @@ export async function GET() {
 
 export async function PUT(request: Request) {
   try {
-    const { accountId, userId } = await requireRole('admin')
+    const { accountId, userId } = await requireEntitlement('yeastar_telephony', 'admin')
     const body = await request.json().catch(() => null)
     const current = await admin().from('yeastar_monitoring_configs')
       .select('api_client_id, api_client_secret, webhook_secret')
