@@ -47,22 +47,42 @@ type ProfileRow = {
   is_active: boolean
 }
 
+type CommercialAuditRow = {
+  account_id: string | null
+  actor_user_id: string | null
+  action: string
+  created_at: string
+}
+
 export async function GET() {
   try {
     await requirePlatformOperator()
     const admin = adminClient()
-    const [{ data: accounts, error: accountsError }, { data: subscriptions, error: subscriptionsError }, { data: profiles, error: profilesError }] = await Promise.all([
+    const [{ data: accounts, error: accountsError }, { data: subscriptions, error: subscriptionsError }, { data: profiles, error: profilesError }, { data: audit, error: auditError }] = await Promise.all([
       admin.from('accounts').select('id, name, owner_user_id, created_at').order('created_at', { ascending: false }),
       admin.from('account_subscriptions').select('account_id, plan_code, seat_limit, status, ends_at, grace_days, contract_reference, invoice_reference, internal_notes'),
       admin.from('profiles').select('account_id, user_id, full_name, email, account_role, is_active'),
+      admin.from('platform_commercial_audit').select('account_id, actor_user_id, action, created_at').order('created_at', { ascending: false }).limit(100),
     ])
-    if (accountsError || subscriptionsError || profilesError) throw accountsError ?? subscriptionsError ?? profilesError
+    if (accountsError || subscriptionsError || profilesError || auditError) throw accountsError ?? subscriptionsError ?? profilesError ?? auditError
 
     const subscriptionByAccount = new Map((subscriptions as SubscriptionRow[]).map((row) => [row.account_id, row]))
     const membersByAccount = new Map<string, number>()
     const typedProfiles = (profiles ?? []) as ProfileRow[]
     const ownersByUser = new Map(typedProfiles.map((profile) => [profile.user_id, profile]))
     const profilesByAccount = new Map<string, ProfileRow[]>()
+    const auditByAccount = new Map<string, { action: string; actor: string; created_at: string }[]>()
+    const profileNameByUser = new Map(typedProfiles.map((profile) => [profile.user_id, profile.full_name?.trim() || profile.email || 'Operador']))
+    for (const entry of (audit ?? []) as CommercialAuditRow[]) {
+      if (!entry.account_id) continue
+      const rows = auditByAccount.get(entry.account_id) ?? []
+      if (rows.length < 8) rows.push({
+        action: entry.action,
+        actor: entry.actor_user_id ? profileNameByUser.get(entry.actor_user_id) ?? 'Usuario eliminado' : 'Sistema',
+        created_at: entry.created_at,
+      })
+      auditByAccount.set(entry.account_id, rows)
+    }
     for (const profile of typedProfiles) {
       membersByAccount.set(profile.account_id, (membersByAccount.get(profile.account_id) ?? 0) + 1)
       const accountProfiles = profilesByAccount.get(profile.account_id) ?? []
@@ -87,6 +107,7 @@ export async function GET() {
             role: profile.account_role,
             is_active: profile.is_active,
           })),
+          audit: auditByAccount.get(account.id) ?? [],
           subscription: subscription ? {
             plan_code: subscription.plan_code,
             seat_limit: subscription.seat_limit,
@@ -165,6 +186,15 @@ export async function POST(request: Request) {
         account_role: 'owner',
       })
       if (profileError) throw profileError
+
+      const { error: auditError } = await admin.from('platform_commercial_audit').insert({
+        account_id: account.id,
+        account_name: account.name,
+        actor_user_id: operator.user.id,
+        action: 'account_created',
+        details: { plan_code: planCode, seat_limit: seatLimit, access_days: accessDays, ends_at: endsAt },
+      })
+      if (auditError) throw auditError
 
       return NextResponse.json({
         account: { id: account.id, name: account.name, plan_code: planCode, seat_limit: seatLimit, ends_at: endsAt },

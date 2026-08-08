@@ -61,7 +61,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ac
     if (accountError) throw accountError
     const { error: subscriptionError } = await admin.from('account_subscriptions').update({ plan_code: planCode, seat_limit: seatLimit, status, ends_at: endsAt, grace_days: body?.grace_days === undefined ? current?.grace_days ?? 0 : graceDays, contract_reference: body?.contract_reference === undefined ? current?.contract_reference ?? null : contractReference || null, invoice_reference: body?.invoice_reference === undefined ? current?.invoice_reference ?? null : invoiceReference || null, internal_notes: body?.internal_notes === undefined ? current?.internal_notes ?? null : internalNotes || null }).eq('account_id', accountId)
     if (subscriptionError) throw subscriptionError
-    await admin.from('platform_commercial_audit').insert({ account_id: accountId, account_name: name, actor_user_id: operator.user.id, action: status !== current?.status ? `service_${status}` : 'commercial_record_updated', details: { before: current, after: { plan_code: planCode, seat_limit: seatLimit, status, ends_at: endsAt, grace_days: graceDays, contract_reference: contractReference || null, invoice_reference: invoiceReference || null } } })
+    const { error: auditError } = await admin.from('platform_commercial_audit').insert({ account_id: accountId, account_name: name, actor_user_id: operator.user.id, action: status !== current?.status ? `service_${status}` : 'commercial_record_updated', details: { before: current, after: { plan_code: planCode, seat_limit: seatLimit, status, ends_at: endsAt, grace_days: graceDays, contract_reference: contractReference || null, invoice_reference: invoiceReference || null, internal_notes: internalNotes || null } } })
+    if (auditError) throw auditError
     return NextResponse.json({ message: 'Plan y límite de usuarios actualizados.' })
   } catch (error) {
     return toErrorResponse(error)
@@ -76,7 +77,7 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
 
     const { accountId } = await params
     const admin = adminClient()
-    const { data: account, error: accountError } = await admin.from('accounts').select('id, owner_user_id').eq('id', accountId).maybeSingle()
+    const { data: account, error: accountError } = await admin.from('accounts').select('id, name, owner_user_id').eq('id', accountId).maybeSingle()
     if (accountError) throw accountError
     if (!account) return NextResponse.json({ error: 'La cuenta ya no existe.' }, { status: 404 })
     if (account.owner_user_id === operator.user.id) {
@@ -91,6 +92,14 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
     // Auth remove the owner: accounts.owner_user_id uses ON DELETE RESTRICT.
     const { error: deleteAccountError } = await admin.from('accounts').delete().eq('id', accountId)
     if (deleteAccountError) throw deleteAccountError
+    const { error: auditError } = await admin.from('platform_commercial_audit').insert({
+      account_id: null,
+      account_name: account.name,
+      actor_user_id: operator.user.id,
+      action: 'account_deleted',
+      details: { deleted_account_id: accountId, owner_user_id: account.owner_user_id },
+    })
+    if (auditError) throw auditError
     const { error: deleteUserError } = await admin.auth.admin.deleteUser(account.owner_user_id)
     if (deleteUserError) {
       console.error('[DELETE /api/platform/accounts/[accountId]] auth cleanup failed:', deleteUserError)

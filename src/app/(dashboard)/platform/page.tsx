@@ -17,6 +17,7 @@ type PlatformAccount = {
   created_at: string
   owner: { full_name: string | null; email: string | null } | null
   members: number
+  audit: { action: string; actor: string; created_at: string }[]
   team: PlatformMember[]
   subscription: { plan_code: PlanCode; seat_limit: number; status: SubscriptionStatus; ends_at: string | null; grace_days: number; contract_reference: string | null; invoice_reference: string | null; internal_notes: string | null } | null
 }
@@ -39,9 +40,19 @@ const PLAN_LABELS: Record<PlanCode, string> = {
 const STATUS_LABELS: Record<SubscriptionStatus, string> = { active: 'Activa', trial: 'Demo', suspended: 'Pausada', cancelled: 'Cancelada' }
 function dateInputValue(value: string | null) { return value ? value.slice(0, 10) : '' }
 function isExpired(endsAt: string | null) { return !!endsAt && new Date(endsAt).getTime() <= Date.now() }
+function isInGrace(subscription: PlatformAccount['subscription']) {
+  if (!subscription?.ends_at || !isExpired(subscription.ends_at)) return false
+  return new Date(subscription.ends_at).getTime() + (subscription.grace_days ?? 0) * 86_400_000 > Date.now()
+}
+function isAccessExpired(subscription: PlatformAccount['subscription']) {
+  if (!subscription?.ends_at) return false
+  return new Date(subscription.ends_at).getTime() + (subscription.grace_days ?? 0) * 86_400_000 <= Date.now()
+}
 function displayStatus(subscription: PlatformAccount['subscription']) {
   if (!subscription) return 'Sin servicio'
-  return isExpired(subscription.ends_at) ? 'Demo vencida' : STATUS_LABELS[subscription.status]
+  if (isAccessExpired(subscription)) return 'Demo vencida'
+  if (isInGrace(subscription)) return 'Período de gracia'
+  return STATUS_LABELS[subscription.status]
 }
 
 export default function PlatformPage() {
@@ -131,7 +142,7 @@ export default function PlatformPage() {
 
   const setAccessStatus = async (account: PlatformAccount, status: SubscriptionStatus) => {
     if (!account.subscription) return
-    if (status === 'active' && isExpired(account.subscription.ends_at)) {
+    if (status === 'active' && isAccessExpired(account.subscription)) {
       toast.error('Primero extiende o elimina la fecha de vencimiento en Editar para reactivar esta demo.')
       beginEdit(account)
       return
@@ -276,6 +287,11 @@ export default function PlatformPage() {
         </form></CardContent>
       </Card> : null}
 
+      {editing ? <Card>
+        <CardHeader><CardTitle>Bitácora comercial</CardTitle><CardDescription>Últimos cambios registrados para esta cuenta.</CardDescription></CardHeader>
+        <CardContent>{editing.audit.length ? <div className="divide-y rounded-md border">{editing.audit.map((entry, index) => <div key={`${entry.created_at}-${index}`} className="flex items-center justify-between gap-3 p-3 text-sm"><div><p className="font-medium capitalize">{entry.action.replaceAll('_', ' ')}</p><p className="text-muted-foreground">Por {entry.actor}</p></div><span className="shrink-0 text-muted-foreground">{new Date(entry.created_at).toLocaleString('es-MX')}</span></div>)}</div> : <p className="text-sm text-muted-foreground">Aún no hay cambios comerciales registrados.</p>}</CardContent>
+      </Card> : null}
+
       {managingAccount ? <Card>
         <CardHeader><CardTitle className="flex items-center gap-2"><UsersRound className="size-5" />Usuarios de {managingAccount.name}</CardTitle><CardDescription>La plataforma administra los accesos. Pausar conserva el historial, bloquea el ingreso y conserva el asiento contratado.</CardDescription></CardHeader>
         <CardContent className="space-y-5">
@@ -298,7 +314,7 @@ export default function PlatformPage() {
       <Card>
         <CardHeader><CardTitle className="flex items-center gap-2"><Building2 className="size-5" />Clientes aprovisionados</CardTitle><CardDescription>Usuarios usados frente a los asientos contratados.</CardDescription></CardHeader>
         <CardContent>
-          {loading ? <div className="flex justify-center py-8"><LoaderCircle className="animate-spin text-muted-foreground" /></div> : accounts.length === 0 ? <p className="py-4 text-sm text-muted-foreground">Aún no hay clientes aprovisionados.</p> : <div className="divide-y rounded-lg border">{accounts.map((account) => <div key={account.id} className="grid gap-3 px-4 py-3 lg:grid-cols-[minmax(0,1fr)_auto_auto_auto] lg:items-center lg:gap-4"><div className="min-w-0"><p className="truncate font-medium">{account.name}</p><p className="truncate text-sm text-muted-foreground">{account.owner?.full_name ?? 'Propietario pendiente'} · {account.owner?.email ?? 'sin correo'}</p>{account.subscription?.ends_at ? <p className="mt-1 text-xs text-amber-500">Acceso hasta {new Date(account.subscription.ends_at).toLocaleDateString('es-MX')}</p> : null}</div><div><p className="text-sm text-muted-foreground">{account.subscription ? PLAN_LABELS[account.subscription.plan_code] : 'Sin plan'}</p><p className={isExpired(account.subscription?.ends_at ?? null) || account.subscription?.status === 'suspended' || account.subscription?.status === 'cancelled' ? 'text-sm font-medium text-destructive' : 'text-sm font-medium text-emerald-500'}>{displayStatus(account.subscription)}</p></div><p className="text-sm font-medium">{account.members}/{account.subscription?.seat_limit ?? 0} usuarios</p><div className="flex flex-wrap gap-2"><Button type="button" size="sm" variant="outline" onClick={() => { setManagingAccount(account); setMemberForm({ full_name: '', email: '', role: 'agent' }) }} disabled={actionId === account.id}><UserCog />Usuarios</Button><Button type="button" size="sm" variant="outline" onClick={() => beginEdit(account)} disabled={actionId === account.id}><Pencil />Editar</Button>{account.subscription?.status === 'active' || account.subscription?.status === 'trial' ? <Button type="button" size="sm" variant="outline" onClick={() => setAccessStatus(account, 'suspended')} disabled={actionId === account.id}><CirclePause />Pausar</Button> : <Button type="button" size="sm" variant="outline" onClick={() => setAccessStatus(account, 'active')} disabled={actionId === account.id}><CirclePlay />Reactivar</Button>}<Button type="button" size="sm" variant="outline" onClick={() => resendInvitation(account)} disabled={actionId === account.id}>{actionId === account.id ? <LoaderCircle className="animate-spin" /> : <Send />}Reenviar</Button><Button type="button" size="sm" variant="destructive" onClick={() => removeAccount(account)} disabled={actionId === account.id}><Trash2 />Borrar</Button></div></div>)}</div>}
+          {loading ? <div className="flex justify-center py-8"><LoaderCircle className="animate-spin text-muted-foreground" /></div> : accounts.length === 0 ? <p className="py-4 text-sm text-muted-foreground">Aún no hay clientes aprovisionados.</p> : <div className="divide-y rounded-lg border">{accounts.map((account) => <div key={account.id} className="grid gap-3 px-4 py-3 lg:grid-cols-[minmax(0,1fr)_auto_auto_auto] lg:items-center lg:gap-4"><div className="min-w-0"><p className="truncate font-medium">{account.name}</p><p className="truncate text-sm text-muted-foreground">{account.owner?.full_name ?? 'Propietario pendiente'} · {account.owner?.email ?? 'sin correo'}</p>{account.subscription?.ends_at ? <p className="mt-1 text-xs text-amber-500">Acceso hasta {new Date(account.subscription.ends_at).toLocaleDateString('es-MX')}</p> : null}</div><div><p className="text-sm text-muted-foreground">{account.subscription ? PLAN_LABELS[account.subscription.plan_code] : 'Sin plan'}</p><p className={isAccessExpired(account.subscription) || account.subscription?.status === 'suspended' || account.subscription?.status === 'cancelled' ? 'text-sm font-medium text-destructive' : isInGrace(account.subscription) ? 'text-sm font-medium text-amber-500' : 'text-sm font-medium text-emerald-500'}>{displayStatus(account.subscription)}</p></div><p className="text-sm font-medium">{account.members}/{account.subscription?.seat_limit ?? 0} usuarios</p><div className="flex flex-wrap gap-2"><Button type="button" size="sm" variant="outline" onClick={() => { setManagingAccount(account); setMemberForm({ full_name: '', email: '', role: 'agent' }) }} disabled={actionId === account.id}><UserCog />Usuarios</Button><Button type="button" size="sm" variant="outline" onClick={() => beginEdit(account)} disabled={actionId === account.id}><Pencil />Editar</Button>{account.subscription?.status === 'active' || account.subscription?.status === 'trial' ? <Button type="button" size="sm" variant="outline" onClick={() => setAccessStatus(account, 'suspended')} disabled={actionId === account.id}><CirclePause />Pausar</Button> : <Button type="button" size="sm" variant="outline" onClick={() => setAccessStatus(account, 'active')} disabled={actionId === account.id}><CirclePlay />Reactivar</Button>}<Button type="button" size="sm" variant="outline" onClick={() => resendInvitation(account)} disabled={actionId === account.id}>{actionId === account.id ? <LoaderCircle className="animate-spin" /> : <Send />}Reenviar</Button><Button type="button" size="sm" variant="destructive" onClick={() => removeAccount(account)} disabled={actionId === account.id}><Trash2 />Borrar</Button></div></div>)}</div>}
         </CardContent>
       </Card>
     </div>
