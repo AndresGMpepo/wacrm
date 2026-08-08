@@ -34,6 +34,15 @@ type SubscriptionRow = {
   ends_at: string | null
 }
 
+type ProfileRow = {
+  account_id: string
+  user_id: string
+  full_name: string | null
+  email: string | null
+  account_role: 'owner' | 'admin' | 'agent' | 'viewer'
+  is_active: boolean
+}
+
 export async function GET() {
   try {
     await requirePlatformOperator()
@@ -41,15 +50,20 @@ export async function GET() {
     const [{ data: accounts, error: accountsError }, { data: subscriptions, error: subscriptionsError }, { data: profiles, error: profilesError }] = await Promise.all([
       admin.from('accounts').select('id, name, owner_user_id, created_at').order('created_at', { ascending: false }),
       admin.from('account_subscriptions').select('account_id, plan_code, seat_limit, status, ends_at'),
-      admin.from('profiles').select('account_id, user_id, full_name, email'),
+      admin.from('profiles').select('account_id, user_id, full_name, email, account_role, is_active'),
     ])
     if (accountsError || subscriptionsError || profilesError) throw accountsError ?? subscriptionsError ?? profilesError
 
     const subscriptionByAccount = new Map((subscriptions as SubscriptionRow[]).map((row) => [row.account_id, row]))
     const membersByAccount = new Map<string, number>()
-    const ownersByUser = new Map((profiles ?? []).map((profile) => [profile.user_id, profile]))
-    for (const profile of profiles ?? []) {
+    const typedProfiles = (profiles ?? []) as ProfileRow[]
+    const ownersByUser = new Map(typedProfiles.map((profile) => [profile.user_id, profile]))
+    const profilesByAccount = new Map<string, ProfileRow[]>()
+    for (const profile of typedProfiles) {
       membersByAccount.set(profile.account_id, (membersByAccount.get(profile.account_id) ?? 0) + 1)
+      const accountProfiles = profilesByAccount.get(profile.account_id) ?? []
+      accountProfiles.push(profile)
+      profilesByAccount.set(profile.account_id, accountProfiles)
     }
 
     return NextResponse.json({
@@ -62,6 +76,13 @@ export async function GET() {
           created_at: account.created_at,
           owner: owner ? { full_name: owner.full_name, email: owner.email } : null,
           members: membersByAccount.get(account.id) ?? 0,
+          team: (profilesByAccount.get(account.id) ?? []).map((profile) => ({
+            user_id: profile.user_id,
+            full_name: profile.full_name,
+            email: profile.email,
+            role: profile.account_role,
+            is_active: profile.is_active,
+          })),
           subscription: subscription ? {
             plan_code: subscription.plan_code,
             seat_limit: subscription.seat_limit,

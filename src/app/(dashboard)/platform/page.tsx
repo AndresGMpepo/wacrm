@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { Building2, CirclePause, CirclePlay, LoaderCircle, Pencil, Send, ShieldCheck, Trash2, UserPlus } from 'lucide-react'
+import { Building2, CirclePause, CirclePlay, LoaderCircle, Pencil, Send, ShieldCheck, Trash2, UserCog, UserPlus, UsersRound } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
@@ -17,7 +17,16 @@ type PlatformAccount = {
   created_at: string
   owner: { full_name: string | null; email: string | null } | null
   members: number
+  team: PlatformMember[]
   subscription: { plan_code: PlanCode; seat_limit: number; status: SubscriptionStatus; ends_at: string | null } | null
+}
+
+type PlatformMember = {
+  user_id: string
+  full_name: string | null
+  email: string | null
+  role: 'owner' | 'admin' | 'agent' | 'viewer'
+  is_active: boolean
 }
 
 type SubscriptionStatus = 'active' | 'trial' | 'suspended' | 'cancelled'
@@ -44,6 +53,8 @@ export default function PlatformPage() {
   const [editForm, setEditForm] = useState({ account_name: '', plan_code: 'ai' as PlanCode, seat_limit: '1', status: 'active' as SubscriptionStatus, ends_at: '' })
   const [actionId, setActionId] = useState<string | null>(null)
   const [form, setForm] = useState({ account_name: '', owner_name: '', owner_email: '', plan_code: 'ai' as PlanCode, seat_limit: '1', access_days: '0' })
+  const [managingAccount, setManagingAccount] = useState<PlatformAccount | null>(null)
+  const [memberForm, setMemberForm] = useState({ full_name: '', email: '', role: 'agent' as 'admin' | 'agent' | 'viewer' })
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true)
@@ -54,8 +65,10 @@ export default function PlatformPage() {
         if (response.status === 403) setAllowed(false)
         throw new Error(json.error ?? 'No se pudo cargar la plataforma.')
       }
+      const nextAccounts = json.accounts ?? []
       setAllowed(true)
-      setAccounts(json.accounts ?? [])
+      setAccounts(nextAccounts)
+      setManagingAccount((current) => current ? nextAccounts.find((account: PlatformAccount) => account.id === current.id) ?? null : null)
     } catch (error) {
       if (!silent) toast.error(error instanceof Error ? error.message : 'No se pudo cargar la plataforma.')
     } finally {
@@ -170,6 +183,57 @@ export default function PlatformPage() {
     }
   }
 
+  const inviteMember = async (event: React.FormEvent) => {
+    event.preventDefault()
+    if (!managingAccount) return
+    setActionId(`member-create:${managingAccount.id}`)
+    try {
+      const response = await fetch(`/api/platform/accounts/${managingAccount.id}/members`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(memberForm),
+      })
+      const json = await response.json()
+      if (!response.ok) throw new Error(json.error ?? 'No se pudo crear el usuario.')
+      toast.success(json.message)
+      setMemberForm({ full_name: '', email: '', role: 'agent' })
+      await load(true)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'No se pudo crear el usuario.')
+    } finally {
+      setActionId(null)
+    }
+  }
+
+  const updateMember = async (account: PlatformAccount, member: PlatformMember, changes: Partial<Pick<PlatformMember, 'role' | 'is_active'>>) => {
+    setActionId(`member:${member.user_id}`)
+    try {
+      const response = await fetch(`/api/platform/accounts/${account.id}/members/${member.user_id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(changes),
+      })
+      const json = await response.json()
+      if (!response.ok) throw new Error(json.error ?? 'No se pudo actualizar el usuario.')
+      toast.success(json.message)
+      await load(true)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'No se pudo actualizar el usuario.')
+    } finally {
+      setActionId(null)
+    }
+  }
+
+  const resendMemberInvitation = async (account: PlatformAccount, member: PlatformMember) => {
+    setActionId(`member:${member.user_id}`)
+    try {
+      const response = await fetch(`/api/platform/accounts/${account.id}/members/${member.user_id}`, { method: 'POST' })
+      const json = await response.json()
+      if (!response.ok) throw new Error(json.error ?? 'No se pudo reenviar la invitación.')
+      toast.success(json.message)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'No se pudo reenviar la invitación.')
+    } finally {
+      setActionId(null)
+    }
+  }
+
   if (!loading && !allowed) {
     return <div className="mx-auto max-w-xl py-12 text-center"><ShieldCheck className="mx-auto size-9 text-muted-foreground" /><h1 className="mt-4 text-2xl font-bold">Acceso de plataforma restringido</h1><p className="mt-2 text-sm text-muted-foreground">Tu usuario no está autorizado para administrar clientes comerciales.</p></div>
   }
@@ -208,10 +272,29 @@ export default function PlatformPage() {
         </form></CardContent>
       </Card> : null}
 
+      {managingAccount ? <Card>
+        <CardHeader><CardTitle className="flex items-center gap-2"><UsersRound className="size-5" />Usuarios de {managingAccount.name}</CardTitle><CardDescription>La plataforma administra los accesos. Pausar conserva el historial, bloquea el ingreso y conserva el asiento contratado.</CardDescription></CardHeader>
+        <CardContent className="space-y-5">
+          <div className="divide-y rounded-lg border">
+            {managingAccount.team.map((member) => <div key={member.user_id} className="flex flex-col gap-3 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
+              <div className="min-w-0"><p className="font-medium">{member.full_name ?? 'Sin nombre'} <span className="text-sm font-normal text-muted-foreground">· {member.role}</span></p><p className="truncate text-sm text-muted-foreground">{member.email ?? 'sin correo'} · <span className={member.is_active ? 'text-emerald-500' : 'text-amber-500'}>{member.is_active ? 'Activo' : 'Pausado'}</span></p></div>
+              {member.role === 'owner' ? <p className="text-sm text-muted-foreground">Propietario de la cuenta</p> : <div className="flex flex-wrap gap-2"><Select value={member.role} onValueChange={(role) => updateMember(managingAccount, member, { role: role as 'admin' | 'agent' | 'viewer' })} disabled={actionId === `member:${member.user_id}`}><SelectTrigger className="w-28"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="admin">Admin</SelectItem><SelectItem value="agent">Agente</SelectItem><SelectItem value="viewer">Consulta</SelectItem></SelectContent></Select><Button type="button" size="sm" variant="outline" disabled={actionId === `member:${member.user_id}`} onClick={() => updateMember(managingAccount, member, { is_active: !member.is_active })}>{member.is_active ? <CirclePause /> : <CirclePlay />}{member.is_active ? 'Pausar' : 'Reactivar'}</Button><Button type="button" size="sm" variant="outline" disabled={actionId === `member:${member.user_id}`} onClick={() => resendMemberInvitation(managingAccount, member)}><Send />Reenviar</Button></div>}
+            </div>)}
+          </div>
+          <form onSubmit={inviteMember} className="grid gap-3 rounded-lg border p-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_160px_auto] md:items-end">
+            <div className="space-y-2"><Label htmlFor="member-name">Nombre</Label><Input id="member-name" value={memberForm.full_name} onChange={(event) => setMemberForm((current) => ({ ...current, full_name: event.target.value }))} required maxLength={120} /></div>
+            <div className="space-y-2"><Label htmlFor="member-email">Correo</Label><Input id="member-email" type="email" value={memberForm.email} onChange={(event) => setMemberForm((current) => ({ ...current, email: event.target.value }))} required /></div>
+            <div className="space-y-2"><Label>Rol</Label><Select value={memberForm.role} onValueChange={(role) => setMemberForm((current) => ({ ...current, role: role as 'admin' | 'agent' | 'viewer' }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="admin">Administrador</SelectItem><SelectItem value="agent">Agente</SelectItem><SelectItem value="viewer">Consulta</SelectItem></SelectContent></Select></div>
+            <Button type="submit" disabled={actionId === `member-create:${managingAccount.id}`}>{actionId === `member-create:${managingAccount.id}` ? <LoaderCircle className="animate-spin" /> : <UserPlus />}Invitar</Button>
+          </form>
+          <Button type="button" variant="ghost" onClick={() => setManagingAccount(null)}>Cerrar administración de usuarios</Button>
+        </CardContent>
+      </Card> : null}
+
       <Card>
         <CardHeader><CardTitle className="flex items-center gap-2"><Building2 className="size-5" />Clientes aprovisionados</CardTitle><CardDescription>Usuarios usados frente a los asientos contratados.</CardDescription></CardHeader>
         <CardContent>
-          {loading ? <div className="flex justify-center py-8"><LoaderCircle className="animate-spin text-muted-foreground" /></div> : accounts.length === 0 ? <p className="py-4 text-sm text-muted-foreground">Aún no hay clientes aprovisionados.</p> : <div className="divide-y rounded-lg border">{accounts.map((account) => <div key={account.id} className="grid gap-3 px-4 py-3 lg:grid-cols-[minmax(0,1fr)_auto_auto_auto] lg:items-center lg:gap-4"><div className="min-w-0"><p className="truncate font-medium">{account.name}</p><p className="truncate text-sm text-muted-foreground">{account.owner?.full_name ?? 'Propietario pendiente'} · {account.owner?.email ?? 'sin correo'}</p>{account.subscription?.ends_at ? <p className="mt-1 text-xs text-amber-500">Acceso hasta {new Date(account.subscription.ends_at).toLocaleDateString('es-MX')}</p> : null}</div><div><p className="text-sm text-muted-foreground">{account.subscription ? PLAN_LABELS[account.subscription.plan_code] : 'Sin plan'}</p><p className={isExpired(account.subscription?.ends_at ?? null) || account.subscription?.status === 'suspended' || account.subscription?.status === 'cancelled' ? 'text-sm font-medium text-destructive' : 'text-sm font-medium text-emerald-500'}>{displayStatus(account.subscription)}</p></div><p className="text-sm font-medium">{account.members}/{account.subscription?.seat_limit ?? 0} usuarios</p><div className="flex flex-wrap gap-2"><Button type="button" size="sm" variant="outline" onClick={() => beginEdit(account)} disabled={actionId === account.id}><Pencil />Editar</Button>{account.subscription?.status === 'active' || account.subscription?.status === 'trial' ? <Button type="button" size="sm" variant="outline" onClick={() => setAccessStatus(account, 'suspended')} disabled={actionId === account.id}><CirclePause />Pausar</Button> : <Button type="button" size="sm" variant="outline" onClick={() => setAccessStatus(account, 'active')} disabled={actionId === account.id}><CirclePlay />Reactivar</Button>}<Button type="button" size="sm" variant="outline" onClick={() => resendInvitation(account)} disabled={actionId === account.id}>{actionId === account.id ? <LoaderCircle className="animate-spin" /> : <Send />}Reenviar</Button><Button type="button" size="sm" variant="destructive" onClick={() => removeAccount(account)} disabled={actionId === account.id}><Trash2 />Borrar</Button></div></div>)}</div>}
+          {loading ? <div className="flex justify-center py-8"><LoaderCircle className="animate-spin text-muted-foreground" /></div> : accounts.length === 0 ? <p className="py-4 text-sm text-muted-foreground">Aún no hay clientes aprovisionados.</p> : <div className="divide-y rounded-lg border">{accounts.map((account) => <div key={account.id} className="grid gap-3 px-4 py-3 lg:grid-cols-[minmax(0,1fr)_auto_auto_auto] lg:items-center lg:gap-4"><div className="min-w-0"><p className="truncate font-medium">{account.name}</p><p className="truncate text-sm text-muted-foreground">{account.owner?.full_name ?? 'Propietario pendiente'} · {account.owner?.email ?? 'sin correo'}</p>{account.subscription?.ends_at ? <p className="mt-1 text-xs text-amber-500">Acceso hasta {new Date(account.subscription.ends_at).toLocaleDateString('es-MX')}</p> : null}</div><div><p className="text-sm text-muted-foreground">{account.subscription ? PLAN_LABELS[account.subscription.plan_code] : 'Sin plan'}</p><p className={isExpired(account.subscription?.ends_at ?? null) || account.subscription?.status === 'suspended' || account.subscription?.status === 'cancelled' ? 'text-sm font-medium text-destructive' : 'text-sm font-medium text-emerald-500'}>{displayStatus(account.subscription)}</p></div><p className="text-sm font-medium">{account.members}/{account.subscription?.seat_limit ?? 0} usuarios</p><div className="flex flex-wrap gap-2"><Button type="button" size="sm" variant="outline" onClick={() => { setManagingAccount(account); setMemberForm({ full_name: '', email: '', role: 'agent' }) }} disabled={actionId === account.id}><UserCog />Usuarios</Button><Button type="button" size="sm" variant="outline" onClick={() => beginEdit(account)} disabled={actionId === account.id}><Pencil />Editar</Button>{account.subscription?.status === 'active' || account.subscription?.status === 'trial' ? <Button type="button" size="sm" variant="outline" onClick={() => setAccessStatus(account, 'suspended')} disabled={actionId === account.id}><CirclePause />Pausar</Button> : <Button type="button" size="sm" variant="outline" onClick={() => setAccessStatus(account, 'active')} disabled={actionId === account.id}><CirclePlay />Reactivar</Button>}<Button type="button" size="sm" variant="outline" onClick={() => resendInvitation(account)} disabled={actionId === account.id}>{actionId === account.id ? <LoaderCircle className="animate-spin" /> : <Send />}Reenviar</Button><Button type="button" size="sm" variant="destructive" onClick={() => removeAccount(account)} disabled={actionId === account.id}><Trash2 />Borrar</Button></div></div>)}</div>}
         </CardContent>
       </Card>
     </div>
