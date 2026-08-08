@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Loader2, Phone, Save } from 'lucide-react';
+import { Loader2, LockKeyhole, Phone, Save } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/hooks/use-auth';
 import { useTelephony } from '@/components/telephony/telephony-provider';
@@ -26,9 +26,20 @@ export function TelephonyConfig() {
   const [accessKey, setAccessKey] = useState('');
   const [followUpEnabled, setFollowUpEnabled] = useState(false);
   const [noReplyMinutes, setNoReplyMinutes] = useState(120);
+  const [planLocked, setPlanLocked] = useState(false);
+  const [planCode, setPlanCode] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
+      const entitlementResponse = await fetch('/api/account/entitlements', { cache: 'no-store' });
+      const entitlementPayload = await entitlementResponse.json();
+      if (!entitlementResponse.ok) throw new Error(entitlementPayload.error);
+      setPlanCode(entitlementPayload.entitlements?.planCode ?? null);
+      if (!entitlementPayload.entitlements?.features?.yeastar_telephony) {
+        setPlanLocked(true);
+        return;
+      }
+      setPlanLocked(false);
       const response = await fetch('/api/telephony/config');
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error);
@@ -84,6 +95,25 @@ export function TelephonyConfig() {
   const led = telephony.connected ? 'bg-emerald-500' : telephony.connecting ? 'animate-pulse bg-amber-400' : 'bg-red-500';
   const firstIntegration = canManageIntegration && !integrationReady;
   const cannotSave = saving || loading || !extension.trim() || (firstIntegration && (!pbxUrl || !accessId || !accessKey));
+
+  if (!loading && planLocked) {
+    const planName = planCode === 'ai' ? 'IA omnicanal' : planCode ?? 'actual';
+    return (
+      <div>
+        <SettingsPanelHead title="Telefonía" description="Gestiona la integración y extensiones Yeastar cuando estén incluidas en tu servicio." />
+        <Card className="border-amber-500/30">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2"><LockKeyhole className="size-4 text-amber-500" /> Yeastar WebRTC no está incluido</CardTitle>
+            <CardDescription>Tu cuenta tiene el plan {planName}. La telefonía Yeastar requiere el plan IA + voz Yeastar o IA + Yeastar + voz WhatsApp.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm text-muted-foreground">
+            <p>Tu configuración, conversaciones y usuarios permanecen intactos. Para habilitar llamadas, softphone, historial y supervisión, solicita la actualización de tu plan al administrador comercial.</p>
+            <Button type="button" variant="outline" onClick={() => { window.location.href = 'mailto:soporte@aurionova.com?subject=Solicitud%20de%20activación%20Yeastar'; }}>Solicitar actualización</Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div>
