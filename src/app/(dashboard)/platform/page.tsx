@@ -18,7 +18,7 @@ type PlatformAccount = {
   owner: { full_name: string | null; email: string | null } | null
   members: number
   team: PlatformMember[]
-  subscription: { plan_code: PlanCode; seat_limit: number; status: SubscriptionStatus; ends_at: string | null } | null
+  subscription: { plan_code: PlanCode; seat_limit: number; status: SubscriptionStatus; ends_at: string | null; grace_days: number; contract_reference: string | null; invoice_reference: string | null; internal_notes: string | null } | null
 }
 
 type PlatformMember = {
@@ -50,7 +50,7 @@ export default function PlatformPage() {
   const [submitting, setSubmitting] = useState(false)
   const [allowed, setAllowed] = useState(true)
   const [editing, setEditing] = useState<PlatformAccount | null>(null)
-  const [editForm, setEditForm] = useState({ account_name: '', plan_code: 'ai' as PlanCode, seat_limit: '1', status: 'active' as SubscriptionStatus, ends_at: '' })
+  const [editForm, setEditForm] = useState({ account_name: '', plan_code: 'ai' as PlanCode, seat_limit: '1', status: 'active' as SubscriptionStatus, ends_at: '', grace_days: '0', contract_reference: '', invoice_reference: '', internal_notes: '' })
   const [actionId, setActionId] = useState<string | null>(null)
   const [form, setForm] = useState({ account_name: '', owner_name: '', owner_email: '', plan_code: 'ai' as PlanCode, seat_limit: '1', access_days: '0' })
   const [managingAccount, setManagingAccount] = useState<PlatformAccount | null>(null)
@@ -105,7 +105,7 @@ export default function PlatformPage() {
       return
     }
     setEditing(account)
-    setEditForm({ account_name: account.name, plan_code: account.subscription.plan_code, seat_limit: String(account.subscription.seat_limit), status: account.subscription.status, ends_at: dateInputValue(account.subscription.ends_at) })
+    setEditForm({ account_name: account.name, plan_code: account.subscription.plan_code, seat_limit: String(account.subscription.seat_limit), status: account.subscription.status, ends_at: dateInputValue(account.subscription.ends_at), grace_days: String(account.subscription.grace_days ?? 0), contract_reference: account.subscription.contract_reference ?? '', invoice_reference: account.subscription.invoice_reference ?? '', internal_notes: account.subscription.internal_notes ?? '' })
   }
 
   const saveEdit = async (event: React.FormEvent) => {
@@ -115,7 +115,7 @@ export default function PlatformPage() {
     try {
       const response = await fetch(`/api/platform/accounts/${editing.id}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...editForm, seat_limit: Number(editForm.seat_limit) }),
+        body: JSON.stringify({ ...editForm, seat_limit: Number(editForm.seat_limit), grace_days: Number(editForm.grace_days) }),
       })
       const json = await response.json()
       if (!response.ok) throw new Error(json.error ?? 'No se pudo actualizar la cuenta.')
@@ -266,6 +266,10 @@ export default function PlatformPage() {
           <div className="space-y-2"><Label htmlFor="edit-account-name">Nombre comercial</Label><Input id="edit-account-name" value={editForm.account_name} onChange={(event) => setEditForm((current) => ({ ...current, account_name: event.target.value }))} required maxLength={80} /></div>
           <div className="space-y-2"><Label htmlFor="edit-seat-limit">Usuarios contratados</Label><Input id="edit-seat-limit" type="number" min={1} max={1000} value={editForm.seat_limit} onChange={(event) => setEditForm((current) => ({ ...current, seat_limit: event.target.value }))} required /></div>
           <div className="space-y-2"><Label htmlFor="edit-ends-at">Acceso hasta</Label><Input id="edit-ends-at" type="date" value={editForm.ends_at} onChange={(event) => setEditForm((current) => ({ ...current, ends_at: event.target.value }))} /><p className="text-xs text-muted-foreground">Déjalo vacío para acceso sin vencimiento.</p></div>
+          <div className="space-y-2"><Label htmlFor="edit-grace-days">Días de gracia</Label><Input id="edit-grace-days" type="number" min={0} max={90} value={editForm.grace_days} onChange={(event) => setEditForm((current) => ({ ...current, grace_days: event.target.value }))} /><p className="text-xs text-muted-foreground">Tiempo adicional antes de bloquear un servicio vencido.</p></div>
+          <div className="space-y-2"><Label htmlFor="edit-contract">Referencia de contrato</Label><Input id="edit-contract" maxLength={160} value={editForm.contract_reference} onChange={(event) => setEditForm((current) => ({ ...current, contract_reference: event.target.value }))} /></div>
+          <div className="space-y-2"><Label htmlFor="edit-invoice">Referencia de factura</Label><Input id="edit-invoice" maxLength={160} value={editForm.invoice_reference} onChange={(event) => setEditForm((current) => ({ ...current, invoice_reference: event.target.value }))} /></div>
+          <div className="space-y-2 md:col-span-2"><Label htmlFor="edit-commercial-notes">Notas internas comerciales</Label><textarea id="edit-commercial-notes" maxLength={4000} value={editForm.internal_notes} onChange={(event) => setEditForm((current) => ({ ...current, internal_notes: event.target.value }))} className="min-h-24 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm" /><p className="text-xs text-muted-foreground">Sólo visibles para operación de plataforma.</p></div>
           <div className="space-y-2"><Label>Plan</Label><Select value={editForm.plan_code} onValueChange={(value) => setEditForm((current) => ({ ...current, plan_code: value as PlanCode }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{(Object.keys(PLAN_LABELS) as PlanCode[]).map((plan) => <SelectItem key={plan} value={plan}>{PLAN_LABELS[plan]}</SelectItem>)}</SelectContent></Select></div>
           <div className="space-y-2"><Label>Estado del servicio</Label><Select value={editForm.status} onValueChange={(value) => setEditForm((current) => ({ ...current, status: value as SubscriptionStatus }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{(Object.keys(STATUS_LABELS) as SubscriptionStatus[]).map((status) => <SelectItem key={status} value={status}>{STATUS_LABELS[status]}</SelectItem>)}</SelectContent></Select></div>
           <div className="flex items-end gap-2"><Button type="submit" disabled={actionId === editing.id}>{actionId === editing.id ? <LoaderCircle className="animate-spin" /> : <Pencil />}Guardar cambios</Button><Button type="button" variant="outline" onClick={() => setEditing(null)} disabled={actionId === editing.id}>Cancelar</Button></div>

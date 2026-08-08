@@ -32,6 +32,10 @@ type SubscriptionRow = {
   seat_limit: number
   status: string
   ends_at: string | null
+  grace_days: number
+  contract_reference: string | null
+  invoice_reference: string | null
+  internal_notes: string | null
 }
 
 type ProfileRow = {
@@ -49,7 +53,7 @@ export async function GET() {
     const admin = adminClient()
     const [{ data: accounts, error: accountsError }, { data: subscriptions, error: subscriptionsError }, { data: profiles, error: profilesError }] = await Promise.all([
       admin.from('accounts').select('id, name, owner_user_id, created_at').order('created_at', { ascending: false }),
-      admin.from('account_subscriptions').select('account_id, plan_code, seat_limit, status, ends_at'),
+      admin.from('account_subscriptions').select('account_id, plan_code, seat_limit, status, ends_at, grace_days, contract_reference, invoice_reference, internal_notes'),
       admin.from('profiles').select('account_id, user_id, full_name, email, account_role, is_active'),
     ])
     if (accountsError || subscriptionsError || profilesError) throw accountsError ?? subscriptionsError ?? profilesError
@@ -88,6 +92,10 @@ export async function GET() {
             seat_limit: subscription.seat_limit,
             status: subscription.status,
             ends_at: subscription.ends_at,
+            grace_days: subscription.grace_days,
+            contract_reference: subscription.contract_reference,
+            invoice_reference: subscription.invoice_reference,
+            internal_notes: subscription.internal_notes,
           } : null,
         }
       }),

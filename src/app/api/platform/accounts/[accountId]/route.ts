@@ -8,6 +8,8 @@ import { checkRateLimit, RATE_LIMITS, rateLimitResponse } from '@/lib/rate-limit
 
 const MAX_ACCOUNT_NAME = 80
 const SUBSCRIPTION_STATUSES = ['active', 'trial', 'suspended', 'cancelled'] as const
+const MAX_REFERENCE = 160
+const MAX_NOTES = 4000
 
 function parseEndDate(value: unknown) {
   if (value === '' || value === null || value === undefined) return null
@@ -36,21 +38,30 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ac
     const seatLimit = typeof body?.seat_limit === 'number' ? body.seat_limit : Number(body?.seat_limit)
     const status = typeof body?.status === 'string' ? body.status : ''
     const endsAt = parseEndDate(body?.ends_at)
+    const graceDays = typeof body?.grace_days === 'number' ? body.grace_days : Number(body?.grace_days ?? 0)
+    const contractReference = typeof body?.contract_reference === 'string' ? body.contract_reference.trim() : ''
+    const invoiceReference = typeof body?.invoice_reference === 'string' ? body.invoice_reference.trim() : ''
+    const internalNotes = typeof body?.internal_notes === 'string' ? body.internal_notes.trim() : ''
     if (!name || name.length > MAX_ACCOUNT_NAME) return NextResponse.json({ error: 'Indica un nombre comercial de hasta 80 caracteres.' }, { status: 400 })
     if (!(PLAN_CODES as readonly string[]).includes(planCode)) return NextResponse.json({ error: 'El plan seleccionado no es válido.' }, { status: 400 })
     if (!Number.isInteger(seatLimit) || seatLimit < 1 || seatLimit > 1000) return NextResponse.json({ error: 'Los usuarios contratados deben estar entre 1 y 1000.' }, { status: 400 })
     if (!(SUBSCRIPTION_STATUSES as readonly string[]).includes(status)) return NextResponse.json({ error: 'El estado seleccionado no es válido.' }, { status: 400 })
     if (endsAt === undefined) return NextResponse.json({ error: 'La fecha de finalización no es válida.' }, { status: 400 })
 
+    if (!Number.isInteger(graceDays) || graceDays < 0 || graceDays > 90) return NextResponse.json({ error: 'El período de gracia debe estar entre 0 y 90 días.' }, { status: 400 })
+    if (contractReference.length > MAX_REFERENCE || invoiceReference.length > MAX_REFERENCE || internalNotes.length > MAX_NOTES) return NextResponse.json({ error: 'Una referencia o nota excede el tamaño permitido.' }, { status: 400 })
+
     const admin = adminClient()
+    const { data: current } = await admin.from('account_subscriptions').select('plan_code, seat_limit, status, ends_at, grace_days, contract_reference, invoice_reference, internal_notes').eq('account_id', accountId).maybeSingle()
     const { count, error: countError } = await admin.from('profiles').select('*', { count: 'exact', head: true }).eq('account_id', accountId)
     if (countError) throw countError
     if ((count ?? 0) > seatLimit) return NextResponse.json({ error: `No puedes bajar el límite a ${seatLimit}: la cuenta ya tiene ${count} usuario(s).` }, { status: 400 })
 
     const { error: accountError } = await admin.from('accounts').update({ name }).eq('id', accountId)
     if (accountError) throw accountError
-    const { error: subscriptionError } = await admin.from('account_subscriptions').update({ plan_code: planCode, seat_limit: seatLimit, status, ends_at: endsAt }).eq('account_id', accountId)
+    const { error: subscriptionError } = await admin.from('account_subscriptions').update({ plan_code: planCode, seat_limit: seatLimit, status, ends_at: endsAt, grace_days: body?.grace_days === undefined ? current?.grace_days ?? 0 : graceDays, contract_reference: body?.contract_reference === undefined ? current?.contract_reference ?? null : contractReference || null, invoice_reference: body?.invoice_reference === undefined ? current?.invoice_reference ?? null : invoiceReference || null, internal_notes: body?.internal_notes === undefined ? current?.internal_notes ?? null : internalNotes || null }).eq('account_id', accountId)
     if (subscriptionError) throw subscriptionError
+    await admin.from('platform_commercial_audit').insert({ account_id: accountId, account_name: name, actor_user_id: operator.user.id, action: status !== current?.status ? `service_${status}` : 'commercial_record_updated', details: { before: current, after: { plan_code: planCode, seat_limit: seatLimit, status, ends_at: endsAt, grace_days: graceDays, contract_reference: contractReference || null, invoice_reference: invoiceReference || null } } })
     return NextResponse.json({ message: 'Plan y límite de usuarios actualizados.' })
   } catch (error) {
     return toErrorResponse(error)
