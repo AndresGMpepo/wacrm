@@ -54,10 +54,10 @@ export function AgentOperationalPanel() {
     if (!agent.critical_conversation_id) return
     setTakingFollowUp(agent.id)
     try {
-      const response = await fetch(`/api/conversations/${agent.critical_conversation_id}/internal-notes`, {
+      const response = await fetch('/api/supervision/interventions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ body: `Seguimiento de supervisión iniciado para una conversación con alerta de sentimiento negativo.`, kind: 'note' }),
+        body: JSON.stringify({ conversationId: agent.critical_conversation_id, action: 'claim' }),
       })
       const data = await response.json()
       if (!response.ok) throw new Error(data.error ?? 'No se pudo registrar el seguimiento.')

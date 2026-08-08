@@ -3,6 +3,7 @@
 import { ShieldAlert } from 'lucide-react'
 import { useAuth } from '@/hooks/use-auth'
 import { AgentOperationalPanel } from '@/components/supervision/agent-operational-panel'
+import { CriticalInterventionQueue } from '@/components/supervision/critical-intervention-queue'
 import { TelephonyLiveMonitor } from '@/components/supervision/telephony-live-monitor'
 
 export default function SupervisionPage() {
@@ -22,6 +23,7 @@ export default function SupervisionPage() {
       {allowed ? (
         <>
           <AgentOperationalPanel />
+          <CriticalInterventionQueue />
           <TelephonyLiveMonitor />
         </>
       ) : (
