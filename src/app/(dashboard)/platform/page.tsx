@@ -94,7 +94,7 @@ export default function PlatformPage() {
             <div className="space-y-2"><Label htmlFor="owner_email">Correo del propietario</Label><Input id="owner_email" type="email" value={form.owner_email} onChange={(event) => setForm((current) => ({ ...current, owner_email: event.target.value }))} required /></div>
             <div className="space-y-2"><Label htmlFor="seat_limit">Usuarios contratados</Label><Input id="seat_limit" type="number" min={1} max={1000} value={form.seat_limit} onChange={(event) => setForm((current) => ({ ...current, seat_limit: event.target.value }))} required /></div>
             <div className="space-y-2"><Label>Plan</Label><Select value={form.plan_code} onValueChange={(value) => setForm((current) => ({ ...current, plan_code: value as PlanCode }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{(Object.keys(PLAN_LABELS) as PlanCode[]).map((plan) => <SelectItem key={plan} value={plan}>{PLAN_LABELS[plan]}</SelectItem>)}</SelectContent></Select></div>
-            <div className="flex items-end"><Button className="w-full md:w-auto" disabled={submitting}>{submitting ? <LoaderCircle className="animate-spin" /> : <UserPlus />}Crear e invitar</Button></div>
+            <div className="flex items-end"><Button type="submit" className="w-full md:w-auto" disabled={submitting}>{submitting ? <LoaderCircle className="animate-spin" /> : <UserPlus />}Crear e invitar</Button></div>
           </form>
         </CardContent>
       </Card>
