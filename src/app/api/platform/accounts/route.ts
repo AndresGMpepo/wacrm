@@ -8,6 +8,7 @@ import { checkRateLimit, RATE_LIMITS, rateLimitResponse } from '@/lib/rate-limit
 
 const MAX_ACCOUNT_NAME = 80
 const MAX_OWNER_NAME = 120
+const MAX_ACCESS_DAYS = 3650
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 function adminClient() {
@@ -30,6 +31,7 @@ type SubscriptionRow = {
   plan_code: PlanCode
   seat_limit: number
   status: string
+  ends_at: string | null
 }
 
 export async function GET() {
@@ -38,7 +40,7 @@ export async function GET() {
     const admin = adminClient()
     const [{ data: accounts, error: accountsError }, { data: subscriptions, error: subscriptionsError }, { data: profiles, error: profilesError }] = await Promise.all([
       admin.from('accounts').select('id, name, owner_user_id, created_at').order('created_at', { ascending: false }),
-      admin.from('account_subscriptions').select('account_id, plan_code, seat_limit, status'),
+      admin.from('account_subscriptions').select('account_id, plan_code, seat_limit, status, ends_at'),
       admin.from('profiles').select('account_id, user_id, full_name, email'),
     ])
     if (accountsError || subscriptionsError || profilesError) throw accountsError ?? subscriptionsError ?? profilesError
@@ -64,6 +66,7 @@ export async function GET() {
             plan_code: subscription.plan_code,
             seat_limit: subscription.seat_limit,
             status: subscription.status,
+            ends_at: subscription.ends_at,
           } : null,
         }
       }),
@@ -85,17 +88,21 @@ export async function POST(request: Request) {
     const ownerEmail = typeof body?.owner_email === 'string' ? body.owner_email.trim().toLowerCase() : ''
     const planCode = typeof body?.plan_code === 'string' ? body.plan_code : ''
     const seatLimit = typeof body?.seat_limit === 'number' ? body.seat_limit : Number(body?.seat_limit)
+    const accessDays = typeof body?.access_days === 'number' ? body.access_days : Number(body?.access_days ?? 0)
 
     if (!accountName || accountName.length > MAX_ACCOUNT_NAME) return NextResponse.json({ error: 'Indica un nombre de cuenta de hasta 80 caracteres.' }, { status: 400 })
     if (!ownerName || ownerName.length > MAX_OWNER_NAME) return NextResponse.json({ error: 'Indica el nombre del propietario.' }, { status: 400 })
     if (!EMAIL_RE.test(ownerEmail)) return NextResponse.json({ error: 'Indica un correo válido para el propietario.' }, { status: 400 })
     if (!(PLAN_CODES as readonly string[]).includes(planCode)) return NextResponse.json({ error: 'El plan seleccionado no es válido.' }, { status: 400 })
     if (!Number.isInteger(seatLimit) || seatLimit < 1 || seatLimit > 1000) return NextResponse.json({ error: 'Los usuarios contratados deben estar entre 1 y 1000.' }, { status: 400 })
+    if (!Number.isInteger(accessDays) || accessDays < 0 || accessDays > MAX_ACCESS_DAYS) return NextResponse.json({ error: 'Los días de acceso deben estar entre 0 y 3650.' }, { status: 400 })
+
+    const endsAt = accessDays > 0 ? new Date(Date.now() + accessDays * 86_400_000).toISOString() : null
 
     const admin = adminClient()
     const { data: invitation, error: invitationError } = await admin.auth.admin.inviteUserByEmail(ownerEmail, {
       data: { full_name: ownerName, platform_provisioned: true },
-      redirectTo: `${appUrl()}/login`,
+      redirectTo: `${appUrl()}/set-password`,
     })
     if (invitationError || !invitation.user) {
       return NextResponse.json({ error: invitationError?.message ?? 'No se pudo enviar la invitación.' }, { status: 400 })
@@ -116,7 +123,8 @@ export async function POST(request: Request) {
         account_id: account.id,
         plan_code: planCode,
         seat_limit: seatLimit,
-        status: 'active',
+        status: accessDays > 0 ? 'trial' : 'active',
+        ends_at: endsAt,
       })
       if (subscriptionError) throw subscriptionError
 
@@ -130,7 +138,7 @@ export async function POST(request: Request) {
       if (profileError) throw profileError
 
       return NextResponse.json({
-        account: { id: account.id, name: account.name, plan_code: planCode, seat_limit: seatLimit },
+        account: { id: account.id, name: account.name, plan_code: planCode, seat_limit: seatLimit, ends_at: endsAt },
         message: 'Cuenta creada. El propietario recibió un correo para definir su contraseña.',
       }, { status: 201 })
     } catch (provisionError) {

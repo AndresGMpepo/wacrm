@@ -18,6 +18,7 @@ type SubscriptionRow = {
   plan_code: string
   seat_limit: number
   status: string
+  ends_at: string | null
   feature_overrides: Record<string, unknown> | null
 }
 
@@ -25,6 +26,7 @@ export type AccountEntitlements = {
   planCode: PlanCode
   seatLimit: number
   status: 'active' | 'trial' | 'suspended' | 'cancelled'
+  endsAt: string | null
   features: Record<Entitlement, boolean>
 }
 
@@ -46,7 +48,7 @@ function isSubscriptionStatus(value: string): value is AccountEntitlements['stat
 export async function getAccountEntitlements(supabase: SupabaseClient, accountId: string): Promise<AccountEntitlements | null> {
   const { data, error } = await supabase
     .from('account_subscriptions')
-    .select('plan_code, seat_limit, status, feature_overrides')
+    .select('plan_code, seat_limit, status, ends_at, feature_overrides')
     .eq('account_id', accountId)
     .maybeSingle()
   if (error) throw error
@@ -56,13 +58,14 @@ export async function getAccountEntitlements(supabase: SupabaseClient, accountId
   const planCode = row.plan_code
   const status = row.status
   if (!isPlanCode(planCode) || !isSubscriptionStatus(status)) return null
-  const enabled = status === 'active' || status === 'trial'
+  const endsAt = row.ends_at ?? null
+  const enabled = (status === 'active' || status === 'trial') && (!endsAt || new Date(endsAt).getTime() > Date.now())
   const features = Object.fromEntries(ENTITLEMENTS.map((feature) => {
     const override = row.feature_overrides?.[feature]
     return [feature, enabled && (typeof override === 'boolean' ? override : PLAN_FEATURES[planCode][feature])]
   })) as Record<Entitlement, boolean>
 
-  return { planCode, seatLimit: row.seat_limit, status, features }
+  return { planCode, seatLimit: row.seat_limit, status, endsAt, features }
 }
 
 /**

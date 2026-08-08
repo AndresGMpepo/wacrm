@@ -70,11 +70,26 @@ export async function middleware(request: NextRequest) {
   }
 
   // Protected pages - redirect to login if not authenticated
-  const protectedPaths = ['/dashboard', '/inbox', '/contacts', '/pipelines', '/broadcasts', '/automations', '/settings']
+  const protectedPaths = ['/dashboard', '/inbox', '/contacts', '/pipelines', '/broadcasts', '/automations', '/settings', '/notifications', '/call-tasks', '/flows', '/agents', '/supervision']
   if (!user && protectedPaths.some(path => request.nextUrl.pathname.startsWith(path))) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
     return withRefreshedCookies(NextResponse.redirect(url))
+  }
+
+  // RLS is the hard boundary (migration 057) for paused, cancelled and
+  // expired-demo accounts. This companion redirect makes the experience
+  // understandable instead of leaving the client with empty data after a
+  // session that was already open at the moment the service was paused.
+  if (user && protectedPaths.some(path => request.nextUrl.pathname.startsWith(path))) {
+    const { data: accessRows, error: accessError } = await supabase.rpc('current_account_access_status')
+    const access = Array.isArray(accessRows) ? accessRows[0] : null
+    if (!accessError && access && !access.is_active) {
+      const url = request.nextUrl.clone()
+      url.pathname = '/account-suspended'
+      url.search = access.status === 'trial' && access.ends_at ? `?until=${encodeURIComponent(access.ends_at)}` : ''
+      return withRefreshedCookies(NextResponse.redirect(url))
+    }
   }
 
   // API routes that need auth (not webhooks)
