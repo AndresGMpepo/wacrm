@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { AlertTriangle, CheckCircle2, Loader2, RefreshCw, UserRoundCheck } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
+import { createClient } from '@/lib/supabase/client'
 
 type Intervention = {
   conversation_id: string
@@ -39,6 +40,17 @@ export function CriticalInterventionQueue() {
   useEffect(() => {
     const timer = window.setInterval(() => void load(true), 15_000)
     return () => window.clearInterval(timer)
+  }, [load])
+
+  useEffect(() => {
+    const supabase = createClient()
+    const channel = supabase
+      .channel('supervision-intervention-queue')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' }, () => void load(true))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'ai_conversation_analyses' }, () => void load(true))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'supervision_interventions' }, () => void load(true))
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
   }, [load])
 
   const act = async (item: Intervention, action: 'claim' | 'resolve') => {

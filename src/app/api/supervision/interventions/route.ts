@@ -45,6 +45,10 @@ export async function GET() {
         const analysis = latest.get(conversation.id)!
         const contact = contactOf(conversation.contacts)
         const intervention = interventionByConversation.get(conversation.id)
+        // Resolving closes the conversation. If an agent or customer reopens
+        // it later, the prior resolution is historical only: it re-enters the
+        // live queue as pending and needs a new supervisor decision.
+        const interventionStatus = intervention?.status === 'resolved' ? 'pending' : intervention?.status ?? 'pending'
         return {
           conversation_id: conversation.id,
           contact_name: contact?.name || contact?.phone || 'Contacto sin nombre',
@@ -52,7 +56,7 @@ export async function GET() {
           sentiment_score: analysis.sentiment_score,
           next_best_action: analysis.next_best_action,
           analyzed_at: analysis.updated_at,
-          intervention_status: intervention?.status ?? 'pending',
+          intervention_status: interventionStatus,
           started_by_user_id: intervention?.started_by_user_id ?? null,
           started_at: intervention?.started_at ?? null,
           resolved_at: intervention?.resolved_at ?? null,
@@ -92,6 +96,14 @@ export async function POST(request: Request) {
       if (current?.status === 'in_progress' && current.started_by_user_id !== userId) {
         return NextResponse.json({ error: 'Otro supervisor ya tomó este seguimiento.' }, { status: 409 })
       }
+      // Taking an intervention has an operational effect, not only an audit
+      // effect: the responsible supervisor becomes the conversation owner.
+      const { error: assignmentError } = await supabase
+        .from('conversations')
+        .update({ assigned_agent_id: userId, status: 'open' })
+        .eq('id', conversationId)
+        .eq('account_id', accountId)
+      if (assignmentError) throw assignmentError
       const payload = { account_id: accountId, conversation_id: conversationId, status: 'in_progress', started_by_user_id: userId, started_at: new Date().toISOString(), resolved_by_user_id: null, resolved_at: null, updated_at: new Date().toISOString() }
       const { error } = current
         ? await supabase.from('supervision_interventions').update(payload).eq('id', current.id)
@@ -102,6 +114,15 @@ export async function POST(request: Request) {
       }
     } else {
       if (!current || current.status !== 'in_progress') return NextResponse.json({ error: 'No existe un seguimiento activo para resolver.' }, { status: 409 })
+      // A resolved intervention closes the CRM conversation. The customer is
+      // never messaged by this action; it simply removes the case from open
+      // operational queues and records who resolved it.
+      const { error: closeError } = await supabase
+        .from('conversations')
+        .update({ assigned_agent_id: userId, status: 'closed' })
+        .eq('id', conversationId)
+        .eq('account_id', accountId)
+      if (closeError) throw closeError
       const { error } = await supabase.from('supervision_interventions').update({ status: 'resolved', resolved_by_user_id: userId, resolved_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', current.id)
       if (error) throw error
       await supabase.from('conversation_internal_notes').insert({ account_id: accountId, conversation_id: conversationId, author_user_id: userId, body: 'Seguimiento de supervisión marcado como resuelto.', kind: 'note' })
