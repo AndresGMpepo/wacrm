@@ -101,7 +101,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
       await db.from('omnichannel_connectors').update({ status: 'active', last_event_at: new Date().toISOString(), last_error: null }).eq('id', connector.id)
       return NextResponse.json({ received: true, test: true })
     }
-    const eventType = Number(event.type)
+    // Yeastar's 30031 report body can omit `type`; the event is already
+    // identified by this dedicated, per-connector webhook URL. When the
+    // field is present, still reject a different event defensively.
+    const eventType = event.type == null ? 30031 : Number(event.type)
     if (eventType !== 30031 || !event.msg) {
       await db.from('omnichannel_connectors').update({ status: 'active', last_event_at: new Date().toISOString(), last_error: null }).eq('id', connector.id)
       return NextResponse.json({ received: true, ignored: true })
