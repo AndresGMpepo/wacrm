@@ -17,6 +17,20 @@ type MediaJob = Job & { message_id: string; kind: 'image' | 'voice_note' }
 function startOfDay() { const d = new Date(); d.setHours(0, 0, 0, 0); return d.toISOString() }
 function startOfMonth() { const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); return d.toISOString() }
 
+function chatMediaStoragePath(mediaUrl: string | null | undefined) {
+  if (!mediaUrl) return null
+  try {
+    const publicUrl = new URL(mediaUrl)
+    const supabaseUrl = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL!)
+    const prefix = '/storage/v1/object/public/chat-media/'
+    if (publicUrl.origin !== supabaseUrl.origin || !publicUrl.pathname.startsWith(prefix)) return null
+    const path = publicUrl.pathname.slice(prefix.length).split('/').map(decodeURIComponent).join('/')
+    return path && !path.split('/').some((segment) => segment === '.' || segment === '..') ? path : null
+  } catch {
+    return null
+  }
+}
+
 function parse(raw: string) {
   const match = raw.match(/\{[\s\S]*\}/)
   if (!match) throw new Error('La IA no devolvió JSON válido.')
@@ -142,14 +156,32 @@ async function processMediaJobs(db: ReturnType<typeof supabaseAdmin>) {
       const { data: message } = await db.from('messages').select('id, media_url, sender_type')
         .eq('id', job.message_id).eq('conversation_id', job.conversation_id).maybeSingle()
       const match = typeof message?.media_url === 'string' ? message.media_url.match(/^\/api\/whatsapp\/media\/([^/?#]+)$/) : null
-      if (!message || message.sender_type !== 'customer' || !match?.[1]) {
+      const storagePath = chatMediaStoragePath(message?.media_url)
+      if (!message || message.sender_type !== 'customer' || (!match?.[1] && !storagePath)) {
         await finishMediaJob(db, job, 'skipped_unsupported', 'El medio ya no está disponible para análisis.', 'skipped')
         skipped++; continue
+      }
+      if (storagePath) {
+        const { data: blob, error: storageError } = await db.storage.from('chat-media').download(storagePath)
+        if (storageError || !blob) throw storageError ?? new Error('No se pudo recuperar la imagen guardada.')
+        const bytes = Buffer.from(await blob.arrayBuffer())
+        const mimeType = blob.type || (job.kind === 'image' ? 'image/jpeg' : 'audio/ogg')
+        const value = job.kind === 'image'
+          ? await describeImageWithOpenAi({ apiKey: config.apiKey, bytes, mimeType, timeoutMs: aiRequestTimeoutMs() })
+          : await transcribeAudioWithOpenAi({ apiKey: config.apiKey, bytes, mimeType, timeoutMs: aiRequestTimeoutMs() })
+        const messagePatch = job.kind === 'image'
+          ? { media_analysis_status: 'completed', media_description: value, media_transcript: null, media_analyzed_at: new Date().toISOString(), media_analysis_error: null }
+          : { media_analysis_status: 'completed', media_transcript: value, media_description: null, media_analyzed_at: new Date().toISOString(), media_analysis_error: null }
+        const { error: messageError } = await db.from('messages').update(messagePatch).eq('id', job.message_id)
+        if (messageError) throw messageError
+        await db.from('ai_media_analysis_jobs').update({ status: 'completed', error_message: null }).eq('id', job.id)
+        await db.rpc('queue_ai_analysis_job', { p_account_id: job.account_id, p_conversation_id: job.conversation_id, p_trigger: 'manual', p_delay: '0 minutes' })
+        completed++; continue
       }
       const { data: whatsapp } = await db.from('whatsapp_config').select('access_token').eq('account_id', job.account_id).maybeSingle()
       if (!whatsapp?.access_token) throw new Error('WhatsApp no está configurado para recuperar el medio.')
       const token = decrypt(whatsapp.access_token)
-      const media = await getMediaUrl({ mediaId: match[1], accessToken: token })
+      const media = await getMediaUrl({ mediaId: match![1], accessToken: token })
       const downloaded = await downloadMedia({ downloadUrl: media.url, accessToken: token })
       const mimeType = downloaded.contentType || media.mimeType
       const value = job.kind === 'image'

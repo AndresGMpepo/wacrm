@@ -1,5 +1,9 @@
 "use client";
 
+// Message media can be authenticated blob URLs or third-party provider URLs;
+// Next Image cannot optimize either without weakening the existing media flow.
+/* eslint-disable @next/next/no-img-element */
+
 import { useState, useEffect, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import type { Message, MessageReaction } from "@/types";
@@ -14,12 +18,15 @@ import {
   ImageOff,
   CornerDownLeft,
   Sparkles,
+  Download,
+  Maximize2,
 } from "lucide-react";
 import { format } from "date-fns";
 import { ReplyQuote } from "./reply-quote";
 import { MessageReactions } from "./message-reactions";
 import { InteractivePreview } from "@/components/interactive/interactive-preview";
 import { useTranslations } from "next-intl";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 interface MessageBubbleProps {
   message: Message;
@@ -60,6 +67,7 @@ function MediaImage({ url, alt }: { url: string; alt: string }) {
   const [src, setSrc] = useState<string | null>(null);
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [viewerOpen, setViewerOpen] = useState(false);
 
   const loadImage = useCallback(async () => {
     if (!url) return;
@@ -109,13 +117,46 @@ function MediaImage({ url, alt }: { url: string; alt: string }) {
     );
   }
 
+  const imageSrc = src ?? "";
   return (
-    <img
-      src={src ?? ""}
-      alt={alt}
-      className="max-h-64 max-w-60 rounded-lg object-cover"
-      onError={() => setError(true)}
-    />
+    <>
+      <button
+        type="button"
+        onClick={() => setViewerOpen(true)}
+        className="group relative block overflow-hidden rounded-lg text-left outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        aria-label="Ver imagen ampliada"
+      >
+        <img
+          src={imageSrc}
+          alt={alt}
+          className="max-h-64 max-w-60 rounded-lg object-cover transition-transform duration-200 group-hover:scale-[1.02]"
+          onError={() => setError(true)}
+        />
+        <span className="absolute inset-x-0 bottom-0 flex items-center justify-end bg-gradient-to-t from-black/55 to-transparent px-2 pb-2 pt-8 text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+          <Maximize2 className="h-4 w-4" aria-hidden="true" />
+        </span>
+      </button>
+      <Dialog open={viewerOpen} onOpenChange={setViewerOpen}>
+        <DialogContent className="max-h-[92vh] max-w-5xl gap-3 p-3 sm:max-w-5xl" aria-describedby={undefined}>
+          <DialogHeader className="sr-only">
+            <DialogTitle>{alt}</DialogTitle>
+            <DialogDescription>Vista ampliada de la imagen adjunta.</DialogDescription>
+          </DialogHeader>
+          <img src={imageSrc} alt={alt} className="max-h-[78vh] w-full rounded-lg object-contain" />
+          <div className="flex justify-end pr-10">
+            <a
+              href={imageSrc}
+              download
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex h-8 items-center justify-center gap-2 rounded-md bg-secondary px-3 text-xs font-medium text-secondary-foreground transition-colors hover:bg-secondary/80"
+            >
+              <Download className="h-4 w-4" /> Descargar
+            </a>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
