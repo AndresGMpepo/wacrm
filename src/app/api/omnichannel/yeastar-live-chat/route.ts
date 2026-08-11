@@ -53,7 +53,7 @@ export async function GET() {
   try {
     const { accountId } = await requireEntitlement('yeastar_live_chat', 'admin')
     const { data, error } = await admin().from('omnichannel_connectors')
-      .select('id, display_name, external_channel_id, source_url, status, webhook_secret, outbound_pbx_url, outbound_api_client_id, outbound_api_client_secret, last_event_at, last_error, created_at, updated_at')
+      .select('id, display_name, external_channel_id, source_url, status, webhook_secret, outbound_pbx_url, outbound_api_client_id, outbound_api_client_secret, session_auto_close, session_timeout_value, session_timeout_unit, session_policy_synced_at, last_event_at, last_error, created_at, updated_at')
       .eq('account_id', accountId).eq('provider', PROVIDER)
       .order('created_at', { ascending: true })
     if (error) throw error
@@ -67,6 +67,7 @@ export async function GET() {
         webhookConfigured: Boolean(connector.webhook_secret),
         outboundConfigured: Boolean(connector.outbound_pbx_url && connector.outbound_api_client_id && connector.outbound_api_client_secret),
         outboundPbxUrl: connector.outbound_pbx_url,
+        sessionPolicy: connector.session_auto_close === null ? null : { autoClose: connector.session_auto_close, timeout: connector.session_timeout_value, unit: connector.session_timeout_unit, syncedAt: connector.session_policy_synced_at },
         webhookUrl: webhookUrl(connector.id),
         lastEventAt: connector.last_event_at,
         lastError: connector.last_error,
@@ -146,7 +147,7 @@ export async function POST(request: Request) {
     const query = existing
       ? db.from('omnichannel_connectors').update(payload).eq('id', existing.id).eq('account_id', accountId)
       : db.from('omnichannel_connectors').insert(payload)
-    const { data, error } = await query.select('id, display_name, external_channel_id, source_url, status, webhook_secret, outbound_pbx_url, outbound_api_client_id, outbound_api_client_secret, last_event_at, last_error, created_at, updated_at').single()
+    const { data, error } = await query.select('id, display_name, external_channel_id, source_url, status, webhook_secret, outbound_pbx_url, outbound_api_client_id, outbound_api_client_secret, session_auto_close, session_timeout_value, session_timeout_unit, session_policy_synced_at, last_event_at, last_error, created_at, updated_at').single()
     if (error) throw error
 
     return NextResponse.json({
@@ -159,6 +160,7 @@ export async function POST(request: Request) {
         webhookConfigured: Boolean(data.webhook_secret),
         outboundConfigured: Boolean(data.outbound_pbx_url && data.outbound_api_client_id && data.outbound_api_client_secret),
         outboundPbxUrl: data.outbound_pbx_url,
+        sessionPolicy: data.session_auto_close === null ? null : { autoClose: data.session_auto_close, timeout: data.session_timeout_value, unit: data.session_timeout_unit, syncedAt: data.session_policy_synced_at },
         webhookUrl: webhookUrl(data.id),
         lastEventAt: data.last_event_at,
         lastError: data.last_error,
