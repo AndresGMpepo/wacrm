@@ -17,6 +17,7 @@ type YeastarReply = {
   access_token?: string
   access_token_expire_time?: number
   data?: { msg_id?: number | string }
+  list?: Array<{ id?: number | string; name?: string; uri?: string; type?: string; size?: number | string }>
 }
 
 type CachedToken = { value: string; expiresAt: number }
@@ -35,6 +36,18 @@ function apiUrl(pbxUrl: string, endpoint: string) {
 
 async function reply(response: Response): Promise<YeastarReply> {
   return response.json().catch(() => ({})) as Promise<YeastarReply>
+}
+
+function safeChatMediaUrl(value: unknown) {
+  if (typeof value !== 'string' || !value.trim()) return null
+  const storageUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+  if (!storageUrl) throw new Error('La configuración de almacenamiento no está disponible.')
+  const url = new URL(value)
+  const allowedOrigin = new URL(storageUrl).origin
+  if (url.origin !== allowedOrigin || !url.pathname.includes('/storage/v1/object/public/chat-media/')) {
+    throw new Error('La imagen debe cargarse desde el almacenamiento seguro de WACRM.')
+  }
+  return url.toString()
 }
 
 async function accessToken(accountId: string, pbxUrl: string, clientId: string, clientSecret: string) {
@@ -68,7 +81,12 @@ export async function POST(request: Request) {
     const body = await request.json().catch(() => null) as Record<string, unknown> | null
     const conversationId = typeof body?.conversation_id === 'string' ? body.conversation_id.trim() : ''
     const text = typeof body?.content_text === 'string' ? body.content_text.trim() : ''
-    if (!conversationId || !text) return NextResponse.json({ error: 'Indica una conversación y un mensaje.' }, { status: 400 })
+    const rawMessageType = typeof body?.message_type === 'string' ? body.message_type : 'text'
+    if (rawMessageType !== 'text' && rawMessageType !== 'image') return NextResponse.json({ error: 'Yeastar Live Chat actualmente admite texto e imágenes.' }, { status: 400 })
+    const messageType = rawMessageType as 'text' | 'image'
+    const mediaUrl = safeChatMediaUrl(body?.media_url)
+    if (!conversationId || (!text && !mediaUrl)) return NextResponse.json({ error: 'Indica una conversación y un mensaje o imagen.' }, { status: 400 })
+    if (messageType === 'image' && !mediaUrl) return NextResponse.json({ error: 'Selecciona una imagen para enviar.' }, { status: 400 })
     if (text.length > 4_000) return NextResponse.json({ error: 'El mensaje supera el límite de 4,000 caracteres de Yeastar Live Chat.' }, { status: 400 })
 
     const db = admin()
@@ -108,12 +126,47 @@ export async function POST(request: Request) {
       decrypt(clientId),
       decrypt(clientSecret),
     )
+    let uploadedFile: NonNullable<YeastarReply['list']>[number] | null = null
+    if (mediaUrl) {
+      const source = await fetch(mediaUrl, { signal: AbortSignal.timeout(15_000) })
+      if (!source.ok) return NextResponse.json({ error: 'No se pudo leer la imagen cargada.' }, { status: 422 })
+      const contentType = source.headers.get('content-type') ?? ''
+      const declaredSize = Number(source.headers.get('content-length') ?? 0)
+      if (!contentType.startsWith('image/') || (Number.isFinite(declaredSize) && declaredSize > 16 * 1024 * 1024)) {
+        return NextResponse.json({ error: 'La imagen debe ser válida y no superar 16 MB.' }, { status: 422 })
+      }
+      const blob = await source.blob()
+      if (blob.size > 16 * 1024 * 1024) return NextResponse.json({ error: 'La imagen no puede superar 16 MB.' }, { status: 422 })
+      const uploadUrl = apiUrl(pbxUrl, 'message/batchupload')
+      uploadUrl.searchParams.set('access_token', token)
+      const form = new FormData()
+      form.append('files', blob, 'wacrm-live-chat-image')
+      const uploadResponse = await fetch(uploadUrl, {
+        method: 'POST',
+        headers: { 'User-Agent': 'OpenAPI' },
+        body: form,
+        signal: AbortSignal.timeout(20_000),
+      })
+      const uploadResult = await reply(uploadResponse)
+      uploadedFile = uploadResult.list?.[0] ?? null
+      if (!uploadResponse.ok || uploadResult.errcode !== 0 || !uploadedFile?.uri) {
+        return NextResponse.json({ error: uploadResult.errmsg || 'Yeastar no pudo cargar la imagen para el chat.' }, { status: 502 })
+      }
+    }
     const sendUrl = apiUrl(pbxUrl, 'message/send')
     sendUrl.searchParams.set('access_token', token)
     const response = await fetch(sendUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'User-Agent': 'OpenAPI' },
-      body: JSON.stringify({ sender_type: 9, sender_no: 'API', session_id: sessionId, msg_kind: 0, msg_type: 0, msg_body: text }),
+      body: JSON.stringify({
+        sender_type: 9,
+        sender_no: 'API',
+        session_id: sessionId,
+        msg_kind: 0,
+        msg_type: 0,
+        ...(text ? { msg_body: text } : {}),
+        ...(uploadedFile ? { files: [uploadedFile] } : {}),
+      }),
       signal: AbortSignal.timeout(15_000),
     })
     const result = await reply(response)
@@ -127,8 +180,9 @@ export async function POST(request: Request) {
       conversation_id: conversation.id,
       sender_type: 'agent',
       sender_id: userId,
-      content_type: 'text',
+      content_type: uploadedFile ? 'image' : 'text',
       content_text: text,
+      media_url: uploadedFile ? mediaUrl : null,
       message_id: messageId,
       status: 'sent',
       created_at: now,

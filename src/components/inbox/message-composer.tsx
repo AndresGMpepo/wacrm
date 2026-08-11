@@ -44,6 +44,7 @@ import { toast } from "sonner";
 import {
   uploadAccountMedia,
   deleteAccountMedia,
+  MEDIA_MAX_BYTES,
   MEDIA_MAX_BYTES_BY_KIND,
 } from "@/lib/storage/upload-media";
 import { ReplyQuote } from "./reply-quote";
@@ -116,6 +117,8 @@ interface MessageComposerProps {
   onSendMedia: (payload: SendMediaPayload) => void;
   onSendInteractive: (payload: InteractiveMessagePayload, replyToId?: string) => void;
   onOpenTemplates: () => void;
+  /** Undefined means every WhatsApp attachment type is available. */
+  supportedMediaKinds?: ComposerMediaKind[];
   replyTo?: ReplyDraft | null;
   onClearReply?: () => void;
 }
@@ -138,10 +141,15 @@ export function MessageComposer({
   onSendMedia,
   onSendInteractive,
   onOpenTemplates,
+  supportedMediaKinds,
   replyTo,
   onClearReply,
 }: MessageComposerProps) {
   const t = useTranslations("Inbox.composer");
+  const supportsMedia = useCallback(
+    (kind: ComposerMediaKind) => !supportedMediaKinds || supportedMediaKinds.includes(kind),
+    [supportedMediaKinds],
+  );
 
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
@@ -387,7 +395,13 @@ export function MessageComposer({
       // Per-kind ceiling mirrors Meta's caps (image 5 MB, etc.) so we
       // reject before upload rather than orphaning an object that Meta
       // would then refuse at send.
-      const max = MEDIA_MAX_BYTES_BY_KIND[kind];
+      // Yeastar Live Chat accepts images up to 20 MB. WACRM's shared
+      // bucket is deliberately capped at 16 MB, so use that safe ceiling
+      // for image-only Live Chat composers while retaining Meta's 5 MB cap
+      // for WhatsApp images.
+      const max = kind === "image" && supportedMediaKinds?.length === 1 && supportedMediaKinds[0] === "image"
+        ? MEDIA_MAX_BYTES
+        : MEDIA_MAX_BYTES_BY_KIND[kind];
       if (file.size > max) {
         toast.error(
           `File is ${(file.size / 1024 / 1024).toFixed(1)} MB — ${kind} limit is ${Math.round(
@@ -408,7 +422,7 @@ export function MessageComposer({
         setBusy(false);
       }
     },
-    [removeStaged],
+    [removeStaged, supportedMediaKinds],
   );
 
   const handlePicked = useCallback(
@@ -650,22 +664,22 @@ export function MessageComposer({
               )}
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="border-border bg-popover">
-              <DropdownMenuItem onClick={() => imageInputRef.current?.click()}>
+              {supportsMedia("image") && <DropdownMenuItem onClick={() => imageInputRef.current?.click()}>
                 <ImageIcon className="mr-2 h-4 w-4" />
                 {t("photo")}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => videoInputRef.current?.click()}>
+              </DropdownMenuItem>}
+              {supportsMedia("video") && <DropdownMenuItem onClick={() => videoInputRef.current?.click()}>
                 <Video className="mr-2 h-4 w-4" />
                 {t("video")}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => documentInputRef.current?.click()}>
+              </DropdownMenuItem>}
+              {supportsMedia("document") && <DropdownMenuItem onClick={() => documentInputRef.current?.click()}>
                 <FileText className="mr-2 h-4 w-4" />
                 {t("document")}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => void startRecording()}>
+              </DropdownMenuItem>}
+              {supportsMedia("audio") && <DropdownMenuItem onClick={() => void startRecording()}>
                 <Mic className="mr-2 h-4 w-4" />
                 {t("voiceNote")}
-              </DropdownMenuItem>
+              </DropdownMenuItem>}
             </DropdownMenuContent>
           </DropdownMenu>
 

@@ -537,7 +537,9 @@ export function MessageThread({
       setReplyTo(null);
 
       try {
-        const res = await fetch("/api/whatsapp/send", {
+        const res = await fetch(
+          conversation.channel_type === "yeastar_live_chat" ? "/api/omnichannel/yeastar/send" : "/api/whatsapp/send",
+          {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -548,7 +550,8 @@ export function MessageThread({
             filename: payload.filename,
             reply_to_message_id: payload.replyToId,
           }),
-        });
+          },
+        );
 
         const data = await res.json().catch(() => ({}));
 
@@ -1167,6 +1170,7 @@ export function MessageThread({
         onSendMedia={handleSendMedia}
         onSendInteractive={handleSendInteractive}
         onOpenTemplates={handleOpenTemplates}
+        supportedMediaKinds={conversation.channel_type === "yeastar_live_chat" ? ["image"] : undefined}
         replyTo={replyTo}
         onClearReply={() => setReplyTo(null)}
       />

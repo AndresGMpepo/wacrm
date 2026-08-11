@@ -19,6 +19,8 @@ type YeastarMessage = {
   send_time?: number | string
 }
 
+type YeastarFile = { name?: string; uri?: string; type?: string; size?: number | string }
+
 type YeastarEvent = { type?: number | string; event?: string; msg?: YeastarMessage | string }
 
 function parseYeastarMessage(value: YeastarEvent['msg']): YeastarMessage | null {
@@ -55,12 +57,15 @@ function messageTimestamp(value: unknown) {
   return Number.isNaN(date.getTime()) ? new Date().toISOString() : date.toISOString()
 }
 
-function isMediaMessage(files: unknown) {
-  if (typeof files !== 'string' || !files.trim()) return false
+function firstMediaFile(files: unknown): YeastarFile | null {
+  if (typeof files !== 'string' || !files.trim()) return null
   try {
-    return Array.isArray(JSON.parse(files)) && JSON.parse(files).length > 0
+    const parsed: unknown = JSON.parse(files)
+    if (!Array.isArray(parsed) || !parsed.length || !parsed[0] || typeof parsed[0] !== 'object') return null
+    const file = parsed[0] as YeastarFile
+    return typeof file.uri === 'string' && file.uri.trim() ? file : null
   } catch {
-    return false
+    return null
   }
 }
 
@@ -92,7 +97,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
     const rawBody = await request.text()
     const event = JSON.parse(rawBody) as YeastarEvent
     const { data: connector, error: connectorError } = await db.from('omnichannel_connectors')
-      .select('id, account_id, provider, display_name, source_url, webhook_secret')
+      .select('id, account_id, provider, display_name, source_url, webhook_secret, status')
       .eq('id', connectorId).eq('provider', 'yeastar_live_chat').maybeSingle()
     if (connectorError) throw connectorError
     if (!connector?.webhook_secret) return NextResponse.json({ error: 'Webhook no configurado.' }, { status: 404 })
@@ -106,6 +111,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
     }
     if (!verifySignature(rawBody, request.headers.get('x-signature'), webhookSecret)) {
       return NextResponse.json({ error: 'Firma de webhook inválida.' }, { status: 401 })
+    }
+
+    // Pausar no altera el PBX ni invalida su webhook. Los eventos firmados se
+    // aceptan sin crear contactos, mensajes ni conversaciones hasta reactivar.
+    if (connector.status === 'paused') {
+      return NextResponse.json({ received: true, paused: true }, { status: 202 })
     }
 
     if (event.event === 'test') {
@@ -194,13 +205,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
       conversationCreated = true
     }
 
-    const contentText = message.msg_body?.trim() || (isMediaMessage(message.msg_files) ? '[Archivo enviado desde Yeastar Live Chat]' : '[Mensaje sin texto]')
+    const mediaFile = firstMediaFile(message.msg_files)
+    const isImage = Boolean(mediaFile?.type?.toLowerCase().startsWith('image/'))
+    const contentText = message.msg_body?.trim() || mediaFile?.name || (mediaFile ? '[Archivo enviado desde Yeastar Live Chat]' : '[Mensaje sin texto]')
     const createdAt = messageTimestamp(message.send_time)
     const { error: messageError } = await db.from('messages').insert({
       conversation_id: conversation.id,
       sender_type: 'customer',
-      content_type: isMediaMessage(message.msg_files) ? 'document' : 'text',
+      content_type: mediaFile ? (isImage ? 'image' : 'document') : 'text',
       content_text: contentText,
+      media_url: mediaFile?.uri ?? null,
       message_id: `yeastar:${connector.id}:${externalMessageId}`,
       status: 'delivered',
       created_at: createdAt,

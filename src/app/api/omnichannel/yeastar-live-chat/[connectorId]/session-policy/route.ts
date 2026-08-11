@@ -10,7 +10,18 @@ export const maxDuration = 20
 
 type YeastarReply = { errcode?: number; errmsg?: string; access_token?: string; access_token_expire_time?: number }
 type ChannelSearchReply = YeastarReply & { list?: Array<{ id?: number; type?: string; channel?: string; number?: string[] }> }
-type ChannelReply = YeastarReply & { data?: { id?: number; auto_close_session?: number; session_expired_time?: number; session_expired_unit?: string } }
+type ChannelReply = YeastarReply & { data?: {
+  id?: number
+  auto_close_session?: number
+  session_expired_time?: number
+  session_expired_unit?: string
+  communication_method?: number
+  enable_webrtc_inbound_call?: number
+  webrtc_trunk_id?: number
+  webrtc_inbound_route_id?: number
+  max_concurrent_call?: number
+  message_type?: number
+} }
 type CachedToken = { value: string; expiresAt: number }
 const tokenCache = new Map<string, CachedToken>()
 
@@ -101,7 +112,14 @@ export async function POST(_request: Request, { params }: { params: Promise<{ co
       session_policy_synced_at: syncedAt,
     }).eq('id', connector.id).eq('account_id', accountId)
     if (updateError) throw updateError
-    return NextResponse.json({ policy: { autoClose, timeout: autoClose ? timeout : null, unit: autoClose ? unit : null, syncedAt } })
+    const capabilities = {
+      images: details.data.message_type === 2,
+      webrtcInboundCalls: details.data.communication_method === 2 && details.data.enable_webrtc_inbound_call === 1 && Boolean(details.data.webrtc_trunk_id) && Boolean(details.data.webrtc_inbound_route_id),
+      webRtcTrunkId: details.data.webrtc_trunk_id ?? null,
+      webRtcInboundRouteId: details.data.webrtc_inbound_route_id ?? null,
+      maxConcurrentCalls: details.data.max_concurrent_call ?? null,
+    }
+    return NextResponse.json({ policy: { autoClose, timeout: autoClose ? timeout : null, unit: autoClose ? unit : null, syncedAt }, capabilities })
   } catch (error) {
     return toErrorResponse(error)
   }

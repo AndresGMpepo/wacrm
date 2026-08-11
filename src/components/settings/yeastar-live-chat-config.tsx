@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { CheckCircle2, Copy, Loader2, MessageCircle, RefreshCw, Save } from 'lucide-react'
+import { CheckCircle2, Copy, Loader2, MessageCircle, Pause, Play, RefreshCw, Save, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
@@ -44,6 +44,7 @@ export function YeastarLiveChatConfig() {
   const [outboundClientId, setOutboundClientId] = useState('')
   const [outboundClientSecret, setOutboundClientSecret] = useState('')
   const [syncingConnectorId, setSyncingConnectorId] = useState<string | null>(null)
+  const [managingConnectorId, setManagingConnectorId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -98,12 +99,53 @@ export function YeastarLiveChatConfig() {
       const response = await fetch(`/api/omnichannel/yeastar-live-chat/${connectorId}/session-policy`, { method: 'POST' })
       const payload = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(payload.error ?? 'No se pudo sincronizar la política.')
-      toast.success(payload.policy?.autoClose ? 'Política de cierre sincronizada.' : 'Yeastar no cierra automáticamente este canal.')
+      const media = payload.capabilities?.images ? 'Imágenes: habilitadas.' : 'Imágenes: revisa “Tipos de mensajes” en Yeastar.'
+      const calls = payload.capabilities?.webrtcInboundCalls
+        ? `Llamadas WebRTC: habilitadas (ruta ${payload.capabilities.webRtcInboundRouteId}).`
+        : 'Llamadas WebRTC: incompletas; activa Llamadas y chat, WebRTC entrante, troncal y ruta en Yeastar.'
+      toast.success(`${payload.policy?.autoClose ? 'Cierre sincronizado.' : 'Sin cierre automático.'} ${media} ${calls}`)
       await load()
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'No se pudo sincronizar la política.')
     } finally {
       setSyncingConnectorId(null)
+    }
+  }
+
+  const setConnectorState = async (connector: Connector, action: 'pause' | 'resume') => {
+    setManagingConnectorId(connector.id)
+    try {
+      const response = await fetch(`/api/omnichannel/yeastar-live-chat/${connector.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action }),
+      })
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(payload.error ?? 'No se pudo actualizar el canal.')
+      toast.success(payload.message ?? (action === 'pause' ? 'Canal pausado.' : 'Canal reactivado.'))
+      await load()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'No se pudo actualizar el canal.')
+    } finally {
+      setManagingConnectorId(null)
+    }
+  }
+
+  const removeConnector = async (connector: Connector) => {
+    const approved = window.confirm(`¿Eliminar la integración “${connector.displayName}” de WACRM?\n\nNo se borrará el canal de Yeastar ni el historial ya recibido. La URL del webhook dejará de aceptar mensajes hasta que configures un canal nuevo.`)
+    if (!approved) return
+
+    setManagingConnectorId(connector.id)
+    try {
+      const response = await fetch(`/api/omnichannel/yeastar-live-chat/${connector.id}`, { method: 'DELETE' })
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(payload.error ?? 'No se pudo eliminar el canal.')
+      toast.success(payload.message ?? 'Integración eliminada de WACRM.')
+      await load()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'No se pudo eliminar el canal.')
+    } finally {
+      setManagingConnectorId(null)
     }
   }
 
@@ -135,7 +177,7 @@ export function YeastarLiveChatConfig() {
           </ol>
         </div>
 
-        {loading ? <div className="flex justify-center py-5"><Loader2 className="animate-spin text-muted-foreground" /></div> : connectors.length === 0 ? <p className="text-sm text-muted-foreground">Aún no hay canales Live Chat configurados.</p> : <div className="space-y-3">{connectors.map((connector) => { const state = connectorState(connector); const policy = connector.sessionPolicy; const policyText = !policy ? 'Pendiente de sincronizar' : !policy.autoClose ? 'Sin cierre automático' : `Cierra tras ${policy.timeout} ${policy.unit === 'day' ? 'día(s)' : policy.unit === 'hour' ? 'hora(s)' : 'minuto(s)'} sin actividad`; return <div key={connector.id} className="rounded-lg border p-4"><div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><p className="font-medium">{connector.displayName}</p><p className="text-sm text-muted-foreground">Canal Yeastar: {connector.channelId}</p><p className="mt-1 break-all text-xs text-muted-foreground">Origen: {connector.sourceUrl ?? 'No indicado'}</p><p className="mt-1 text-xs text-muted-foreground">Salida OpenAPI: {connector.outboundConfigured ? `configurada (${connector.outboundPbxUrl})` : 'usa la configuración global de Telefonía'}</p><p className="mt-1 text-xs text-muted-foreground">Sesión: {policyText}</p></div><p className={`flex items-center gap-1.5 text-sm ${state.className}`}><CheckCircle2 className="size-4" />{state.label}</p></div><div className="mt-3 flex flex-wrap gap-2"><Input className="min-w-0 flex-1" readOnly value={connector.webhookUrl ?? 'Define NEXT_PUBLIC_SITE_URL para generar la URL'} /><Button type="button" size="icon" variant="outline" onClick={() => void copy(connector.webhookUrl)} disabled={!connector.webhookUrl} aria-label="Copiar URL del webhook"><Copy className="size-4" /></Button><Button type="button" variant="outline" onClick={() => void syncPolicy(connector.id)} disabled={syncingConnectorId === connector.id}><RefreshCw className={syncingConnectorId === connector.id ? 'animate-spin' : ''} />Sincronizar cierre</Button></div>{policy?.syncedAt ? <p className="mt-2 text-xs text-muted-foreground">Política leída: {new Date(policy.syncedAt).toLocaleString('es-MX')}</p> : null}{connector.lastEventAt ? <p className="mt-2 text-xs text-muted-foreground">Último evento: {new Date(connector.lastEventAt).toLocaleString('es-MX')}</p> : null}{connector.lastError ? <p className="mt-2 text-xs text-destructive">Último error: {connector.lastError}</p> : null}</div> })}</div>}
+        {loading ? <div className="flex justify-center py-5"><Loader2 className="animate-spin text-muted-foreground" /></div> : connectors.length === 0 ? <p className="text-sm text-muted-foreground">Aún no hay canales Live Chat configurados.</p> : <div className="space-y-3">{connectors.map((connector) => { const state = connectorState(connector); const policy = connector.sessionPolicy; const policyText = !policy ? 'Pendiente de sincronizar' : !policy.autoClose ? 'Sin cierre automático' : `Cierra tras ${policy.timeout} ${policy.unit === 'day' ? 'día(s)' : policy.unit === 'hour' ? 'hora(s)' : 'minuto(s)'} sin actividad`; const busy = syncingConnectorId === connector.id || managingConnectorId === connector.id; return <div key={connector.id} className="rounded-lg border p-4"><div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><p className="font-medium">{connector.displayName}</p><p className="text-sm text-muted-foreground">Canal Yeastar: {connector.channelId}</p><p className="mt-1 break-all text-xs text-muted-foreground">Origen: {connector.sourceUrl ?? 'No indicado'}</p><p className="mt-1 text-xs text-muted-foreground">Salida OpenAPI: {connector.outboundConfigured ? `configurada (${connector.outboundPbxUrl})` : 'usa la configuración global de Telefonía'}</p><p className="mt-1 text-xs text-muted-foreground">Sesión: {policyText}</p></div><p className={`flex items-center gap-1.5 text-sm ${state.className}`}><CheckCircle2 className="size-4" />{state.label}</p></div><div className="mt-3 flex flex-wrap gap-2"><Input className="min-w-0 flex-1" readOnly value={connector.webhookUrl ?? 'Define NEXT_PUBLIC_SITE_URL para generar la URL'} /><Button type="button" size="icon" variant="outline" onClick={() => void copy(connector.webhookUrl)} disabled={!connector.webhookUrl || busy} aria-label="Copiar URL del webhook"><Copy className="size-4" /></Button><Button type="button" variant="outline" onClick={() => void syncPolicy(connector.id)} disabled={busy}><RefreshCw className={syncingConnectorId === connector.id ? 'animate-spin' : ''} />Verificar conexión</Button>{connector.status === 'paused' ? <Button type="button" variant="outline" onClick={() => void setConnectorState(connector, 'resume')} disabled={busy}><Play />Reactivar</Button> : <Button type="button" variant="outline" onClick={() => void setConnectorState(connector, 'pause')} disabled={busy}><Pause />Pausar</Button>}<Button type="button" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => void removeConnector(connector)} disabled={busy}><Trash2 />Eliminar</Button></div>{policy?.syncedAt ? <p className="mt-2 text-xs text-muted-foreground">Política leída: {new Date(policy.syncedAt).toLocaleString('es-MX')}</p> : null}{connector.lastEventAt ? <p className="mt-2 text-xs text-muted-foreground">Último evento: {new Date(connector.lastEventAt).toLocaleString('es-MX')}</p> : null}{connector.lastError ? <p className="mt-2 text-xs text-destructive">Último error: {connector.lastError}</p> : null}</div> })}</div>}
       </CardContent>
     </Card>
   )
