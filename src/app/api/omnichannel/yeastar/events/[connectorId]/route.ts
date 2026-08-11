@@ -19,7 +19,18 @@ type YeastarMessage = {
   send_time?: number | string
 }
 
-type YeastarEvent = { type?: number; event?: string; msg?: YeastarMessage }
+type YeastarEvent = { type?: number | string; event?: string; msg?: YeastarMessage | string }
+
+function parseYeastarMessage(value: YeastarEvent['msg']): YeastarMessage | null {
+  if (!value) return null
+  if (typeof value === 'object') return value
+  try {
+    const parsed: unknown = JSON.parse(value)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as YeastarMessage : null
+  } catch {
+    return null
+  }
+}
 
 function admin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -105,14 +116,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
     // identified by this dedicated, per-connector webhook URL. When the
     // field is present, still reject a different event defensively.
     const eventType = event.type == null ? 30031 : Number(event.type)
-    if (eventType !== 30031 || !event.msg) {
+    const message = parseYeastarMessage(event.msg)
+    if (eventType !== 30031 || !message) {
       await db.from('omnichannel_connectors').update({ status: 'active', last_event_at: new Date().toISOString(), last_error: null }).eq('id', connector.id)
       return NextResponse.json({ received: true, ignored: true })
     }
 
-    const sessionId = String(event.msg.session_id ?? '').trim()
-    const messageId = String(event.msg.msg_id ?? '').trim()
-    const externalUserId = event.msg.sender?.user_no?.trim() ?? ''
+    const sessionId = String(message.session_id ?? '').trim()
+    const messageId = String(message.msg_id ?? '').trim()
+    const externalUserId = message.sender?.user_no?.trim() ?? ''
     const externalMessageId = `${sessionId}:${messageId}`
     if (!sessionId || !messageId || !externalUserId) {
       return NextResponse.json({ error: 'Evento 30031 incompleto.' }, { status: 400 })
@@ -124,14 +136,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
 
     // Live Chat visitors are user_type 5. Do not accidentally ingest SMS,
     // Facebook or API messages through a connector configured for this source.
-    if (Number(event.msg.sender?.user_type) !== 5 || Number(event.msg.msg_type) !== 0) {
+    if (Number(message.sender?.user_type) !== 5 || Number(message.msg_type) !== 0) {
       await db.from('omnichannel_webhook_receipts').update({ outcome: 'ignored', detail: 'Evento no corresponde a un mensaje entrante Live Chat.', processed_at: new Date().toISOString() })
         .eq('connector_id', connector.id).eq('event_type', 30031).eq('external_message_id', externalMessageId)
       return NextResponse.json({ received: true, ignored: true })
     }
 
     const auditUserId = await resolveAuditUserId(db, connector.account_id)
-    const visitorName = event.msg.sender?.username?.trim().slice(0, 160) || `Visitante web ${externalUserId.slice(-8)}`
+    const visitorName = message.sender?.username?.trim().slice(0, 160) || `Visitante web ${externalUserId.slice(-8)}`
     let contactId: string
     const { data: identity, error: identityError } = await db.from('omnichannel_contact_identities')
       .select('contact_id').eq('connector_id', connector.id).eq('external_user_id', externalUserId).maybeSingle()
@@ -182,12 +194,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
       conversationCreated = true
     }
 
-    const contentText = event.msg.msg_body?.trim() || (isMediaMessage(event.msg.msg_files) ? '[Archivo enviado desde Yeastar Live Chat]' : '[Mensaje sin texto]')
-    const createdAt = messageTimestamp(event.msg.send_time)
+    const contentText = message.msg_body?.trim() || (isMediaMessage(message.msg_files) ? '[Archivo enviado desde Yeastar Live Chat]' : '[Mensaje sin texto]')
+    const createdAt = messageTimestamp(message.send_time)
     const { error: messageError } = await db.from('messages').insert({
       conversation_id: conversation.id,
       sender_type: 'customer',
-      content_type: isMediaMessage(event.msg.msg_files) ? 'document' : 'text',
+      content_type: isMediaMessage(message.msg_files) ? 'document' : 'text',
       content_text: contentText,
       message_id: `yeastar:${connector.id}:${externalMessageId}`,
       status: 'delivered',
