@@ -108,7 +108,7 @@ export function YeastarLiveChatConfig() {
   }
 
   return (
-    <Card className="mt-6">
+    <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2"><MessageCircle className="size-5" />Chat web de Yeastar</CardTitle>
         <CardDescription>Prepara el canal de Live Chat para que sus conversaciones entren a la misma bandeja, reglas de asignación, alertas e IA de WACRM.</CardDescription>

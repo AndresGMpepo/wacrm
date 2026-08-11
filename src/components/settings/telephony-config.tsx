@@ -12,7 +12,6 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { SettingsPanelHead } from './settings-panel-head';
 import { YeastarMonitoringConfig } from './yeastar-monitoring-config';
-import { YeastarLiveChatConfig } from './yeastar-live-chat-config';
 
 export function TelephonyConfig() {
   const { profile } = useAuth();
@@ -165,7 +164,6 @@ export function TelephonyConfig() {
         </CardContent>
       </Card> : null}
       {canManageIntegration ? <YeastarMonitoringConfig /> : null}
-      {canManageIntegration ? <YeastarLiveChatConfig /> : null}
     </div>
   );
 }
