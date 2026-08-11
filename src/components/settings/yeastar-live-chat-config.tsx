@@ -13,11 +13,20 @@ type Connector = {
   id: string
   displayName: string
   channelId: string
+  sourceUrl: string | null
   status: 'configured' | 'active' | 'paused' | 'error'
   webhookConfigured: boolean
   webhookUrl: string | null
   lastEventAt: string | null
   lastError: string | null
+}
+
+function connectorState(connector: Connector) {
+  if (!connector.webhookConfigured) return { label: 'Falta secreto de webhook', className: 'text-destructive' }
+  if (connector.status === 'active') return { label: 'Activo — recibe eventos de Yeastar', className: 'text-emerald-500' }
+  if (connector.status === 'error') return { label: 'Revisar el último evento', className: 'text-destructive' }
+  if (connector.status === 'paused') return { label: 'Pausado', className: 'text-amber-500' }
+  return { label: 'Configurado — pendiente de recibir evento', className: 'text-amber-500' }
 }
 
 export function YeastarLiveChatConfig() {
@@ -26,6 +35,7 @@ export function YeastarLiveChatConfig() {
   const [saving, setSaving] = useState(false)
   const [displayName, setDisplayName] = useState('Chat web')
   const [channelId, setChannelId] = useState('')
+  const [sourceUrl, setSourceUrl] = useState('')
   const [webhookSecret, setWebhookSecret] = useState('')
 
   const load = useCallback(async () => {
@@ -50,7 +60,7 @@ export function YeastarLiveChatConfig() {
       const response = await fetch('/api/omnichannel/yeastar-live-chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ displayName, channelId, webhookSecret }),
+        body: JSON.stringify({ displayName, channelId, sourceUrl, webhookSecret }),
       })
       const payload = await response.json()
       if (!response.ok) throw new Error(payload.error ?? 'No se pudo guardar el canal.')
@@ -82,8 +92,9 @@ export function YeastarLiveChatConfig() {
       </CardHeader>
       <CardContent className="space-y-5">
         <form onSubmit={save} className="grid gap-4 rounded-lg border p-4 md:grid-cols-2">
-          <div className="space-y-2"><Label htmlFor="yeastar-chat-name">Nombre visible</Label><Input id="yeastar-chat-name" maxLength={80} value={displayName} onChange={(event) => setDisplayName(event.target.value)} required disabled={saving} /></div>
+          <div className="space-y-2"><Label htmlFor="yeastar-chat-name">Nombre visible del canal</Label><Input id="yeastar-chat-name" maxLength={80} value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="Ventas sitio web" required disabled={saving} /><p className="text-xs text-muted-foreground">Este nombre aparecerá en la bandeja y los reportes.</p></div>
           <div className="space-y-2"><Label htmlFor="yeastar-chat-id">ID del canal Live Chat</Label><Input id="yeastar-chat-id" maxLength={128} value={channelId} onChange={(event) => setChannelId(event.target.value)} placeholder="ID mostrado por Yeastar" required disabled={saving} /></div>
+          <div className="space-y-2 md:col-span-2"><Label htmlFor="yeastar-chat-source-url">Página o portal de origen</Label><Input id="yeastar-chat-source-url" type="url" maxLength={500} value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} placeholder="https://empresa.com/ventas" disabled={saving} /><p className="text-xs text-muted-foreground">Opcional. Registra dónde está instalado este widget: sitio de ventas, portal de tickets o micrositio.</p></div>
           <div className="space-y-2 md:col-span-2"><Label htmlFor="yeastar-chat-secret">Secreto del webhook</Label><Input id="yeastar-chat-secret" type="password" value={webhookSecret} onChange={(event) => setWebhookSecret(event.target.value)} placeholder="El mismo secreto configurado en el webhook 30031 de Yeastar" disabled={saving} /><p className="text-xs text-muted-foreground">Se cifra en el servidor. Si el canal ya existe, déjalo vacío para conservar el secreto actual.</p></div>
           <div className="md:col-span-2"><Button type="submit" disabled={saving || !displayName.trim() || !channelId.trim()}>{saving ? <Loader2 className="animate-spin" /> : <Save />}Guardar canal</Button></div>
         </form>
@@ -91,14 +102,14 @@ export function YeastarLiveChatConfig() {
         <div className="rounded-lg border border-primary/25 bg-primary/5 p-4 text-sm text-muted-foreground">
           <p className="font-medium text-foreground">Configuración en Yeastar</p>
           <ol className="mt-2 list-decimal space-y-1 pl-5">
-            <li>Crea o identifica tu canal de Live Chat y copia su ID.</li>
+            <li>Crea o identifica un canal de Live Chat por cada widget o página y copia su ID.</li>
             <li>En Integraciones → API agrega un webhook POST para el evento <strong>30031: New Message Notification</strong>.</li>
-            <li>Pega la URL generada abajo y usa el mismo secreto en ambos sistemas.</li>
+            <li>Pega la URL generada abajo y usa el mismo secreto en ambos sistemas. Cada canal debe usar su propia URL de WACRM.</li>
             <li>Configura el destino de mensajes del canal hacia la plataforma de analítica/API de terceros.</li>
           </ol>
         </div>
 
-        {loading ? <div className="flex justify-center py-5"><Loader2 className="animate-spin text-muted-foreground" /></div> : connectors.length === 0 ? <p className="text-sm text-muted-foreground">Aún no hay canales Live Chat configurados.</p> : <div className="space-y-3">{connectors.map((connector) => <div key={connector.id} className="rounded-lg border p-4"><div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><p className="font-medium">{connector.displayName}</p><p className="text-sm text-muted-foreground">Canal Yeastar: {connector.channelId}</p></div><p className="flex items-center gap-1.5 text-sm text-amber-500"><CheckCircle2 className="size-4" />{connector.webhookConfigured ? 'Configurado — pendiente de recibir evento' : 'Falta secreto de webhook'}</p></div><div className="mt-3 flex gap-2"><Input readOnly value={connector.webhookUrl ?? 'Define NEXT_PUBLIC_SITE_URL para generar la URL'} /><Button type="button" size="icon" variant="outline" onClick={() => void copy(connector.webhookUrl)} disabled={!connector.webhookUrl} aria-label="Copiar URL del webhook"><Copy className="size-4" /></Button></div>{connector.lastError ? <p className="mt-2 text-xs text-destructive">Último error: {connector.lastError}</p> : null}</div>)}</div>}
+        {loading ? <div className="flex justify-center py-5"><Loader2 className="animate-spin text-muted-foreground" /></div> : connectors.length === 0 ? <p className="text-sm text-muted-foreground">Aún no hay canales Live Chat configurados.</p> : <div className="space-y-3">{connectors.map((connector) => { const state = connectorState(connector); return <div key={connector.id} className="rounded-lg border p-4"><div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><p className="font-medium">{connector.displayName}</p><p className="text-sm text-muted-foreground">Canal Yeastar: {connector.channelId}</p><p className="mt-1 break-all text-xs text-muted-foreground">Origen: {connector.sourceUrl ?? 'No indicado'}</p></div><p className={`flex items-center gap-1.5 text-sm ${state.className}`}><CheckCircle2 className="size-4" />{state.label}</p></div><div className="mt-3 flex gap-2"><Input readOnly value={connector.webhookUrl ?? 'Define NEXT_PUBLIC_SITE_URL para generar la URL'} /><Button type="button" size="icon" variant="outline" onClick={() => void copy(connector.webhookUrl)} disabled={!connector.webhookUrl} aria-label="Copiar URL del webhook"><Copy className="size-4" /></Button></div>{connector.lastEventAt ? <p className="mt-2 text-xs text-muted-foreground">Último evento: {new Date(connector.lastEventAt).toLocaleString('es-MX')}</p> : null}{connector.lastError ? <p className="mt-2 text-xs text-destructive">Último error: {connector.lastError}</p> : null}</div> })}</div>}
       </CardContent>
     </Card>
   )

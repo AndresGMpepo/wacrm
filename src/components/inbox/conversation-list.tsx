@@ -506,6 +506,14 @@ function ConversationItem({
             />
           </div>
         </div>
+        {conversation.channel_source_label ? (
+          <p
+            className="mt-1 truncate text-[10px] font-medium text-primary"
+            title={conversation.channel_source_url ?? undefined}
+          >
+            {conversation.channel_type === "yeastar_live_chat" ? "Chat web" : "Canal"}: {conversation.channel_source_label}
+          </p>
+        ) : null}
       </div>
     </button>
   );

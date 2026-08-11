@@ -188,6 +188,12 @@ export interface Conversation {
   ai_last_sentiment?: 'positive' | 'neutral' | 'negative' | 'mixed' | null;
   ai_last_sentiment_score?: number | null;
   ai_last_analyzed_at?: string | null;
+  /** Omnichannel origin captured at conversation creation. */
+  channel_type?: 'whatsapp' | 'yeastar_live_chat' | 'facebook' | 'instagram' | 'tiktok';
+  connector_id?: string | null;
+  external_session_id?: string | null;
+  channel_source_label?: string | null;
+  channel_source_url?: string | null;
 }
 
 // ============================================================
