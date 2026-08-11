@@ -38,7 +38,8 @@ async function reply(response: Response): Promise<YeastarReply> {
 }
 
 async function accessToken(accountId: string, pbxUrl: string, clientId: string, clientSecret: string) {
-  const cached = tokenCache.get(accountId)
+  const cacheKey = `${accountId}:${pbxUrl}`
+  const cached = tokenCache.get(cacheKey)
   if (cached && cached.expiresAt > Date.now()) return cached.value
 
   const response = await fetch(apiUrl(pbxUrl, 'get_token'), {
@@ -54,7 +55,7 @@ async function accessToken(accountId: string, pbxUrl: string, clientId: string, 
     throw new Error(data.errmsg || 'Yeastar no aceptó las credenciales OpenAPI.')
   }
   const ttl = Math.max(60, (data.access_token_expire_time ?? 1800) - 60)
-  tokenCache.set(accountId, { value: data.access_token, expiresAt: Date.now() + ttl * 1000 })
+  tokenCache.set(cacheKey, { value: data.access_token, expiresAt: Date.now() + ttl * 1000 })
   return data.access_token
 }
 
@@ -83,7 +84,17 @@ export async function POST(request: Request) {
     if (!conversation?.connector_id || !conversation.external_session_id) {
       return NextResponse.json({ error: 'Esta conversación de Live Chat no tiene una sesión de Yeastar disponible.' }, { status: 409 })
     }
-    if (!monitoringResult.data?.api_client_id || !monitoringResult.data.api_client_secret || !pbxResult.data?.pbx_url) {
+    // Do not use an embedded PostgREST relation here. Self-hosted Supabase can
+    // retain a stale relation cache immediately after migrations; a scoped
+    // point lookup is both clearer and more resilient.
+    const { data: connector, error: connectorError } = await db.from('omnichannel_connectors')
+      .select('outbound_pbx_url, outbound_api_client_id, outbound_api_client_secret')
+      .eq('id', conversation.connector_id).eq('account_id', accountId).eq('provider', 'yeastar_live_chat').maybeSingle()
+    if (connectorError) throw connectorError
+    const pbxUrl = connector?.outbound_pbx_url ?? pbxResult.data?.pbx_url
+    const clientId = connector?.outbound_api_client_id ?? monitoringResult.data?.api_client_id
+    const clientSecret = connector?.outbound_api_client_secret ?? monitoringResult.data?.api_client_secret
+    if (!clientId || !clientSecret || !pbxUrl) {
       return NextResponse.json({ error: 'Configura la URL del PBX y las credenciales OpenAPI en Configuración → Telefonía antes de responder por Live Chat.' }, { status: 409 })
     }
     const sessionId = Number(conversation.external_session_id)
@@ -93,11 +104,11 @@ export async function POST(request: Request) {
 
     const token = await accessToken(
       accountId,
-      pbxResult.data.pbx_url,
-      decrypt(monitoringResult.data.api_client_id),
-      decrypt(monitoringResult.data.api_client_secret),
+      pbxUrl,
+      decrypt(clientId),
+      decrypt(clientSecret),
     )
-    const sendUrl = apiUrl(pbxResult.data.pbx_url, 'message/send')
+    const sendUrl = apiUrl(pbxUrl, 'message/send')
     sendUrl.searchParams.set('access_token', token)
     const response = await fetch(sendUrl, {
       method: 'POST',
@@ -107,7 +118,7 @@ export async function POST(request: Request) {
     })
     const result = await reply(response)
     if (!response.ok || result.errcode !== 0) {
-      return NextResponse.json({ error: result.errmsg || 'Yeastar no pudo enviar el mensaje de Live Chat.' }, { status: 502 })
+      return NextResponse.json({ error: result.errmsg || `Yeastar rechazó el envío (HTTP ${response.status}). Verifica la conexión OpenAPI de este canal.` }, { status: 502 })
     }
 
     const now = new Date().toISOString()
