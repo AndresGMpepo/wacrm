@@ -470,12 +470,15 @@ export function MessageThread({
       setReplyTo(null);
 
       try {
-        const res = await fetch("/api/whatsapp/send", {
+        const sendUrl = conversation.channel_type === "yeastar_live_chat"
+          ? "/api/omnichannel/yeastar/send"
+          : "/api/whatsapp/send";
+        const res = await fetch(sendUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             conversation_id: conversation.id,
-            message_type: "text",
+            ...(conversation.channel_type === "yeastar_live_chat" ? {} : { message_type: "text" }),
             content_text: text,
             reply_to_message_id: replyToId,
           }),
@@ -1159,7 +1162,7 @@ export function MessageThread({
       {/* Composer */}
       <MessageComposer
         conversationId={conversation.id}
-        sessionExpired={sessionInfo.expired}
+        sessionExpired={conversation.channel_type === "yeastar_live_chat" ? false : sessionInfo.expired}
         onSend={handleSend}
         onSendMedia={handleSendMedia}
         onSendInteractive={handleSendInteractive}
