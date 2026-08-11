@@ -7,7 +7,9 @@ import { decrypt } from '@/lib/whatsapp/encryption'
 import { isUniqueViolation } from '@/lib/contacts/dedupe'
 import { resolveAuditUserId } from '@/lib/api/v1/contacts'
 
-export const maxDuration = 10
+// Receiving an image requires a PBX download and a Storage upload before the
+// webhook can be acknowledged. Keep this bounded but above the text-only path.
+export const maxDuration = 30
 
 type YeastarMessage = {
   session_id?: number | string
@@ -20,6 +22,9 @@ type YeastarMessage = {
 }
 
 type YeastarFile = { name?: string; uri?: string; type?: string; size?: number | string }
+type YeastarTokenReply = { errcode?: number; errmsg?: string; access_token?: string; access_token_expire_time?: number }
+type CachedToken = { value: string; expiresAt: number }
+const tokenCache = new Map<string, CachedToken>()
 
 type YeastarEvent = { type?: number | string; event?: string; msg?: YeastarMessage | string }
 
@@ -58,15 +63,63 @@ function messageTimestamp(value: unknown) {
 }
 
 function firstMediaFile(files: unknown): YeastarFile | null {
-  if (typeof files !== 'string' || !files.trim()) return null
+  if (!files) return null
   try {
-    const parsed: unknown = JSON.parse(files)
+    const parsed: unknown = typeof files === 'string' ? JSON.parse(files) : files
     if (!Array.isArray(parsed) || !parsed.length || !parsed[0] || typeof parsed[0] !== 'object') return null
     const file = parsed[0] as YeastarFile
     return typeof file.uri === 'string' && file.uri.trim() ? file : null
   } catch {
     return null
   }
+}
+
+function apiUrl(pbxUrl: string, endpoint: string) {
+  return new URL(`openapi/v1.0/${endpoint}`, `${pbxUrl.replace(/\/+$/, '')}/`)
+}
+
+async function accessToken(accountId: string, pbxUrl: string, clientId: string, clientSecret: string) {
+  const cacheKey = `${accountId}:${pbxUrl}`
+  const cached = tokenCache.get(cacheKey)
+  if (cached && cached.expiresAt > Date.now()) return cached.value
+  const response = await fetch(apiUrl(pbxUrl, 'get_token'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'User-Agent': 'OpenAPI' },
+    body: JSON.stringify({ username: clientId, password: clientSecret }),
+    signal: AbortSignal.timeout(15_000),
+  })
+  const reply = await response.json().catch(() => ({})) as YeastarTokenReply
+  if (!response.ok || reply.errcode !== 0 || !reply.access_token) throw new Error(reply.errmsg || 'Yeastar no aceptó las credenciales OpenAPI.')
+  tokenCache.set(cacheKey, { value: reply.access_token, expiresAt: Date.now() + Math.max(60, (reply.access_token_expire_time ?? 1800) - 60) * 1000 })
+  return reply.access_token
+}
+
+function safeFileName(value: string | undefined) {
+  return (value ?? 'imagen').replace(/[^A-Za-z0-9._-]/g, '_').slice(-100) || 'imagen'
+}
+
+async function mirrorImageToWacrm(
+  db: ReturnType<typeof admin>,
+  params: { accountId: string; connectorId: string; pbxUrl: string; clientId: string; clientSecret: string; uri: string; name?: string; expectedType?: string },
+) {
+  // Yeastar returns a URI relative to /ysdisk/cache/chat. It is intended for
+  // file access but not for direct browser rendering from another origin.
+  if (!/^[A-Za-z0-9/_-]{1,300}$/.test(params.uri)) throw new Error('Yeastar devolvió una URI de archivo inválida.')
+  const token = await accessToken(params.accountId, params.pbxUrl, decrypt(params.clientId), decrypt(params.clientSecret))
+  const fileUrl = new URL(`/ysdisk/cache/chat/${params.uri}`, params.pbxUrl)
+  fileUrl.searchParams.set('access_token', token)
+  const response = await fetch(fileUrl, { headers: { 'User-Agent': 'OpenAPI' }, signal: AbortSignal.timeout(20_000) })
+  if (!response.ok) throw new Error(`Yeastar no permitió descargar la imagen (HTTP ${response.status}).`)
+  const type = response.headers.get('content-type') ?? params.expectedType ?? ''
+  if (!type.toLowerCase().startsWith('image/')) throw new Error('El archivo recibido no es una imagen válida.')
+  const bytes = await response.arrayBuffer()
+  if (!bytes.byteLength || bytes.byteLength > 16 * 1024 * 1024) throw new Error('La imagen recibida excede el límite de 16 MB de WACRM.')
+  const path = `account-${params.accountId}/yeastar-live-chat/${params.connectorId}/${crypto.randomUUID()}-${safeFileName(params.name)}`
+  const { error: uploadError } = await db.storage.from('chat-media').upload(path, new Uint8Array(bytes), { contentType: type, upsert: false })
+  if (uploadError) throw uploadError
+  const { data } = db.storage.from('chat-media').getPublicUrl(path)
+  if (!data.publicUrl) throw new Error('No se pudo publicar la imagen recibida.')
+  return data.publicUrl
 }
 
 async function claimReceipt(db: ReturnType<typeof admin>, accountId: string, connectorId: string, eventType: number, externalMessageId: string) {
@@ -97,7 +150,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
     const rawBody = await request.text()
     const event = JSON.parse(rawBody) as YeastarEvent
     const { data: connector, error: connectorError } = await db.from('omnichannel_connectors')
-      .select('id, account_id, provider, display_name, source_url, webhook_secret, status')
+      .select('id, account_id, provider, display_name, source_url, webhook_secret, status, outbound_pbx_url, outbound_api_client_id, outbound_api_client_secret')
       .eq('id', connectorId).eq('provider', 'yeastar_live_chat').maybeSingle()
     if (connectorError) throw connectorError
     if (!connector?.webhook_secret) return NextResponse.json({ error: 'Webhook no configurado.' }, { status: 404 })
@@ -208,13 +261,47 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
     const mediaFile = firstMediaFile(message.msg_files)
     const isImage = Boolean(mediaFile?.type?.toLowerCase().startsWith('image/'))
     const contentText = message.msg_body?.trim() || mediaFile?.name || (mediaFile ? '[Archivo enviado desde Yeastar Live Chat]' : '[Mensaje sin texto]')
+    let mediaUrl: string | null = null
+    let mediaError: string | null = null
+    if (isImage && mediaFile?.uri) {
+      try {
+        let pbxUrl = connector.outbound_pbx_url
+        let clientId = connector.outbound_api_client_id
+        let clientSecret = connector.outbound_api_client_secret
+        if (!pbxUrl || !clientId || !clientSecret) {
+          const [monitoringResult, telephonyResult] = await Promise.all([
+            db.from('yeastar_monitoring_configs').select('api_client_id, api_client_secret').eq('account_id', connector.account_id).maybeSingle(),
+            db.from('telephony_configs').select('pbx_url').eq('account_id', connector.account_id).eq('provider', 'yeastar').maybeSingle(),
+          ])
+          if (monitoringResult.error) throw monitoringResult.error
+          if (telephonyResult.error) throw telephonyResult.error
+          pbxUrl = pbxUrl ?? telephonyResult.data?.pbx_url ?? null
+          clientId = clientId ?? monitoringResult.data?.api_client_id ?? null
+          clientSecret = clientSecret ?? monitoringResult.data?.api_client_secret ?? null
+        }
+        if (!pbxUrl || !clientId || !clientSecret) throw new Error('Faltan URL o credenciales OpenAPI para descargar la imagen.')
+        mediaUrl = await mirrorImageToWacrm(db, {
+          accountId: connector.account_id,
+          connectorId: connector.id,
+          pbxUrl,
+          clientId,
+          clientSecret,
+          uri: mediaFile.uri,
+          name: mediaFile.name,
+          expectedType: mediaFile.type,
+        })
+      } catch (error) {
+        mediaError = error instanceof Error ? error.message : 'No se pudo descargar la imagen desde Yeastar.'
+        console.error('[yeastar-live-chat] could not mirror inbound image:', mediaError)
+      }
+    }
     const createdAt = messageTimestamp(message.send_time)
     const { error: messageError } = await db.from('messages').insert({
       conversation_id: conversation.id,
       sender_type: 'customer',
       content_type: mediaFile ? (isImage ? 'image' : 'document') : 'text',
       content_text: contentText,
-      media_url: mediaFile?.uri ?? null,
+      media_url: mediaUrl,
       message_id: `yeastar:${connector.id}:${externalMessageId}`,
       status: 'delivered',
       created_at: createdAt,
@@ -239,7 +326,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
     })
     if (assignmentError) console.error('[yeastar-live-chat] automatic assignment failed:', assignmentError.message)
 
-    await db.from('omnichannel_webhook_receipts').update({ outcome: 'processed', detail: conversationCreated ? 'Conversación Live Chat creada.' : 'Mensaje Live Chat agregado.', processed_at: now })
+    await db.from('omnichannel_webhook_receipts').update({ outcome: 'processed', detail: mediaError ?? (conversationCreated ? 'Conversación Live Chat creada.' : 'Mensaje Live Chat agregado.'), processed_at: now })
       .eq('connector_id', connector.id).eq('event_type', 30031).eq('external_message_id', externalMessageId)
     await db.from('omnichannel_connectors').update({ status: 'active', last_event_at: now, last_error: null }).eq('id', connector.id)
 
