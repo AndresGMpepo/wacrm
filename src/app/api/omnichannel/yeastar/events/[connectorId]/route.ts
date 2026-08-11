@@ -98,10 +98,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
     }
 
     if (event.event === 'test') {
-      await db.from('omnichannel_connectors').update({ last_event_at: new Date().toISOString(), last_error: null }).eq('id', connector.id)
+      await db.from('omnichannel_connectors').update({ status: 'active', last_event_at: new Date().toISOString(), last_error: null }).eq('id', connector.id)
       return NextResponse.json({ received: true, test: true })
     }
-    if (event.type !== 30031 || !event.msg) {
+    const eventType = Number(event.type)
+    if (eventType !== 30031 || !event.msg) {
+      await db.from('omnichannel_connectors').update({ status: 'active', last_event_at: new Date().toISOString(), last_error: null }).eq('id', connector.id)
       return NextResponse.json({ received: true, ignored: true })
     }
 
@@ -119,7 +121,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
 
     // Live Chat visitors are user_type 5. Do not accidentally ingest SMS,
     // Facebook or API messages through a connector configured for this source.
-    if (event.msg.sender?.user_type !== 5 || event.msg.msg_type !== 0) {
+    if (Number(event.msg.sender?.user_type) !== 5 || Number(event.msg.msg_type) !== 0) {
       await db.from('omnichannel_webhook_receipts').update({ outcome: 'ignored', detail: 'Evento no corresponde a un mensaje entrante Live Chat.', processed_at: new Date().toISOString() })
         .eq('connector_id', connector.id).eq('event_type', 30031).eq('external_message_id', externalMessageId)
       return NextResponse.json({ received: true, ignored: true })
