@@ -78,6 +78,9 @@ function apiUrl(pbxUrl: string, endpoint: string) {
   return new URL(`openapi/v1.0/${endpoint}`, `${pbxUrl.replace(/\/+$/, '')}/`)
 }
 
+// Kept for future protected Yeastar media endpoints; Live Chat uses a public
+// widget media route and does not require an OpenAPI token.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function accessToken(accountId: string, pbxUrl: string, clientId: string, clientSecret: string) {
   const cacheKey = `${accountId}:${pbxUrl}`
   const cached = tokenCache.get(cacheKey)
@@ -120,14 +123,13 @@ function responsePreview(bytes: Uint8Array) {
 
 async function mirrorImageToWacrm(
   db: ReturnType<typeof admin>,
-  params: { accountId: string; connectorId: string; pbxUrl: string; clientId: string; clientSecret: string; uri: string; name?: string; expectedType?: string },
+  params: { accountId: string; connectorId: string; pbxUrl: string; uri: string; name?: string; expectedType?: string },
 ) {
-  // Yeastar returns a URI relative to /ysdisk/cache/chat. It is intended for
-  // file access but not for direct browser rendering from another origin.
+  // Live Chat media URIs are served by the widget endpoint, for example
+  // /api/livechat/20260811/<file-id>. /ysdisk/cache/chat is an SPA route on
+  // Cloud PBXs and responds with HTML instead of the actual file.
   if (!/^[A-Za-z0-9/_-]{1,300}$/.test(params.uri)) throw new Error('Yeastar devolvió una URI de archivo inválida.')
-  const token = await accessToken(params.accountId, params.pbxUrl, decrypt(params.clientId), decrypt(params.clientSecret))
-  const fileUrl = new URL(`/ysdisk/cache/chat/${params.uri}`, params.pbxUrl)
-  fileUrl.searchParams.set('access_token', token)
+  const fileUrl = new URL(`/api/livechat/${params.uri}`, params.pbxUrl)
   const response = await fetch(fileUrl, { headers: { 'User-Agent': 'OpenAPI' }, signal: AbortSignal.timeout(20_000) })
   if (!response.ok) throw new Error(`Yeastar no permitió descargar la imagen (HTTP ${response.status}).`)
   // The file cache frequently sends application/octet-stream. The signed
@@ -293,26 +295,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
     if (isImage && mediaFile?.uri) {
       try {
         let pbxUrl = connector.outbound_pbx_url
-        let clientId = connector.outbound_api_client_id
-        let clientSecret = connector.outbound_api_client_secret
-        if (!pbxUrl || !clientId || !clientSecret) {
-          const [monitoringResult, telephonyResult] = await Promise.all([
-            db.from('yeastar_monitoring_configs').select('api_client_id, api_client_secret').eq('account_id', connector.account_id).maybeSingle(),
-            db.from('telephony_configs').select('pbx_url').eq('account_id', connector.account_id).eq('provider', 'yeastar').maybeSingle(),
-          ])
-          if (monitoringResult.error) throw monitoringResult.error
+        if (!pbxUrl) {
+          const telephonyResult = await db.from('telephony_configs').select('pbx_url').eq('account_id', connector.account_id).eq('provider', 'yeastar').maybeSingle()
           if (telephonyResult.error) throw telephonyResult.error
           pbxUrl = pbxUrl ?? telephonyResult.data?.pbx_url ?? null
-          clientId = clientId ?? monitoringResult.data?.api_client_id ?? null
-          clientSecret = clientSecret ?? monitoringResult.data?.api_client_secret ?? null
         }
-        if (!pbxUrl || !clientId || !clientSecret) throw new Error('Faltan URL o credenciales OpenAPI para descargar la imagen.')
+        if (!pbxUrl) throw new Error('Falta la URL del PBX para descargar la imagen.')
         mediaUrl = await mirrorImageToWacrm(db, {
           accountId: connector.account_id,
           connectorId: connector.id,
           pbxUrl,
-          clientId,
-          clientSecret,
           uri: mediaFile.uri,
           name: mediaFile.name,
           expectedType: mediaFile.type,
