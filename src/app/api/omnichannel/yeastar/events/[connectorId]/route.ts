@@ -109,6 +109,15 @@ function imageMimeFromBytes(bytes: Uint8Array) {
   return null
 }
 
+function responsePreview(bytes: Uint8Array) {
+  // Returned only in the server-side webhook receipt to diagnose PBX routes.
+  // It is bounded and strips control characters; credentials never appear here.
+  return new TextDecoder().decode(bytes.slice(0, 180))
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 async function mirrorImageToWacrm(
   db: ReturnType<typeof admin>,
   params: { accountId: string; connectorId: string; pbxUrl: string; clientId: string; clientSecret: string; uri: string; name?: string; expectedType?: string },
@@ -129,7 +138,8 @@ async function mirrorImageToWacrm(
   const bytes = new Uint8Array(await response.arrayBuffer())
   if (!bytes.byteLength || bytes.byteLength > 16 * 1024 * 1024) throw new Error('La imagen recibida excede el límite de 16 MB de WACRM.')
   if (!responseType?.startsWith('image/') && !imageMimeFromBytes(bytes)) {
-    throw new Error('Yeastar returned a file that is not a supported image.')
+    const preview = responsePreview(bytes)
+    throw new Error(`Yeastar no devolvió una imagen (${responseType || 'sin tipo MIME'}). ${preview ? `Respuesta: ${preview}` : 'La respuesta no contiene texto.'}`)
   }
   const path = `account-${params.accountId}/yeastar-live-chat/${params.connectorId}/${crypto.randomUUID()}-${safeFileName(params.name)}`
   const { error: uploadError } = await db.storage.from('chat-media').upload(path, new Uint8Array(bytes), { contentType: type, upsert: false })
