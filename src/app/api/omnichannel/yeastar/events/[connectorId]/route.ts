@@ -98,6 +98,17 @@ function safeFileName(value: string | undefined) {
   return (value ?? 'imagen').replace(/[^A-Za-z0-9._-]/g, '_').slice(-100) || 'imagen'
 }
 
+function imageMimeFromBytes(bytes: Uint8Array) {
+  // Yeastar can return uploaded images as application/octet-stream. Verify the
+  // actual binary signature before persisting anything in WACRM storage.
+  if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47 && bytes[4] === 0x0d && bytes[5] === 0x0a && bytes[6] === 0x1a && bytes[7] === 0x0a) return 'image/png'
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'image/jpeg'
+  if (bytes.length >= 12 && bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 && bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50) return 'image/webp'
+  if (bytes.length >= 6 && String.fromCharCode(...bytes.slice(0, 6)) === 'GIF87a') return 'image/gif'
+  if (bytes.length >= 6 && String.fromCharCode(...bytes.slice(0, 6)) === 'GIF89a') return 'image/gif'
+  return null
+}
+
 async function mirrorImageToWacrm(
   db: ReturnType<typeof admin>,
   params: { accountId: string; connectorId: string; pbxUrl: string; clientId: string; clientSecret: string; uri: string; name?: string; expectedType?: string },
@@ -110,10 +121,16 @@ async function mirrorImageToWacrm(
   fileUrl.searchParams.set('access_token', token)
   const response = await fetch(fileUrl, { headers: { 'User-Agent': 'OpenAPI' }, signal: AbortSignal.timeout(20_000) })
   if (!response.ok) throw new Error(`Yeastar no permitió descargar la imagen (HTTP ${response.status}).`)
-  const type = response.headers.get('content-type') ?? params.expectedType ?? ''
+  // The file cache frequently sends application/octet-stream. The signed
+  // Yeastar event includes the original file type, so use it for that case.
+  const responseType = response.headers.get('content-type')?.split(';', 1)[0].trim().toLowerCase()
+  const type = responseType?.startsWith('image/') ? responseType : params.expectedType ?? ''
   if (!type.toLowerCase().startsWith('image/')) throw new Error('El archivo recibido no es una imagen válida.')
-  const bytes = await response.arrayBuffer()
+  const bytes = new Uint8Array(await response.arrayBuffer())
   if (!bytes.byteLength || bytes.byteLength > 16 * 1024 * 1024) throw new Error('La imagen recibida excede el límite de 16 MB de WACRM.')
+  if (!responseType?.startsWith('image/') && !imageMimeFromBytes(bytes)) {
+    throw new Error('Yeastar returned a file that is not a supported image.')
+  }
   const path = `account-${params.accountId}/yeastar-live-chat/${params.connectorId}/${crypto.randomUUID()}-${safeFileName(params.name)}`
   const { error: uploadError } = await db.storage.from('chat-media').upload(path, new Uint8Array(bytes), { contentType: type, upsert: false })
   if (uploadError) throw uploadError
