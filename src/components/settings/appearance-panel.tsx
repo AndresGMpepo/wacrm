@@ -163,7 +163,7 @@ function AccountBranding() {
   return <div className="mt-8 rounded-xl border border-border bg-card p-5">
     <div className="flex items-start gap-3">
       <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"><Building2 className="size-4" /></span>
-      <div><h3 className="text-sm font-semibold text-foreground">Identidad de la cuenta</h3><p className="mt-1 text-xs leading-relaxed text-muted-foreground">El nombre y logo se muestran a todos los miembros de esta cuenta, sin afectar otras cuentas de WACRM.</p></div>
+      <div><h3 className="text-sm font-semibold text-foreground">Identidad de la cuenta</h3><p className="mt-1 text-xs leading-relaxed text-muted-foreground">El nombre y logo se muestran a todos los miembros de esta cuenta, sin afectar otras cuentas de NexoOmni.</p></div>
     </div>
     <div className="mt-5 grid gap-5 sm:grid-cols-[112px_minmax(0,1fr)]">
       <div className="flex flex-col items-center gap-2">

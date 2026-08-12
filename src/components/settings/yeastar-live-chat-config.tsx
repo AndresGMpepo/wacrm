@@ -132,7 +132,7 @@ export function YeastarLiveChatConfig() {
   }
 
   const removeConnector = async (connector: Connector) => {
-    const approved = window.confirm(`¿Eliminar la integración “${connector.displayName}” de WACRM?\n\nNo se borrará el canal de Yeastar ni el historial ya recibido. La URL del webhook dejará de aceptar mensajes hasta que configures un canal nuevo.`)
+    const approved = window.confirm(`¿Eliminar la integración “${connector.displayName}” de NexoOmni?\n\nNo se borrará el canal de Yeastar ni el historial ya recibido. La URL del webhook dejará de aceptar mensajes hasta que configures un canal nuevo.`)
     if (!approved) return
 
     setManagingConnectorId(connector.id)
@@ -140,7 +140,7 @@ export function YeastarLiveChatConfig() {
       const response = await fetch(`/api/omnichannel/yeastar-live-chat/${connector.id}`, { method: 'DELETE' })
       const payload = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(payload.error ?? 'No se pudo eliminar el canal.')
-      toast.success(payload.message ?? 'Integración eliminada de WACRM.')
+      toast.success(payload.message ?? 'Integración eliminada de NexoOmni.')
       await load()
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'No se pudo eliminar el canal.')
@@ -153,7 +153,7 @@ export function YeastarLiveChatConfig() {
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2"><MessageCircle className="size-5" />Chat web de Yeastar</CardTitle>
-        <CardDescription>Prepara el canal de Live Chat para que sus conversaciones entren a la misma bandeja, reglas de asignación, alertas e IA de WACRM.</CardDescription>
+        <CardDescription>Prepara el canal de Live Chat para que sus conversaciones entren a la misma bandeja, reglas de asignación, alertas e IA de NexoOmni.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
         <form onSubmit={save} className="grid gap-4 rounded-lg border p-4 md:grid-cols-2">
@@ -172,7 +172,7 @@ export function YeastarLiveChatConfig() {
           <ol className="mt-2 list-decimal space-y-1 pl-5">
             <li>Crea o identifica un canal de Live Chat por cada widget o página y copia su ID.</li>
             <li>En Integraciones → API agrega un webhook POST para el evento <strong>30031: New Message Notification</strong>.</li>
-            <li>Pega la URL generada abajo y usa el mismo secreto en ambos sistemas. Cada canal debe usar su propia URL de WACRM.</li>
+            <li>Pega la URL generada abajo y usa el mismo secreto en ambos sistemas. Cada canal debe usar su propia URL de NexoOmni.</li>
             <li>Configura el destino de mensajes del canal hacia la plataforma de analítica/API de terceros.</li>
           </ol>
         </div>

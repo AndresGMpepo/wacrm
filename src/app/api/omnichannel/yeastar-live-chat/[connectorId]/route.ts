@@ -58,7 +58,7 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
     if (error) throw error
     if (!count) return NextResponse.json({ error: 'Canal Live Chat no encontrado.' }, { status: 404 })
 
-    return NextResponse.json({ message: 'La integración fue eliminada de WACRM. El canal permanece intacto en Yeastar y el historial existente se conserva.' })
+    return NextResponse.json({ message: 'La integración fue eliminada de NexoOmni. El canal permanece intacto en Yeastar y el historial existente se conserva.' })
   } catch (error) {
     return toErrorResponse(error)
   }

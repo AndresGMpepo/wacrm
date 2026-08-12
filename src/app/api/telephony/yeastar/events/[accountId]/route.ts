@@ -197,7 +197,7 @@ export async function POST(request: Request, context: { params: Promise<{ accoun
   const { data: configuredExtensions, error: extensionError } = await db.from('telephony_user_configs')
     .select('extension').eq('account_id', accountId).eq('provider', 'yeastar')
   if (extensionError) {
-    await receipt(db, accountId, 'invalid', `No se pudieron consultar las extensiones WACRM: ${extensionError.message}`, event.eventType, event.callId)
+    await receipt(db, accountId, 'invalid', `No se pudieron consultar las extensiones NexoOmni: ${extensionError.message}`, event.eventType, event.callId)
     return NextResponse.json({ error: 'Could not load extensions' }, { status: 500 })
   }
   const knownExtensions = new Set((configuredExtensions ?? []).map((row) => row.extension))
@@ -206,7 +206,7 @@ export async function POST(request: Request, context: { params: Promise<{ accoun
   for (const member of event.members) {
     const calls = trackedCalls(member, knownExtensions, peer)
     if (!calls.length) {
-      transitions.push('Miembro sin una extensión configurada en WACRM; no se muestra.')
+      transitions.push('Miembro sin una extensión configurada en NexoOmni; no se muestra.')
       continue
     }
     for (const call of calls) {

@@ -53,7 +53,7 @@ export async function POST(request: Request) {
         event_type: 'wacrm-softphone',
         call_id: call.callId,
         outcome: 'processed',
-        detail: `Softphone WACRM sincronizado: extensión ${extension} · ${call.direction} · ${call.status}.`,
+        detail: `Softphone NexoOmni sincronizado: extensión ${extension} · ${call.direction} · ${call.status}.`,
       })
     }
     return NextResponse.json({ ok: true })

@@ -195,12 +195,12 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
         <div className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-border px-4">
           <Link href="/dashboard" className="flex items-center gap-2">
           <img 
-            src={account?.logo_url ?? "/Logo-eslogan.png"}
-            alt={`${account?.name ?? "Aurionova CRM"} logo`}
+            src={account?.logo_url ?? "/nexoomni-logo.svg"}
+            alt={`${account?.name ?? "NexoOmni"} logo`}
             className="h-9 w-9 rounded-md bg-white object-contain p-0.5" 
           />
           <span className="text-sm font-semibold text-foreground">
-            {account?.name ?? "Aurionova CRM"}
+            {account?.name ?? "NexoOmni"}
           </span>
         </Link>
           <button

@@ -77,7 +77,7 @@ export default function SetPasswordPage() {
         <CardHeader className="items-center text-center">
           <div className="mb-2 flex size-12 items-center justify-center rounded-xl bg-primary/10"><KeyRound className="size-6 text-primary" /></div>
           <CardTitle className="text-xl text-foreground">Crea tu contraseña</CardTitle>
-          <CardDescription>Define una contraseña para activar tu acceso a WACRM.</CardDescription>
+          <CardDescription>Define una contraseña para activar tu acceso a NexoOmni.</CardDescription>
         </CardHeader>
         <CardContent>
           {!ready && !error ? <div className="flex justify-center py-6"><LoaderCircle className="animate-spin text-muted-foreground" /></div> : null}

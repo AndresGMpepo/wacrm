@@ -366,7 +366,7 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
         reportLiveCall(session, 'RING', false, true);
         startRingtone();
         toast.info('Llamada entrante', { description: session.status?.number ?? 'Contesta desde el softphone.' });
-        notify('Llamada entrante', session.status?.number ?? 'Contesta desde WACRM.');
+        notify('Llamada entrante', session.status?.number ?? 'Contesta desde NexoOmni.');
         // A missed call never reaches startSession. Listen directly to the
         // incoming session so it is recorded even when Yeastar removes it
         // before emitting a phone-level deleteSession event.

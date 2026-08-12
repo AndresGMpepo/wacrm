@@ -117,7 +117,7 @@ export function TelephonyConfig() {
 
   return (
     <div>
-      <SettingsPanelHead title="Telefonía" description="La integración Yeastar es común para el equipo; tu extensión es privada y solo se usa en tu sesión de WACRM." />
+      <SettingsPanelHead title="Telefonía" description="La integración Yeastar es común para el equipo; tu extensión es privada y solo se usa en tu sesión de NexoOmni." />
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2"><Phone className="size-4" /> Yeastar WebRTC</CardTitle>
@@ -127,7 +127,7 @@ export function TelephonyConfig() {
           <div className="space-y-2">
             <Label htmlFor="my-extension">Mi extensión</Label>
             <Input id="my-extension" value={extension} onChange={(event) => setExtension(event.target.value)} placeholder="1000" disabled={loading || saving || (!integrationReady && !canManageIntegration)} />
-            <p className="text-xs text-muted-foreground">No se comparte con otros usuarios de WACRM.</p>
+            <p className="text-xs text-muted-foreground">No se comparte con otros usuarios de NexoOmni.</p>
           </div>
 
           {canManageIntegration ? <>
@@ -150,17 +150,17 @@ export function TelephonyConfig() {
       {canManageIntegration ? <Card className="mt-6">
         <CardHeader>
           <CardTitle>Guía de integración: Yeastar Linkus SDK</CardTitle>
-          <CardDescription>Esta configuración conecta WACRM directamente con Yeastar mediante firmas Linkus temporales. La contraseña SIP de una extensión nunca se guarda ni se envía al navegador.</CardDescription>
+          <CardDescription>Esta configuración conecta NexoOmni directamente con Yeastar mediante firmas Linkus temporales. La contraseña SIP de una extensión nunca se guarda ni se envía al navegador.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4 text-sm text-muted-foreground">
           <ol className="list-decimal space-y-2 pl-5">
             <li>En Yeastar, habilita <strong>Linkus SDK</strong> y crea o consulta el <strong>Access ID</strong> y <strong>Access Key</strong> de la integración.</li>
             <li>Usa la URL HTTPS pública de tu PBX, por ejemplo <code>https://tu-pbx.ras.yeastar.com</code>. No uses la URL WSS de transmisión de audio para este formulario.</li>
-            <li>Como administrador, registra la URL, Access ID y Access Key una sola vez para tu cuenta WACRM.</li>
+            <li>Como administrador, registra la URL, Access ID y Access Key una sola vez para tu cuenta NexoOmni.</li>
             <li>Cada miembro de la cuenta guarda únicamente su propia extensión, por ejemplo 1000 o 1008. Una extensión no se comparte ni reemplaza la de otro agente.</li>
             <li>Guarda la configuración y permite el micrófono cuando el navegador lo solicite. La cámara solo se solicita al iniciar o responder una videollamada.</li>
           </ol>
-          <p className="rounded-md border border-primary/30 bg-primary/10 p-3 text-primary"><strong>Seguridad:</strong> Access ID y Access Key quedan cifrados en el servidor. WACRM solicita a Yeastar una firma temporal para la extensión del usuario conectado; nunca reutiliza la firma de otro usuario.</p>
+          <p className="rounded-md border border-primary/30 bg-primary/10 p-3 text-primary"><strong>Seguridad:</strong> Access ID y Access Key quedan cifrados en el servidor. NexoOmni solicita a Yeastar una firma temporal para la extensión del usuario conectado; nunca reutiliza la firma de otro usuario.</p>
         </CardContent>
       </Card> : null}
       {canManageIntegration ? <YeastarMonitoringConfig /> : null}

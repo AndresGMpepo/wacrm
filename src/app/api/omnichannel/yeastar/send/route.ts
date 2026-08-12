@@ -45,7 +45,7 @@ function safeChatMediaUrl(value: unknown) {
   const url = new URL(value)
   const allowedOrigin = new URL(storageUrl).origin
   if (url.origin !== allowedOrigin || !url.pathname.includes('/storage/v1/object/public/chat-media/')) {
-    throw new Error('La imagen debe cargarse desde el almacenamiento seguro de WACRM.')
+    throw new Error('La imagen debe cargarse desde el almacenamiento seguro de NexoOmni.')
   }
   return url.toString()
 }

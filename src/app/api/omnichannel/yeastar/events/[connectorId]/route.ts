@@ -256,7 +256,7 @@ async function mirrorImageToWacrm(
   const type = responseType?.startsWith('image/') ? responseType : params.expectedType ?? ''
   if (!type.toLowerCase().startsWith('image/')) throw new Error('El archivo recibido no es una imagen válida.')
   const bytes = new Uint8Array(await response.arrayBuffer())
-  if (!bytes.byteLength || bytes.byteLength > 16 * 1024 * 1024) throw new Error('La imagen recibida excede el límite de 16 MB de WACRM.')
+  if (!bytes.byteLength || bytes.byteLength > 16 * 1024 * 1024) throw new Error('La imagen recibida excede el límite de 16 MB de NexoOmni.')
   if (!responseType?.startsWith('image/') && !imageMimeFromBytes(bytes)) {
     const preview = responsePreview(bytes)
     throw new Error(`Yeastar no devolvió una imagen (${responseType || 'sin tipo MIME'}). ${preview ? `Respuesta: ${preview}` : 'La respuesta no contiene texto.'}`)

@@ -284,7 +284,7 @@ export function AiConfig() {
               <div className="space-y-2">
                 <Label>Proveedor de IA</Label>
                 <div className="flex h-10 items-center rounded-md border border-input bg-muted/40 px-3 text-sm font-medium">OpenAI</div>
-                <p className="text-xs text-muted-foreground">Una sola cuenta y una sola factura para respuestas, análisis, imágenes y notas de voz. WACRM elige internamente modelos especializados de OpenAI cuando hace falta.</p>
+                <p className="text-xs text-muted-foreground">Una sola cuenta y una sola factura para respuestas, análisis, imágenes y notas de voz. NexoOmni elige internamente modelos especializados de OpenAI cuando hace falta.</p>
               </div>
 
               <div className="space-y-2">

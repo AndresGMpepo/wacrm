@@ -22,10 +22,10 @@ const inter = Inter({
 
 export const metadata: Metadata = {
   title: {
-    default: "aucrm",
-    template: "%s — aucrm",
+    default: "NexoOmni",
+    template: "%s — NexoOmni",
   },
-  description: "Self-hostable Aurionova CRM.",
+  description: "NexoOmni: plataforma omnicanal para conversaciones, automatización e inteligencia artificial.",
   robots: {
     index: false,
     follow: false,
