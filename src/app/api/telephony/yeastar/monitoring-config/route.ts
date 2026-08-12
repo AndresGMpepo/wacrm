@@ -8,10 +8,19 @@ function admin() {
   return createAdminClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
 }
 
+function publicOrigin(request: Request) {
+  // The application sees EasyPanel's container URL (0.0.0.0:80); the proxy
+  // carries the real customer-facing host in x-forwarded-host.
+  const forwardedHost = request.headers.get('x-forwarded-host')?.split(',', 1)[0]?.trim()
+  if (forwardedHost) {
+    const forwardedProto = request.headers.get('x-forwarded-proto')?.split(',', 1)[0]?.trim() || 'https'
+    return `${forwardedProto}://${forwardedHost}`
+  }
+  return new URL(request.url).origin
+}
+
 function webhookUrl(request: Request, accountId: string) {
-  // Generate the PBX callback from the current deployment origin so a stale
-  // public build variable cannot point Yeastar back to a retired environment.
-  return `${new URL(request.url).origin}/api/telephony/yeastar/events/${accountId}`
+  return `${publicOrigin(request)}/api/telephony/yeastar/events/${accountId}`
 }
 
 export async function GET(request: Request) {

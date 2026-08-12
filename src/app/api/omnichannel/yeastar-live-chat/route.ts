@@ -44,12 +44,20 @@ function admin() {
   return createAdminClient(url, key, { auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false } })
 }
 
+function publicOrigin(request: Request) {
+  // EasyPanel terminates HTTPS before forwarding to the Next.js container,
+  // whose internal request URL is normally http://0.0.0.0:80. Prefer the
+  // public origin supplied by that trusted reverse proxy.
+  const forwardedHost = request.headers.get('x-forwarded-host')?.split(',', 1)[0]?.trim()
+  if (forwardedHost) {
+    const forwardedProto = request.headers.get('x-forwarded-proto')?.split(',', 1)[0]?.trim() || 'https'
+    return `${forwardedProto}://${forwardedHost}`
+  }
+  return new URL(request.url).origin
+}
+
 function webhookUrl(request: Request, connectorId: string) {
-  // This endpoint is requested from the same deployed application that shows
-  // the URL. Deriving the origin here prevents an old build-time
-  // NEXT_PUBLIC_SITE_URL from publishing stale development webhook links.
-  const origin = new URL(request.url).origin
-  return `${origin}/api/omnichannel/yeastar/events/${connectorId}`
+  return `${publicOrigin(request)}/api/omnichannel/yeastar/events/${connectorId}`
 }
 
 export async function GET(request: Request) {
