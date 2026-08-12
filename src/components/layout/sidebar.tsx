@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
 import { useTotalUnread } from "@/hooks/use-total-unread";
@@ -10,6 +10,7 @@ import { useUnreadNotifications } from "@/hooks/use-unread-notifications";
 import { usePendingCallTasks } from "@/hooks/use-pending-call-tasks";
 import {
   Bell,
+  Building2,
   Bot,
   Crown,
   GitBranch,
@@ -122,6 +123,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
   const t = useTranslations("Sidebar");
   const pathname = usePathname();
   const { profile, profileLoading, account, accountRole, signOut } = useAuth();
+  const [isPlatformOperator, setIsPlatformOperator] = useState(false);
   const totalUnread = useTotalUnread();
   const unreadNotifications = useUnreadNotifications();
   const pendingCallTasks = usePendingCallTasks();
@@ -137,6 +139,35 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
     !profileLoading &&
     !!account?.name &&
     account.name !== profile?.full_name;
+
+  // The commercial console is deliberately not derived from the tenant role:
+  // an account owner must not see every customer. The server is authoritative
+  // (`requirePlatformOperator`); this request only decides whether to show the
+  // quick link in the sidebar.
+  useEffect(() => {
+    if (profileLoading || !profile?.email) {
+      setIsPlatformOperator(false);
+      return;
+    }
+
+    let cancelled = false;
+    void fetch('/api/platform/access', { cache: 'no-store' })
+      .then(async (response) => {
+        if (!response.ok) return false;
+        const payload = (await response.json().catch(() => null)) as { allowed?: boolean } | null;
+        return payload?.allowed === true;
+      })
+      .then((allowed) => {
+        if (!cancelled) setIsPlatformOperator(allowed);
+      })
+      .catch(() => {
+        if (!cancelled) setIsPlatformOperator(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [profileLoading, profile?.email]);
 
   // Close the drawer when route changes — users opened it to navigate,
   // so once they pick a destination the drawer should get out of the way.
@@ -285,6 +316,25 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
               );
             })}
           </ul>
+
+          {isPlatformOperator ? (
+            <>
+              <div className="my-4 border-t border-border" />
+              <Link
+                href="/platform"
+                className={cn(
+                  "flex items-center gap-3 rounded-lg border border-primary/25 bg-primary/5 px-3 py-2.5 text-sm font-semibold transition-colors lg:py-2",
+                  pathname.startsWith('/platform')
+                    ? "bg-primary/15 text-primary"
+                    : "text-primary hover:bg-primary/10",
+                )}
+              >
+                <Building2 className="h-4 w-4" />
+                <span className="flex-1">{t('platformAdministration')}</span>
+                <Shield className="h-3.5 w-3.5" />
+              </Link>
+            </>
+          ) : null}
 
           <div className="my-4 border-t border-border" />
 

@@ -42,6 +42,7 @@ import {
 } from '@/lib/api-keys/scopes';
 import { useTranslations } from 'next-intl';
 import { SettingsPanelHead } from './settings-panel-head';
+import { N8nIntegrationSettings } from './n8n-integration-settings';
 
 interface ApiKey {
   id: string;
@@ -76,6 +77,7 @@ export function ApiKeysSettings() {
   const [keys, setKeys] = useState<ApiKey[]>([]);
   const [loading, setLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
+  const [createPreset, setCreatePreset] = useState<{ name: string; scopes: ApiScope[] } | null>(null);
   const [revoking, setRevoking] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -146,7 +148,7 @@ export function ApiKeysSettings() {
         }
         action={
           <RequireRole min="admin">
-            <Button onClick={() => setCreateOpen(true)}>
+            <Button onClick={() => { setCreatePreset(null); setCreateOpen(true); }}>
               <Plus className="size-4" />
               {t('newApiKey')}
             </Button>
@@ -271,6 +273,16 @@ export function ApiKeysSettings() {
         open={createOpen}
         onOpenChange={setCreateOpen}
         onCreated={load}
+        preset={createPreset}
+      />
+      <N8nIntegrationSettings
+        onCreateApiKey={() => {
+          setCreatePreset({
+            name: 'n8n producción',
+            scopes: ['contacts:read', 'contacts:write', 'messages:send', 'messages:read', 'conversations:read'],
+          });
+          setCreateOpen(true);
+        }}
       />
     </section>
   );
@@ -284,10 +296,12 @@ function CreateKeyDialog({
   open,
   onOpenChange,
   onCreated,
+  preset,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onCreated: () => void;
+  preset: { name: string; scopes: ApiScope[] } | null;
 }) {
   const t = useTranslations('Settings.apiKeys');
   const [name, setName] = useState('');
@@ -302,6 +316,12 @@ function CreateKeyDialog({
     setSubmitting(false);
     setCreatedKey(null);
   }
+
+  useEffect(() => {
+    if (!open || !preset || createdKey) return;
+    setName(preset.name);
+    setScopes(preset.scopes);
+  }, [open, preset, createdKey]);
 
   function toggleScope(scope: ApiScope, checked: boolean) {
     setScopes((prev) =>

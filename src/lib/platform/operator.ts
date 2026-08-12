@@ -18,13 +18,22 @@ function operatorEmails() {
   )
 }
 
+/**
+ * Client navigation is only a convenience; this server-side predicate is
+ * still backed by `requirePlatformOperator()` in every platform route.
+ */
+export function isPlatformOperatorEmail(email: string | null | undefined) {
+  if (!email) return false
+  const allowed = operatorEmails()
+  return allowed.size > 0 && allowed.has(email.trim().toLowerCase())
+}
+
 export async function requirePlatformOperator() {
   const supabase = await createClient()
   const { data: { user }, error } = await supabase.auth.getUser()
   if (error || !user) throw new UnauthorizedError()
 
-  const allowed = operatorEmails()
-  if (allowed.size === 0 || !user.email || !allowed.has(user.email.toLowerCase())) {
+  if (!isPlatformOperatorEmail(user.email)) {
     throw new ForbiddenError('No tienes acceso al panel de plataforma.')
   }
 

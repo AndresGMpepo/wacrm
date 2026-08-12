@@ -6,6 +6,7 @@ import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe'
 import { resolveAuditUserId } from '@/lib/api/v1/contacts'
+import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
 
 // Receiving an image requires a PBX download and a Storage upload before the
 // webhook can be acknowledged. Keep this bounded but above the text-only path.
@@ -453,6 +454,27 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
       p_conversation_id: conversation.id,
     })
     if (assignmentError) console.error('[yeastar-live-chat] automatic assignment failed:', assignmentError.message)
+
+    // n8n (and any other account webhook) receives the same normalized
+    // vocabulary regardless of whether the customer wrote through WhatsApp
+    // or Yeastar Live Chat. This keeps external automations omnichannel and
+    // prevents a Live Chat lead from silently bypassing a CRM workflow.
+    if (conversationCreated) {
+      await dispatchWebhookEvent(db, connector.account_id, 'conversation.created', {
+        conversation_id: conversation.id,
+        contact_id: contactId,
+        channel_type: 'yeastar_live_chat',
+        connector_id: connector.id,
+      })
+    }
+    await dispatchWebhookEvent(db, connector.account_id, 'message.received', {
+      conversation_id: conversation.id,
+      contact_id: contactId,
+      message_id: `yeastar:${connector.id}:${externalMessageId}`,
+      channel_type: 'yeastar_live_chat',
+      content_type: mediaFile ? (isImage ? 'image' : 'document') : 'text',
+      text: contentText,
+    })
 
     await db.from('omnichannel_webhook_receipts').update({ outcome: 'processed', detail: mediaError ?? (conversationCreated ? 'Conversación Live Chat creada.' : 'Mensaje Live Chat agregado.'), processed_at: now })
       .eq('connector_id', connector.id).eq('event_type', 30031).eq('external_message_id', externalMessageId)

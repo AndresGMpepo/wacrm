@@ -27,6 +27,7 @@
     "flows": "Flujos",
     "supervision": "Supervisión",
     "aiAgents": "Agentes IA",
+    "platformAdministration": "Administración NexoOmni",
     "settings": "Configuración",
     "beta": "Beta",
     "unreadConversations": "{count} {count, plural, =1 {conversación no leída} other {conversaciones no leídas}}",
