@@ -8,6 +8,8 @@ import { toast } from "sonner";
 import { useTranslations } from "next-intl";
 
 import { FlowEditorShell } from "@/components/flows/flow-editor-shell";
+import { useAuth } from "@/hooks/use-auth";
+import { useCan } from "@/hooks/use-can";
 import type { FlowRow, FlowNodeRow } from "@/lib/flows/types";
 
 /**
@@ -26,6 +28,8 @@ export default function FlowEditorPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
   const t = useTranslations("Flows.edit");
+  const { profileLoading } = useAuth();
+  const canManage = useCan("edit-settings");
 
   const [flow, setFlow] = useState<FlowRow | null>(null);
   const [nodes, setNodes] = useState<FlowNodeRow[]>([]);
@@ -65,7 +69,7 @@ export default function FlowEditorPage() {
     };
   }, [params.id]);
 
-  if (loading) {
+  if (loading || profileLoading) {
     return (
       <div className="flex h-full items-center justify-center">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -83,6 +87,31 @@ export default function FlowEditorPage() {
         >
           {t("backToFlows")}
         </button>
+      </div>
+    );
+  }
+
+  if (!canManage) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+        <p className="text-sm font-medium text-foreground">Solo un propietario o administrador puede modificar este flujo.</p>
+        <p className="max-w-md text-sm text-muted-foreground">Como agente puedes consultar el historial de ejecuciones para atender la operación sin alterar la lógica activa.</p>
+        <div className="flex gap-3">
+          <button
+            type="button"
+            onClick={() => router.push(`/flows/${flow.id}/runs`)}
+            className="text-sm text-primary hover:opacity-80"
+          >
+            Ver ejecuciones
+          </button>
+          <button
+            type="button"
+            onClick={() => router.push("/flows")}
+            className="text-sm text-primary hover:opacity-80"
+          >
+            {t("backToFlows")}
+          </button>
+        </div>
       </div>
     );
   }

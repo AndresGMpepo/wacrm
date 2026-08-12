@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { requireRole, toErrorResponse } from '@/lib/auth/account'
+import { requireEntitlement } from '@/lib/account/entitlements'
+import { toErrorResponse } from '@/lib/auth/account'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 
 /**
@@ -53,6 +54,11 @@ export async function GET(
   context: { params: Promise<{ id: string }> },
 ) {
   const { id } = await context.params
+  try {
+    await requireEntitlement('automation_flows')
+  } catch (err) {
+    return toErrorResponse(err)
+  }
   const guard = await requireOwnership(id)
   if (!guard.ok) return NextResponse.json(guard.body, { status: guard.status })
   const { supabase } = guard
@@ -97,7 +103,7 @@ export async function PUT(
   // it, but this route mutates via the service-role client which bypasses
   // RLS, so the role must be enforced here (a viewer passes ownership).
   try {
-    await requireRole('agent')
+    await requireEntitlement('automation_flows', 'admin')
   } catch (err) {
     return toErrorResponse(err)
   }
@@ -192,7 +198,7 @@ export async function DELETE(
   // Writes require at least `agent` — see the PUT handler note. The
   // service-role client below bypasses the agent-gated flows_delete RLS.
   try {
-    await requireRole('agent')
+    await requireEntitlement('automation_flows', 'admin')
   } catch (err) {
     return toErrorResponse(err)
   }

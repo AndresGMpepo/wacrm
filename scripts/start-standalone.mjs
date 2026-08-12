@@ -15,6 +15,9 @@ const child = spawn(process.execPath, ['.next/standalone/server.js'], {
 let workerTimer = null;
 let initialWorkerTimer = null;
 let workerRunning = false;
+let flowsCronTimer = null;
+let initialFlowsCronTimer = null;
+let flowsCronRunning = false;
 const canRunAnalysisWorker = Boolean(
   process.env.APP_URL && process.env.AI_ANALYSIS_WORKER_SECRET,
 );
@@ -29,6 +32,22 @@ const runAnalysisWorker = () => {
   worker.on('exit', () => { workerRunning = false; });
 };
 
+// Flow runs can wait for customer input. Sweep those that exceeded their
+// per-flow fallback window so a stale run never blocks a future trigger.
+const canRunFlowsCron = Boolean(
+  process.env.APP_URL && process.env.AUTOMATION_CRON_SECRET,
+);
+const runFlowsCron = () => {
+  if (!canRunFlowsCron || flowsCronRunning) return;
+  flowsCronRunning = true;
+  const cron = spawn(process.execPath, ['scripts/run-flows-cron.mjs'], {
+    stdio: 'inherit',
+    env: process.env,
+  });
+  cron.on('error', (error) => console.error('[flows cron] spawn failed:', error));
+  cron.on('exit', () => { flowsCronRunning = false; });
+};
+
 if (canRunAnalysisWorker) {
   // Give Next enough time to accept the first local/public request, then
   // continue at the policy's one-minute cadence.
@@ -38,10 +57,19 @@ if (canRunAnalysisWorker) {
   console.info('[ai analysis worker] disabled: APP_URL or AI_ANALYSIS_WORKER_SECRET is missing.');
 }
 
+if (canRunFlowsCron) {
+  initialFlowsCronTimer = setTimeout(runFlowsCron, 30_000);
+  flowsCronTimer = setInterval(runFlowsCron, 5 * 60_000);
+} else {
+  console.info('[flows cron] disabled: APP_URL or AUTOMATION_CRON_SECRET is missing.');
+}
+
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, () => {
     if (workerTimer) clearInterval(workerTimer);
     if (initialWorkerTimer) clearTimeout(initialWorkerTimer);
+    if (flowsCronTimer) clearInterval(flowsCronTimer);
+    if (initialFlowsCronTimer) clearTimeout(initialFlowsCronTimer);
     child.kill(signal);
   });
 }

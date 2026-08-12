@@ -11,6 +11,7 @@ export const ENTITLEMENTS = [
   'yeastar_telephony',
   'yeastar_live_chat',
   'whatsapp_voice_calls',
+  'automation_flows',
 ] as const
 export type Entitlement = (typeof ENTITLEMENTS)[number]
 
@@ -33,9 +34,9 @@ export type AccountEntitlements = {
 }
 
 const PLAN_FEATURES: Record<PlanCode, Record<Entitlement, boolean>> = {
-  ai: { ai_conversation_intelligence: true, yeastar_telephony: false, yeastar_live_chat: false, whatsapp_voice_calls: false },
-  yeastar_voice: { ai_conversation_intelligence: true, yeastar_telephony: true, yeastar_live_chat: true, whatsapp_voice_calls: false },
-  whatsapp_voice: { ai_conversation_intelligence: true, yeastar_telephony: true, yeastar_live_chat: true, whatsapp_voice_calls: true },
+  ai: { ai_conversation_intelligence: true, yeastar_telephony: false, yeastar_live_chat: false, whatsapp_voice_calls: false, automation_flows: true },
+  yeastar_voice: { ai_conversation_intelligence: true, yeastar_telephony: true, yeastar_live_chat: true, whatsapp_voice_calls: false, automation_flows: true },
+  whatsapp_voice: { ai_conversation_intelligence: true, yeastar_telephony: true, yeastar_live_chat: true, whatsapp_voice_calls: true, automation_flows: true },
 }
 
 function isPlanCode(value: string): value is PlanCode {

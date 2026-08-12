@@ -16,6 +16,7 @@ import {
   HelpCircle,
   UserPlus,
   FileText,
+  KeyRound,
 } from "lucide-react";
 
 import { useTranslations } from "next-intl";
@@ -84,7 +85,7 @@ const TEMPLATE_ICONS = {
 
 export default function FlowsPage() {
   const router = useRouter();
-  const canCreate = useCan("send-messages");
+  const canCreate = useCan("edit-settings");
   const t = useTranslations("Flows.list");
   const [flows, setFlows] = useState<FlowRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -205,9 +206,6 @@ export default function FlowsPage() {
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-2xl font-semibold text-foreground">{t("title")}</h1>
-            <span className="inline-flex items-center rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-300">
-              {t("beta")}
-            </span>
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
             {t("description")}
@@ -223,6 +221,24 @@ export default function FlowsPage() {
         </GatedButton>
       </header>
 
+      <section className="flex flex-col gap-4 rounded-xl border border-primary/25 bg-primary/5 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/15 text-primary">
+            <KeyRound className="h-4 w-4" />
+          </div>
+          <div>
+            <h2 className="text-sm font-semibold text-foreground">Automatizaciones avanzadas con n8n</h2>
+            <p className="mt-1 max-w-2xl text-xs leading-relaxed text-muted-foreground">
+              n8n puede ejecutarse en una VPS separada y conectarse por API y webhooks de NexoOmni. Tus contactos, permisos y bitácora permanecen aislados por cuenta; no se incrusta una sesión externa dentro del CRM.
+            </p>
+          </div>
+        </div>
+        <Button variant="outline" size="sm" onClick={() => router.push("/settings?tab=api")}>
+          <KeyRound className="h-3.5 w-3.5" />
+          Preparar conexión segura
+        </Button>
+      </section>
+
       {flows.length === 0 ? (
         <EmptyState
           onCreate={() => setCreateOpen(true)}
@@ -237,6 +253,7 @@ export default function FlowsPage() {
               flow={flow}
               onEdit={() => router.push(`/flows/${flow.id}`)}
               onDelete={() => handleDelete(flow)}
+              canManage={canCreate}
               t={t}
             />
           ))}
@@ -360,11 +377,13 @@ function FlowCard({
   flow,
   onEdit,
   onDelete,
+  canManage,
   t,
 }: {
   flow: FlowRow;
   onEdit: () => void;
   onDelete: () => void;
+  canManage: boolean;
   t: ReturnType<typeof useTranslations>;
 }) {
   const triggerSummary = describeTrigger(flow, t);
@@ -409,17 +428,19 @@ function FlowCard({
       <div className="mt-4 flex items-center justify-end gap-2 border-t border-border pt-3">
         <Button variant="ghost" size="sm" onClick={onEdit}>
           <Pencil className="h-3.5 w-3.5" />
-          {t("edit")}
+          {canManage ? t("edit") : "Ver"}
         </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onDelete}
-          className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-          {t("delete")}
-        </Button>
+        {canManage && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onDelete}
+            className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            {t("delete")}
+          </Button>
+        )}
       </div>
     </div>
   );

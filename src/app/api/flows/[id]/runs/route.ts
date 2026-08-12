@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { requireEntitlement } from '@/lib/account/entitlements'
+import { toErrorResponse } from '@/lib/auth/account'
 
 /**
  * GET /api/flows/[id]/runs
@@ -21,6 +23,11 @@ export async function GET(
   context: { params: Promise<{ id: string }> },
 ) {
   const { id } = await context.params
+  try {
+    await requireEntitlement('automation_flows')
+  } catch (err) {
+    return toErrorResponse(err)
+  }
 
   const supabase = await createClient()
   const {
