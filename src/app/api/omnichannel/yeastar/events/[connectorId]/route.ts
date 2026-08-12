@@ -4,7 +4,7 @@ import { NextResponse } from 'next/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 
 import { decrypt } from '@/lib/whatsapp/encryption'
-import { isUniqueViolation } from '@/lib/contacts/dedupe'
+import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe'
 import { resolveAuditUserId } from '@/lib/api/v1/contacts'
 
 // Receiving an image requires a PBX download and a Storage upload before the
@@ -23,6 +23,8 @@ type YeastarMessage = {
 
 type YeastarFile = { name?: string; uri?: string; type?: string; size?: number | string }
 type YeastarTokenReply = { errcode?: number; errmsg?: string; access_token?: string; access_token_expire_time?: number }
+type YeastarPreChatForm = { name?: string; first_name?: string; last_name?: string; email?: string; phone?: string }
+type YeastarSessionReply = YeastarTokenReply & { list?: { pre_chat_form?: YeastarPreChatForm } }
 type CachedToken = { value: string; expiresAt: number }
 const tokenCache = new Map<string, CachedToken>()
 
@@ -78,9 +80,8 @@ function apiUrl(pbxUrl: string, endpoint: string) {
   return new URL(`openapi/v1.0/${endpoint}`, `${pbxUrl.replace(/\/+$/, '')}/`)
 }
 
-// Kept for future protected Yeastar media endpoints; Live Chat uses a public
-// widget media route and does not require an OpenAPI token.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
+// Live Chat media uses a public widget route, while the pre-chat form is read
+// through Yeastar OpenAPI with a short-lived token.
 async function accessToken(accountId: string, pbxUrl: string, clientId: string, clientSecret: string) {
   const cacheKey = `${accountId}:${pbxUrl}`
   const cached = tokenCache.get(cacheKey)
@@ -95,6 +96,123 @@ async function accessToken(accountId: string, pbxUrl: string, clientId: string, 
   if (!response.ok || reply.errcode !== 0 || !reply.access_token) throw new Error(reply.errmsg || 'Yeastar no aceptó las credenciales OpenAPI.')
   tokenCache.set(cacheKey, { value: reply.access_token, expiresAt: Date.now() + Math.max(60, (reply.access_token_expire_time ?? 1800) - 60) * 1000 })
   return reply.access_token
+}
+
+function field(value: unknown, maxLength: number) {
+  if (typeof value !== 'string') return null
+  const normalized = value.trim().replace(/\s+/g, ' ')
+  return normalized && normalized.length <= maxLength ? normalized : null
+}
+
+function preChatName(form: YeastarPreChatForm | null) {
+  const explicit = field(form?.name, 160)
+  if (explicit) return explicit
+  return [field(form?.first_name, 80), field(form?.last_name, 80)].filter(Boolean).join(' ') || null
+}
+
+async function getPreChatForm(
+  db: ReturnType<typeof admin>,
+  connector: { account_id: string; outbound_pbx_url: string | null; outbound_api_client_id: string | null; outbound_api_client_secret: string | null },
+  sessionId: string,
+) {
+  const sessionNumber = Number(sessionId)
+  if (!Number.isSafeInteger(sessionNumber) || sessionNumber <= 0) return null
+
+  // Per-channel credentials take precedence. The global monitoring
+  // connection remains a backwards-compatible fallback for older channels.
+  const [monitoringResult, telephonyResult] = await Promise.all([
+    db.from('yeastar_monitoring_configs').select('api_client_id, api_client_secret').eq('account_id', connector.account_id).maybeSingle(),
+    db.from('telephony_configs').select('pbx_url').eq('account_id', connector.account_id).eq('provider', 'yeastar').maybeSingle(),
+  ])
+  if (monitoringResult.error) throw monitoringResult.error
+  if (telephonyResult.error) throw telephonyResult.error
+
+  const pbxUrl = connector.outbound_pbx_url ?? telephonyResult.data?.pbx_url
+  const encryptedClientId = connector.outbound_api_client_id ?? monitoringResult.data?.api_client_id
+  const encryptedClientSecret = connector.outbound_api_client_secret ?? monitoringResult.data?.api_client_secret
+  if (!pbxUrl || !encryptedClientId || !encryptedClientSecret) return null
+
+  const token = await accessToken(
+    connector.account_id,
+    pbxUrl,
+    decrypt(encryptedClientId),
+    decrypt(encryptedClientSecret),
+  )
+  const sessionUrl = apiUrl(pbxUrl, 'message_session/get')
+  sessionUrl.searchParams.set('access_token', token)
+  sessionUrl.searchParams.set('id', String(sessionNumber))
+  const response = await fetch(sessionUrl, { headers: { 'User-Agent': 'OpenAPI' }, signal: AbortSignal.timeout(12_000) })
+  const result = await response.json().catch(() => ({})) as YeastarSessionReply
+  if (!response.ok || result.errcode !== 0) throw new Error(result.errmsg || 'Yeastar no devolvió la sesión del chat.')
+  return result.list?.pre_chat_form ?? null
+}
+
+async function resolveLiveChatContact(
+  db: ReturnType<typeof admin>,
+  params: { accountId: string; auditUserId: string; connectorId: string; externalUserId: string; visitorName: string; preChat: YeastarPreChatForm | null },
+) {
+  const { data: identity, error: identityError } = await db.from('omnichannel_contact_identities')
+    .select('contact_id').eq('connector_id', params.connectorId).eq('external_user_id', params.externalUserId).maybeSingle()
+  if (identityError) throw identityError
+
+  const name = preChatName(params.preChat) ?? params.visitorName
+  const emailValue = field(params.preChat?.email, 254)?.toLowerCase() ?? null
+  const phoneValue = field(params.preChat?.phone, 80)
+
+  if (identity) {
+    await db.from('omnichannel_contact_identities').update({ display_name: name }).eq('connector_id', params.connectorId).eq('external_user_id', params.externalUserId)
+    return identity.contact_id as string
+  }
+
+  // Phone is the strongest identity and wins if phone/email point at different
+  // contacts. We never silently merge two customer records in a webhook.
+  const phoneMatch = phoneValue ? await findExistingContact(db, params.accountId, phoneValue) : null
+  let emailMatch: { id: string; name: string | null; email: string | null; phone: string } | null = null
+  if (!phoneMatch && emailValue) {
+    const { data, error } = await db.from('contacts')
+      .select('id, name, email, phone').eq('account_id', params.accountId).ilike('email', emailValue).limit(1)
+    if (error) throw error
+    emailMatch = data?.[0] ?? null
+  }
+
+  const existing = phoneMatch ?? emailMatch
+  let contactId: string
+  if (existing) {
+    contactId = existing.id
+    const existingPhone = String(existing.phone ?? '')
+    const existingName = typeof existing.name === 'string' ? existing.name.trim() : ''
+    const existingEmail = typeof existing.email === 'string' ? existing.email.trim().toLowerCase() : ''
+    const update: Record<string, string> = {}
+    if (name && (!existingName || existingName.startsWith('Visitante web '))) update.name = name
+    if (emailValue && !existingEmail) update.email = emailValue
+    if (phoneValue && existingPhone.startsWith('yeastar-chat:')) update.phone = phoneValue
+    if (Object.keys(update).length) {
+      const { error } = await db.from('contacts').update(update).eq('id', contactId).eq('account_id', params.accountId)
+      // A concurrent registration can reserve a submitted phone. The match is
+      // still valid, so never discard an inbound customer message for that.
+      if (error && !isUniqueViolation(error)) throw error
+    }
+  } else {
+    const { data: contact, error: contactError } = await db.from('contacts').insert({
+      account_id: params.accountId,
+      user_id: params.auditUserId,
+      phone: phoneValue ?? `yeastar-chat:${params.connectorId}:${params.externalUserId}`,
+      name,
+      email: emailValue,
+    }).select('id').single()
+    if (contactError || !contact) throw contactError ?? new Error('Could not create Live Chat contact')
+    contactId = contact.id
+  }
+
+  const { error: identityInsertError } = await db.from('omnichannel_contact_identities').insert({
+    account_id: params.accountId,
+    connector_id: params.connectorId,
+    external_user_id: params.externalUserId,
+    contact_id: contactId,
+    display_name: name,
+  })
+  if (identityInsertError) throw identityInsertError
+  return contactId
 }
 
 function safeFileName(value: string | undefined) {
@@ -237,33 +355,24 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
 
     const auditUserId = await resolveAuditUserId(db, connector.account_id)
     const visitorName = message.sender?.username?.trim().slice(0, 160) || `Visitante web ${externalUserId.slice(-8)}`
-    let contactId: string
-    const { data: identity, error: identityError } = await db.from('omnichannel_contact_identities')
-      .select('contact_id').eq('connector_id', connector.id).eq('external_user_id', externalUserId).maybeSingle()
-    if (identityError) throw identityError
-    if (identity) {
-      contactId = identity.contact_id
-      await db.from('omnichannel_contact_identities').update({ display_name: visitorName }).eq('connector_id', connector.id).eq('external_user_id', externalUserId)
-    } else {
-      const { data: contact, error: contactError } = await db.from('contacts').insert({
-        account_id: connector.account_id,
-        user_id: auditUserId,
-        // Live Chat has an external visitor ID rather than a phone number.
-        // Prefix it so contact phone normalization never collides with WhatsApp.
-        phone: `yeastar-chat:${connector.id}:${externalUserId}`,
-        name: visitorName,
-      }).select('id').single()
-      if (contactError || !contact) throw contactError ?? new Error('Could not create Live Chat contact')
-      contactId = contact.id
-      const { error: identityInsertError } = await db.from('omnichannel_contact_identities').insert({
-        account_id: connector.account_id,
-        connector_id: connector.id,
-        external_user_id: externalUserId,
-        contact_id: contactId,
-        display_name: visitorName,
-      })
-      if (identityInsertError) throw identityInsertError
+    // Event 30031 contains the visitor label but not the pre-chat fields.
+    // Yeastar exposes name, phone and email on the associated message session.
+    // Enrichment is best-effort so a temporary OpenAPI error never drops an
+    // otherwise valid incoming chat message.
+    let preChat: YeastarPreChatForm | null = null
+    try {
+      preChat = await getPreChatForm(db, connector, sessionId)
+    } catch (error) {
+      console.error('[yeastar-live-chat] could not load pre-chat form:', error instanceof Error ? error.message : 'unknown error')
     }
+    const contactId = await resolveLiveChatContact(db, {
+      accountId: connector.account_id,
+      auditUserId,
+      connectorId: connector.id,
+      externalUserId,
+      visitorName,
+      preChat,
+    })
 
     const { data: conversations, error: conversationError } = await db.from('conversations')
       .select('id, unread_count').eq('account_id', connector.account_id).eq('connector_id', connector.id).eq('external_session_id', sessionId)

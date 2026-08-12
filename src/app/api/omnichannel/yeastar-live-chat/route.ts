@@ -44,12 +44,15 @@ function admin() {
   return createAdminClient(url, key, { auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false } })
 }
 
-function webhookUrl(connectorId: string) {
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, '')
-  return siteUrl ? `${siteUrl}/api/omnichannel/yeastar/events/${connectorId}` : null
+function webhookUrl(request: Request, connectorId: string) {
+  // This endpoint is requested from the same deployed application that shows
+  // the URL. Deriving the origin here prevents an old build-time
+  // NEXT_PUBLIC_SITE_URL from publishing stale development webhook links.
+  const origin = new URL(request.url).origin
+  return `${origin}/api/omnichannel/yeastar/events/${connectorId}`
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const { accountId } = await requireEntitlement('yeastar_live_chat', 'admin')
     const { data, error } = await admin().from('omnichannel_connectors')
@@ -68,7 +71,7 @@ export async function GET() {
         outboundConfigured: Boolean(connector.outbound_pbx_url && connector.outbound_api_client_id && connector.outbound_api_client_secret),
         outboundPbxUrl: connector.outbound_pbx_url,
         sessionPolicy: connector.session_auto_close === null ? null : { autoClose: connector.session_auto_close, timeout: connector.session_timeout_value, unit: connector.session_timeout_unit, syncedAt: connector.session_policy_synced_at },
-        webhookUrl: webhookUrl(connector.id),
+        webhookUrl: webhookUrl(request, connector.id),
         lastEventAt: connector.last_event_at,
         lastError: connector.last_error,
         createdAt: connector.created_at,
@@ -161,7 +164,7 @@ export async function POST(request: Request) {
         outboundConfigured: Boolean(data.outbound_pbx_url && data.outbound_api_client_id && data.outbound_api_client_secret),
         outboundPbxUrl: data.outbound_pbx_url,
         sessionPolicy: data.session_auto_close === null ? null : { autoClose: data.session_auto_close, timeout: data.session_timeout_value, unit: data.session_timeout_unit, syncedAt: data.session_policy_synced_at },
-        webhookUrl: webhookUrl(data.id),
+        webhookUrl: webhookUrl(request, data.id),
         lastEventAt: data.last_event_at,
         lastError: data.last_error,
         createdAt: data.created_at,

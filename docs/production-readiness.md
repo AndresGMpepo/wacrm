@@ -49,3 +49,42 @@ El inicio de WACRM ya ejecuta el worker de análisis configurado por
 `APP_URL` y `AI_ANALYSIS_WORKER_SECRET`. No ejecutes una segunda copia del
 mismo bucle en Scripts de Easypanel; duplicarlo puede procesar trabajos dos
 veces. Al separar producción, el worker se moverá a un servicio dedicado.
+
+## Uptime Kuma en Easypanel
+
+Despliega Uptime Kuma como un servicio independiente de `app_wacrm`; no debe
+formar parte del contenedor de WACRM ni compartir su volumen. La imagen
+recomendada es:
+
+```text
+louislam/uptime-kuma:2
+```
+
+En Easypanel crea un servicio **App** con esa imagen, expón el puerto interno
+`3001`, asigna un subdominio administrativo (por ejemplo,
+`status-admin.tu-dominio.com`) y crea un volumen local persistente:
+
+```text
+/app/data
+```
+
+En el primer ingreso crea la cuenta administradora de Kuma, configura 2FA y
+una notificación de Telegram o correo. El volumen debe ser local del servidor:
+Uptime Kuma utiliza SQLite y requiere bloqueos POSIX confiables.
+
+### Monitores iniciales
+
+Configura estos monitores HTTP(S) con intervalo de 60 segundos, reintento tras
+2 fallos y alerta de recuperación:
+
+| Nombre | URL | Código esperado | Configuración adicional |
+| --- | --- | --- | --- |
+| WACRM - aplicación | `https://wacrm.aurionova.com/api/health` | `200` | Ninguna |
+| WACRM - base y Storage | `https://wacrm.aurionova.com/api/health/ready` | `200` | Header `x-healthcheck-secret` con el valor privado |
+| Supabase API | `https://supabase-api.aurionova.com/rest/v1/` | `401` o `200` | El objetivo es confirmar que el proxy/API responde; no uses una llave en el monitor |
+| Dominio WACRM | `https://wacrm.aurionova.com/login` | `200` | Activa la comprobación de vencimiento TLS |
+
+No publiques la pantalla de Kuma ni sus monitores internos como una página de
+estado pública. Para el lanzamiento productivo, agrega después un monitor
+externo independiente: un monitor que vive en el mismo VPS no puede avisar si
+ese VPS o su red completa dejan de responder.

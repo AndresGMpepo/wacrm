@@ -8,12 +8,13 @@ function admin() {
   return createAdminClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
 }
 
-function webhookUrl(accountId: string) {
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, '')
-  return siteUrl ? `${siteUrl}/api/telephony/yeastar/events/${accountId}` : null
+function webhookUrl(request: Request, accountId: string) {
+  // Generate the PBX callback from the current deployment origin so a stale
+  // public build variable cannot point Yeastar back to a retired environment.
+  return `${new URL(request.url).origin}/api/telephony/yeastar/events/${accountId}`
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const { accountId } = await requireEntitlement('yeastar_telephony', 'admin')
     const db = admin()
@@ -26,7 +27,7 @@ export async function GET() {
       .order('received_at', { ascending: false }).limit(5)
     if (receiptError) throw receiptError
     return NextResponse.json({
-      webhookUrl: webhookUrl(accountId),
+      webhookUrl: webhookUrl(request, accountId),
       config: {
         webhookConfigured: Boolean(data?.webhook_secret),
         apiConfigured: Boolean(data?.api_client_id && data?.api_client_secret),
