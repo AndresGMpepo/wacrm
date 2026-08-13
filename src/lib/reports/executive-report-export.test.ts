@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { executiveReportCsv, executiveReportExcelXml, reportExportFilename, type ExecutiveReport } from './executive-report-export'
+import { executiveReportCsv, executiveReportExcelXml, executiveReportPrintHtml, reportExportFilename, type ExecutiveReport } from './executive-report-export'
 
 const report: ExecutiveReport = {
   meta: { operating_mode: 'hybrid', currency: 'MXN', range: { from: '2026-08-01', to: '2026-08-07', days: 7 }, response_metrics_capped: false },
@@ -31,5 +31,12 @@ describe('executive report exports', () => {
 
   it('uses an auditable filename for the visible range', () => {
     expect(reportExportFilename(report, 'xls')).toBe('nexoomni-reporte-ejecutivo-2026-08-01-2026-08-07.xls')
+  })
+
+  it('creates a print-ready report without executable markup', () => {
+    const html = executiveReportPrintHtml(report)
+    expect(html).toContain('<title>NexoOmni - Reporte ejecutivo</title>')
+    expect(html).toContain('&apos;=WhatsApp')
+    expect(html).not.toContain('<script')
   })
 })

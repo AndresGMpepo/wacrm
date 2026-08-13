@@ -5,7 +5,7 @@ import { AlertTriangle, BarChart3, Bot, BriefcaseBusiness, CheckCircle2, Clock3,
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { executiveReportCsv, executiveReportExcelXml, reportExportFilename, type ExecutiveReport } from '@/lib/reports/executive-report-export'
+import { executiveReportCsv, executiveReportExcelXml, executiveReportPrintHtml, reportExportFilename, type ExecutiveReport } from '@/lib/reports/executive-report-export'
 
 type Report = ExecutiveReport
 
@@ -56,6 +56,21 @@ export default function ReportsPage() {
     URL.revokeObjectURL(url)
   }
 
+  const printPdf = () => {
+    if (!report) return
+    const printWindow = window.open('', '_blank')
+    if (!printWindow) {
+      setError('El navegador bloqueó la ventana de impresión. Permite ventanas emergentes para descargar el PDF.')
+      return
+    }
+    printWindow.document.write(executiveReportPrintHtml(report))
+    printWindow.document.close()
+    window.setTimeout(() => {
+      printWindow.focus()
+      printWindow.print()
+    }, 150)
+  }
+
   const executiveReading = useMemo(() => {
     if (!report) return null
     if (report.intelligence.negative_rate !== null && report.intelligence.negative_rate >= 25) return { icon: AlertTriangle, title: 'Atención prioritaria: experiencia del cliente', text: `${report.intelligence.negative_rate}% de los análisis del periodo son negativos. Revisa los casos críticos y la carga de los agentes antes de aumentar campañas.`, tone: 'red' as const }
@@ -72,7 +87,7 @@ export default function ReportsPage() {
 
   const insightBorder = executiveReading.tone === 'red' ? 'border-red-500/40' : executiveReading.tone === 'amber' ? 'border-amber-500/40' : 'border-primary/30'
   return <div className="space-y-6">
-    <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between"><div><h1 className="text-2xl font-bold tracking-tight text-foreground">Reportes ejecutivos</h1><p className="mt-1 max-w-2xl text-sm text-muted-foreground">Lectura directiva de operación, experiencia, campañas y pipeline. Las métricas se mantienen separadas por empresa.</p></div><div className="flex flex-wrap items-center gap-2"><div className="flex rounded-lg border border-border bg-card p-1">{PERIODS.map((period) => <button key={period} type="button" onClick={() => setDays(period)} className={`rounded-md px-3 py-1.5 text-sm font-medium ${days === period ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}>{period} días</button>)}</div><Button variant="outline" size="sm" onClick={() => download('csv')}><Download className="size-4" /> CSV</Button><Button variant="outline" size="sm" onClick={() => download('xls')}><Download className="size-4" /> Excel</Button><Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}><RefreshCw className={`size-4 ${loading ? 'animate-spin' : ''}`} /> Actualizar</Button></div></div>
+    <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between"><div><h1 className="text-2xl font-bold tracking-tight text-foreground">Reportes ejecutivos</h1><p className="mt-1 max-w-2xl text-sm text-muted-foreground">Lectura directiva de operación, experiencia, campañas y pipeline. Las métricas se mantienen separadas por empresa.</p></div><div className="flex flex-wrap items-center gap-2"><div className="flex rounded-lg border border-border bg-card p-1">{PERIODS.map((period) => <button key={period} type="button" onClick={() => setDays(period)} className={`rounded-md px-3 py-1.5 text-sm font-medium ${days === period ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}>{period} días</button>)}</div><Button variant="outline" size="sm" onClick={() => download('csv')}><Download className="size-4" /> CSV</Button><Button variant="outline" size="sm" onClick={() => download('xls')}><Download className="size-4" /> Excel</Button><Button variant="outline" size="sm" onClick={printPdf}><Download className="size-4" /> PDF</Button><Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}><RefreshCw className={`size-4 ${loading ? 'animate-spin' : ''}`} /> Actualizar</Button></div></div>
 
     <Card className={insightBorder}><CardContent className="flex gap-3 pt-4"><div className={executiveReading.tone === 'red' ? 'text-red-400' : executiveReading.tone === 'amber' ? 'text-amber-400' : 'text-primary'}><InsightIcon className="mt-0.5 size-5" /></div><div><p className="font-semibold text-foreground">{executiveReading.title}</p><p className="mt-1 text-sm leading-6 text-muted-foreground">{executiveReading.text}</p><p className="mt-2 text-xs text-muted-foreground">Periodo: {report.meta.range.from} al {report.meta.range.to} · Perfil: {report.meta.operating_mode === 'commercial' ? 'Comercial' : report.meta.operating_mode === 'support' ? 'Soporte' : 'Híbrido'}</p></div></CardContent></Card>
 
@@ -91,6 +106,6 @@ export default function ReportsPage() {
 
     {report.meta.response_metrics_capped ? <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-200">La métrica de primera respuesta se calculó sobre las primeras 5,000 conversaciones del periodo para proteger el rendimiento. La siguiente fase incorporará agregados en base de datos para volúmenes mayores.</p> : null}
     {error ? <p className="text-sm text-red-400">{error}</p> : null}
-    <p className="flex items-center gap-2 text-xs text-muted-foreground"><Download className="size-3.5" /> CSV y Excel exportan exactamente el periodo visible. El siguiente bloque añadirá PDF ejecutivo y envíos programados.</p>
+    <p className="flex items-center gap-2 text-xs text-muted-foreground"><Download className="size-3.5" /> CSV, Excel y PDF usan exactamente el periodo visible. En PDF, el navegador abrirá la opción para guardar como PDF.</p>
   </div>
 }

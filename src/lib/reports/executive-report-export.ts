@@ -71,3 +71,8 @@ export function executiveReportExcelXml(report: ExecutiveReport) {
 export function reportExportFilename(report: ExecutiveReport, extension: 'csv' | 'xls') {
   return `nexoomni-reporte-ejecutivo-${report.meta.range.from}-${report.meta.range.to}.${extension}`
 }
+
+export function executiveReportPrintHtml(report: ExecutiveReport) {
+  const sheetTable = (sheet: ExportSheet) => `<section><h2>${escapeXml(sheet.name)}</h2><table><tbody>${sheet.rows.map((row, index) => `<tr>${row.map((cell) => `<${index === 0 ? 'th' : 'td'}>${escapeXml(cell)}</${index === 0 ? 'th' : 'td'}>`).join('')}</tr>`).join('')}</tbody></table></section>`
+  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>NexoOmni - Reporte ejecutivo</title><style>body{font-family:Arial,sans-serif;color:#172033;margin:36px}h1{font-size:24px;margin:0 0 6px}p{color:#536075;margin:0 0 22px}h2{font-size:16px;margin:26px 0 8px}table{border-collapse:collapse;width:100%;font-size:11px;margin-bottom:14px}th,td{border:1px solid #d8dee9;padding:7px;text-align:left;vertical-align:top}th{background:#f1f4f8;font-weight:700}@media print{body{margin:18px}section{break-inside:avoid}}</style></head><body><h1>Reporte ejecutivo NexoOmni</h1><p>Periodo: ${escapeXml(report.meta.range.from)} al ${escapeXml(report.meta.range.to)} · Perfil: ${escapeXml(operatingMode(report.meta.operating_mode))}</p>${reportSheets(report).map(sheetTable).join('')}</body></html>`
+}
