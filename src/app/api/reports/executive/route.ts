@@ -80,22 +80,28 @@ async function messageRowsForConversations(db: ReturnType<typeof admin>, ids: st
 
 export async function GET(request: Request) {
   try {
-    const ctx = await requireRole('admin')
-    const range = parseRange(new URL(request.url))
+    const url = new URL(request.url)
+    const workerAllowed = Boolean(process.env.AI_ANALYSIS_WORKER_SECRET) && request.headers.get('x-report-worker-secret') === process.env.AI_ANALYSIS_WORKER_SECRET
+    const ctx = workerAllowed ? null : await requireRole('admin')
+    const accountId = workerAllowed ? url.searchParams.get('account_id') : ctx!.accountId
+    if (!accountId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(accountId)) {
+      return NextResponse.json({ error: 'Cuenta de reporte no válida.' }, { status: 400 })
+    }
+    const range = parseRange(url)
     const db = admin()
 
     const [accountResult, conversationResult, previousConversationResult, backlogResult, resolvedResult, profilesResult, openConversationsResult, analysesResult, dealsResult, openDealsResult, broadcastsResult] = await Promise.all([
-      db.from('accounts').select('operating_mode, default_currency').eq('id', ctx.accountId).single(),
-      db.from('conversations').select('id, assigned_agent_id, status, channel_type, created_at').eq('account_id', ctx.accountId).gte('created_at', range.from).lt('created_at', range.toExclusive).order('created_at'),
-      db.from('conversations').select('*', { count: 'exact', head: true }).eq('account_id', ctx.accountId).gte('created_at', range.previousFrom).lt('created_at', range.previousToExclusive),
-      db.from('conversations').select('*', { count: 'exact', head: true }).eq('account_id', ctx.accountId).in('status', ['open', 'pending']),
-      db.from('conversations').select('id, assigned_agent_id, status, channel_type, created_at').eq('account_id', ctx.accountId).eq('status', 'closed').gte('updated_at', range.from).lt('updated_at', range.toExclusive),
-      db.from('profiles').select('user_id, full_name').eq('account_id', ctx.accountId).order('full_name'),
-      db.from('conversations').select('assigned_agent_id').eq('account_id', ctx.accountId).in('status', ['open', 'pending']),
-      db.from('ai_conversation_analyses').select('sentiment, sentiment_score, qa_score').eq('account_id', ctx.accountId).eq('status', 'completed').gte('analyzed_at', range.from).lt('analyzed_at', range.toExclusive),
-      db.from('deals').select('value, status, updated_at').eq('account_id', ctx.accountId).gte('updated_at', range.from).lt('updated_at', range.toExclusive),
-      db.from('deals').select('value').eq('account_id', ctx.accountId).eq('status', 'open'),
-      db.from('broadcasts').select('id, name, status, created_at, total_recipients, sent_count, delivered_count, read_count, replied_count, failed_count').eq('account_id', ctx.accountId).gte('created_at', range.from).lt('created_at', range.toExclusive).order('created_at', { ascending: false }).limit(12),
+      db.from('accounts').select('operating_mode, default_currency').eq('id', accountId).single(),
+      db.from('conversations').select('id, assigned_agent_id, status, channel_type, created_at').eq('account_id', accountId).gte('created_at', range.from).lt('created_at', range.toExclusive).order('created_at'),
+      db.from('conversations').select('*', { count: 'exact', head: true }).eq('account_id', accountId).gte('created_at', range.previousFrom).lt('created_at', range.previousToExclusive),
+      db.from('conversations').select('*', { count: 'exact', head: true }).eq('account_id', accountId).in('status', ['open', 'pending']),
+      db.from('conversations').select('id, assigned_agent_id, status, channel_type, created_at').eq('account_id', accountId).eq('status', 'closed').gte('updated_at', range.from).lt('updated_at', range.toExclusive),
+      db.from('profiles').select('user_id, full_name').eq('account_id', accountId).order('full_name'),
+      db.from('conversations').select('assigned_agent_id').eq('account_id', accountId).in('status', ['open', 'pending']),
+      db.from('ai_conversation_analyses').select('sentiment, sentiment_score, qa_score').eq('account_id', accountId).eq('status', 'completed').gte('analyzed_at', range.from).lt('analyzed_at', range.toExclusive),
+      db.from('deals').select('value, status, updated_at').eq('account_id', accountId).gte('updated_at', range.from).lt('updated_at', range.toExclusive),
+      db.from('deals').select('value').eq('account_id', accountId).eq('status', 'open'),
+      db.from('broadcasts').select('id, name, status, created_at, total_recipients, sent_count, delivered_count, read_count, replied_count, failed_count').eq('account_id', accountId).gte('created_at', range.from).lt('created_at', range.toExclusive).order('created_at', { ascending: false }).limit(12),
     ])
 
     for (const result of [accountResult, conversationResult, previousConversationResult, backlogResult, resolvedResult, profilesResult, openConversationsResult, analysesResult, dealsResult, openDealsResult, broadcastsResult]) {

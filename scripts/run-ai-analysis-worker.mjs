@@ -8,12 +8,18 @@ if (!baseUrl || !secret) {
   process.exit(1)
 }
 
-const response = await fetch(`${baseUrl}/api/internal/ai-analysis-worker`, {
-  method: 'POST',
-  headers: { 'x-ai-worker-secret': secret },
-})
-if (!response.ok) {
-  console.error(`Worker request failed: ${response.status} ${await response.text()}`)
+const headers = { 'x-ai-worker-secret': secret, 'x-report-worker-secret': secret }
+const [analysisResponse, reportResponse] = await Promise.all([
+  fetch(`${baseUrl}/api/internal/ai-analysis-worker`, { method: 'POST', headers }),
+  fetch(`${baseUrl}/api/internal/report-schedule-worker`, { method: 'POST', headers }),
+])
+
+if (!analysisResponse.ok) {
+  console.error(`AI worker request failed: ${analysisResponse.status} ${await analysisResponse.text()}`)
   process.exit(1)
 }
-console.log(await response.text())
+const reports = reportResponse.ok
+  ? await reportResponse.json()
+  : { error: `Report worker request failed: ${reportResponse.status} ${await reportResponse.text()}` }
+if ('error' in reports) console.error(`[report schedule worker] ${reports.error}`)
+console.log(JSON.stringify({ analysis: await analysisResponse.json(), reports }))

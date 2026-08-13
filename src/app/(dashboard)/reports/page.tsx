@@ -6,6 +6,7 @@ import { AlertTriangle, BarChart3, Bot, BriefcaseBusiness, CheckCircle2, Clock3,
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { executiveReportCsv, executiveReportExcelXml, executiveReportPrintHtml, reportExportFilename, type ExecutiveReport } from '@/lib/reports/executive-report-export'
+import { ReportScheduleManager } from '@/components/reports/report-schedule-manager'
 
 type Report = ExecutiveReport
 
@@ -105,6 +106,7 @@ export default function ReportsPage() {
       <Card><CardHeader><CardTitle className="flex items-center gap-2"><Megaphone className="size-4 text-primary" /> Campañas del periodo</CardTitle><CardDescription>Entrega, lectura y respuesta de los envíos masivos. No atribuye ventas todavía.</CardDescription></CardHeader><CardContent className="space-y-4"><div className="grid grid-cols-3 gap-2 text-center"><div className="rounded-lg bg-muted p-2"><p className="text-lg font-semibold">{ratio(report.campaigns.delivery_rate)}</p><p className="text-[11px] text-muted-foreground">entrega</p></div><div className="rounded-lg bg-muted p-2"><p className="text-lg font-semibold">{ratio(report.campaigns.read_rate)}</p><p className="text-[11px] text-muted-foreground">lectura</p></div><div className="rounded-lg bg-muted p-2"><p className="text-lg font-semibold">{ratio(report.campaigns.reply_rate)}</p><p className="text-[11px] text-muted-foreground">respuesta</p></div></div>{report.campaigns.items.length === 0 ? <p className="text-sm text-muted-foreground">No se crearon campañas en este periodo.</p> : report.campaigns.items.slice(0, 4).map((campaign) => <div key={campaign.id} className="flex items-center justify-between gap-3 text-sm"><span className="truncate font-medium text-foreground">{campaign.name}</span><span className="shrink-0 text-muted-foreground">{campaign.replied_count ?? 0} respuestas</span></div>)}</CardContent></Card></div>
 
     {report.meta.response_metrics_capped ? <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-200">La métrica de primera respuesta se calculó sobre las primeras 5,000 conversaciones del periodo para proteger el rendimiento. La siguiente fase incorporará agregados en base de datos para volúmenes mayores.</p> : null}
+    <ReportScheduleManager />
     {error ? <p className="text-sm text-red-400">{error}</p> : null}
     <p className="flex items-center gap-2 text-xs text-muted-foreground"><Download className="size-3.5" /> CSV, Excel y PDF usan exactamente el periodo visible. En PDF, el navegador abrirá la opción para guardar como PDF.</p>
   </div>
