@@ -11,6 +11,7 @@ import { usePendingCallTasks } from "@/hooks/use-pending-call-tasks";
 import {
   Bell,
   Building2,
+  ChartNoAxesCombined,
   Bot,
   Crown,
   GitBranch,
@@ -91,6 +92,8 @@ interface NavItem {
    * Purely informational — doesn't affect routing or access.
    */
   beta?: boolean;
+  /** Executive reports aggregate the whole account, so they are for admins. */
+  adminOnly?: boolean;
 }
 
 const navItems: NavItem[] = [
@@ -102,6 +105,7 @@ const navItems: NavItem[] = [
   { href: "/pipelines", labelKey: "pipelines", icon: GitBranch },
   { href: "/broadcasts", labelKey: "broadcasts", icon: Radio },
   { href: "/automations", labelKey: "automations", icon: Zap },
+  { href: "/reports", labelKey: "reports", icon: ChartNoAxesCombined, adminOnly: true },
   { href: "/flows", labelKey: "flows", icon: Workflow },
   { href: "/supervision", labelKey: "supervision", icon: ShieldAlert },
   { href: "/agents", labelKey: "aiAgents", icon: Bot },
@@ -247,7 +251,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
         {/* Main navigation */}
         <nav className="flex-1 overflow-y-auto px-3 py-4">
           <ul className="flex flex-col gap-1">
-            {navItems.map((item) => {
+            {navItems.filter((item) => !item.adminOnly || accountRole === 'owner' || accountRole === 'admin').map((item) => {
               const isActive =
                 pathname === item.href ||
                 (item.href !== "/dashboard" && pathname.startsWith(item.href));

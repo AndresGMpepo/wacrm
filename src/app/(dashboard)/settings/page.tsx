@@ -11,6 +11,7 @@ import { SettingsOverview } from '@/components/settings/settings-overview';
 import { ProfileForm } from '@/components/settings/profile-form';
 import { SecurityPanel } from '@/components/settings/security-panel';
 import { AppearancePanel } from '@/components/settings/appearance-panel';
+import { OperatingModeSettings } from '@/components/settings/operating-mode-settings';
 import { WhatsAppConfig } from '@/components/settings/whatsapp-config';
 import { YeastarLiveChatConfig } from '@/components/settings/yeastar-live-chat-config';
 import { ConversationAssignmentConfig } from '@/components/settings/conversation-assignment-config';
@@ -77,6 +78,7 @@ function SettingsPageInner() {
     profile: <ProfileForm />,
     security: <SecurityPanel />,
     appearance: <AppearancePanel />,
+    'operating-mode': <OperatingModeSettings />,
     whatsapp: <WhatsAppConfig />,
     'live-chat': <YeastarLiveChatConfig />,
     assignment: <ConversationAssignmentConfig />,
