@@ -10,12 +10,13 @@ import {
   Mail,
   Copy,
   Check,
-  User,
   Tag as TagIcon,
   DollarSign,
   StickyNote,
   Plus,
   PhoneCall,
+  MessageSquare,
+  ArrowUpRight,
 } from "lucide-react";
 import { useTelephony } from '@/components/telephony/telephony-provider';
 import { ConversationInternalNotes } from './conversation-internal-notes';
@@ -23,6 +24,16 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { format } from "date-fns";
 import { useTranslations } from "next-intl";
+import Link from "next/link";
+
+type ContactConversation = {
+  id: string;
+  status: "open" | "pending" | "closed";
+  last_message_text: string | null;
+  last_message_at: string | null;
+  channel_type: "whatsapp" | "yeastar_live_chat" | "facebook" | "instagram" | "tiktok" | null;
+  channel_source_label: string | null;
+};
 
 interface ContactSidebarProps {
   contact: Contact | null;
@@ -40,6 +51,7 @@ export function ContactSidebar({ contact, conversationId, internalNotesOpenSigna
   const [deals, setDeals] = useState<Deal[]>([]);
   const [notes, setNotes] = useState<ContactNote[]>([]);
   const [tags, setTags] = useState<(Tag & { contact_tag_id: string })[]>([]);
+  const [conversationHistory, setConversationHistory] = useState<ContactConversation[]>([]);
   const [newNote, setNewNote] = useState("");
   const [addingNote, setAddingNote] = useState(false);
 
@@ -48,8 +60,10 @@ export function ContactSidebar({ contact, conversationId, internalNotesOpenSigna
 
     const supabase = createClient();
 
-    // Fetch deals, notes, and tags in parallel
-    const [dealsRes, notesRes, tagsRes] = await Promise.all([
+    // The contact, not a provider-specific visitor label, is the stable
+    // identity. This lets a known customer see their WhatsApp and Live Chat
+    // threads together without ever merging conversations automatically.
+    const [dealsRes, notesRes, tagsRes, conversationsRes] = await Promise.all([
       supabase
         .from("deals")
         .select("*, stage:pipeline_stages(*)")
@@ -64,6 +78,12 @@ export function ContactSidebar({ contact, conversationId, internalNotesOpenSigna
         .from("contact_tags")
         .select("id, tag_id, tags(*)")
         .eq("contact_id", contact.id),
+      supabase
+        .from("conversations")
+        .select("id, status, last_message_text, last_message_at, channel_type, channel_source_label")
+        .eq("contact_id", contact.id)
+        .order("last_message_at", { ascending: false, nullsFirst: false })
+        .limit(5),
     ]);
 
     if (dealsRes.data) setDeals(dealsRes.data);
@@ -77,6 +97,7 @@ export function ContactSidebar({ contact, conversationId, internalNotesOpenSigna
         }));
       setTags(mapped);
     }
+    if (conversationsRes.data) setConversationHistory(conversationsRes.data as ContactConversation[]);
   }, [contact]);
 
   // Load on contact change. setContactData/setTags run inside async
@@ -135,6 +156,13 @@ export function ContactSidebar({ contact, conversationId, internalNotesOpenSigna
 
   const displayName = contact.name || contact.phone;
   const initials = displayName.charAt(0).toUpperCase();
+  const channelLabel = (conversation: ContactConversation) => {
+    if (conversation.channel_type === "yeastar_live_chat") return conversation.channel_source_label ? `Chat web · ${conversation.channel_source_label}` : "Chat web Yeastar";
+    if (conversation.channel_type === "facebook") return "Facebook";
+    if (conversation.channel_type === "instagram") return "Instagram";
+    if (conversation.channel_type === "tiktok") return "TikTok";
+    return "WhatsApp";
+  };
 
   return (
     <div className="flex h-full w-70 flex-col border-l border-border bg-card">
@@ -186,6 +214,42 @@ export function ContactSidebar({ contact, conversationId, internalNotesOpenSigna
           </div>
 
           {/* Divider */}
+          <div className="my-4 border-t border-border" />
+
+          {/* Omnichannel history: exact email/phone identity only. */}
+          <div>
+            <div className="flex items-center gap-2 px-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              <MessageSquare className="h-3 w-3" />
+              Historial omnicanal
+            </div>
+            <div className="mt-2 space-y-2">
+              {conversationHistory.length === 0 ? (
+                <p className="px-1 text-xs text-muted-foreground">Sin otras conversaciones registradas.</p>
+              ) : (
+                conversationHistory.map((conversation) => (
+                  <Link
+                    key={conversation.id}
+                    href={`/inbox?c=${encodeURIComponent(conversation.id)}`}
+                    className={cn(
+                      "block rounded-lg border border-border px-3 py-2 transition-colors hover:bg-muted",
+                      conversation.id === conversationId && "border-primary/50 bg-primary/5"
+                    )}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="truncate text-xs font-medium text-foreground">{channelLabel(conversation)}</span>
+                      <ArrowUpRight className="h-3 w-3 shrink-0 text-muted-foreground" />
+                    </div>
+                    <p className="mt-1 truncate text-[11px] text-muted-foreground">{conversation.last_message_text || "Sin mensajes"}</p>
+                    <p className="mt-1 text-[10px] text-muted-foreground">
+                      {conversation.status === "open" ? "Abierta" : conversation.status === "pending" ? "Pendiente" : "Cerrada"}
+                      {conversation.last_message_at ? ` · ${format(new Date(conversation.last_message_at), "MMM d, HH:mm")}` : ""}
+                    </p>
+                  </Link>
+                ))
+              )}
+            </div>
+          </div>
+
           <div className="my-4 border-t border-border" />
 
           {/* Tags */}
