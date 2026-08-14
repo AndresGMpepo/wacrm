@@ -171,17 +171,22 @@ async function resolveLiveChatContact(
     if (!Object.keys(update).length) return
 
     const { error } = await db.from('contacts').update(update).eq('id', contact.id).eq('account_id', params.accountId)
-    // A concurrent registration can reserve a submitted phone. The match is
-    // still valid, so never discard an inbound customer message for that.
-    if (error && !isUniqueViolation(error)) throw error
+    // Contact enrichment is never allowed to discard an inbound customer
+    // message. A concurrent registration can reserve the submitted phone or
+    // email; the already-resolved contact remains valid in either case.
+    if (error && !isUniqueViolation(error)) {
+      console.error('[yeastar-live-chat] could not enrich existing contact:', error.message)
+    }
   }
 
   if (identity) {
     const { data: contact, error: contactError } = await db.from('contacts')
       .select('id, name, email, phone').eq('id', identity.contact_id).eq('account_id', params.accountId).maybeSingle()
-    if (contactError) throw contactError
+    if (contactError) console.error('[yeastar-live-chat] could not load mapped contact:', contactError.message)
     if (contact) await enrichContact(contact)
-    await db.from('omnichannel_contact_identities').update({ display_name: name }).eq('connector_id', params.connectorId).eq('external_user_id', params.externalUserId)
+    const { error: identityUpdateError } = await db.from('omnichannel_contact_identities')
+      .update({ display_name: name }).eq('connector_id', params.connectorId).eq('external_user_id', params.externalUserId)
+    if (identityUpdateError) console.error('[yeastar-live-chat] could not refresh contact identity:', identityUpdateError.message)
     return identity.contact_id as string
   }
 
@@ -192,10 +197,13 @@ async function resolveLiveChatContact(
   if (!phoneMatch && emailValue) {
     const { data, error } = await db.from('contacts')
       .select('id, name, email, phone').eq('account_id', params.accountId).eq('email_normalized', emailValue).limit(2)
-    if (error) throw error
+    // The identity lookup is an enhancement, not a prerequisite for delivery.
+    // This also lets a rolling deployment continue receiving messages while a
+    // PostgREST schema cache refreshes after migration 076.
+    if (error) console.error('[yeastar-live-chat] could not match contact by email:', error.message)
     // A repeated email is not sufficient proof that two records are the same
     // person. Preserve the existing records rather than linking arbitrarily.
-    emailMatch = data?.length === 1 ? data[0] : null
+    emailMatch = !error && data?.length === 1 ? data[0] : null
   }
 
   const existing = phoneMatch ?? emailMatch
@@ -222,7 +230,11 @@ async function resolveLiveChatContact(
     contact_id: contactId,
     display_name: name,
   })
-  if (identityInsertError) throw identityInsertError
+  if (identityInsertError && !isUniqueViolation(identityInsertError)) {
+    // Message delivery must not depend on this convenience mapping. It can be
+    // recreated with the next event without creating a second conversation.
+    console.error('[yeastar-live-chat] could not save contact identity:', identityInsertError.message)
+  }
   return contactId
 }
 
