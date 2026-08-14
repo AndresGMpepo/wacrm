@@ -25,6 +25,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { decrypt } from '@/lib/whatsapp/encryption';
 import { buildSignatureHeader } from '@/lib/webhooks/sign';
 import { isDeliverableUrl } from '@/lib/webhooks/ssrf';
+import { recordN8nDelivery } from '@/lib/webhooks/n8n-delivery-log';
 import type { WebhookEvent } from '@/lib/webhooks/events';
 
 /** Per-endpoint HTTP timeout. Kept short — this runs in `after()`. */
@@ -35,8 +36,10 @@ export const MAX_CONSECUTIVE_FAILURES = 15;
 
 interface EndpointRow {
   id: string;
+  account_id: string;
   url: string;
   secret: string;
+  integration_type?: 'generic' | 'n8n';
 }
 
 /**
@@ -52,7 +55,7 @@ export async function dispatchWebhookEvent(
   try {
     const { data: rows, error } = await db
       .from('webhook_endpoints')
-      .select('id, url, secret')
+      .select('id, account_id, url, secret, integration_type')
       .eq('account_id', accountId)
       .eq('is_active', true)
       .contains('events', [event]);
@@ -63,8 +66,9 @@ export async function dispatchWebhookEvent(
     // HMAC over the raw request body. `id` is a per-delivery uuid the
     // receiver can dedupe on (deliveries are at-least-once and may
     // repeat / arrive out of order).
+    const deliveryId = randomUUID();
     const payload = JSON.stringify({
-      id: randomUUID(),
+      id: deliveryId,
       event,
       occurred_at: new Date().toISOString(),
       account_id: accountId,
@@ -74,7 +78,7 @@ export async function dispatchWebhookEvent(
 
     await Promise.allSettled(
       (rows as EndpointRow[]).map((row) =>
-        deliverOne(db, row, event, payload, tsSeconds)
+        deliverOne(db, row, event, payload, tsSeconds, deliveryId)
       )
     );
   } catch (err) {
@@ -88,13 +92,15 @@ async function deliverOne(
   row: EndpointRow,
   event: WebhookEvent,
   payload: string,
-  tsSeconds: number
+  tsSeconds: number,
+  deliveryId: string,
 ): Promise<void> {
   // SSRF guard: refuse to POST to a host that resolves to a private /
   // loopback / link-local address. Counts as a failure so a
   // misconfigured internal URL surfaces and eventually auto-disables.
   if (!(await isDeliverableUrl(row.url))) {
     console.warn('[webhooks] refusing non-public delivery target for', row.id);
+    await logN8nFailure(db, row, event, deliveryId, null, 'La URL no resuelve a un destino HTTPS público.')
     await recordFailure(db, row);
     return;
   }
@@ -106,6 +112,7 @@ async function deliverOne(
     // A row whose secret can't be decrypted can never produce a valid
     // signature — count it as a failure so it eventually auto-disables.
     console.error('[webhooks] secret decrypt failed for', row.id, err);
+    await logN8nFailure(db, row, event, deliveryId, null, 'No fue posible descifrar el secreto de la conexión.')
     await recordFailure(db, row);
     return;
   }
@@ -131,20 +138,65 @@ async function deliverOne(
       redirect: 'manual',
       signal: AbortSignal.timeout(DELIVERY_TIMEOUT_MS),
     });
-    if (!res.ok) throw new Error(`endpoint responded ${res.status}`);
+    if (!res.ok) {
+      throw new Error(`endpoint responded ${res.status}`);
+    }
 
     // Success: clear the failure streak.
     await db
       .from('webhook_endpoints')
       .update({ failure_count: 0, last_delivery_at: new Date().toISOString() })
       .eq('id', row.id);
+
+    if (row.integration_type === 'n8n') {
+      await recordN8nDelivery(db, {
+        accountId: row.account_id,
+        endpointId: row.id,
+        deliveryId,
+        eventType: event,
+        outcome: 'delivered',
+        httpStatus: res.status,
+        detail: 'Evento recibido correctamente por n8n.',
+      });
+    }
   } catch (err) {
     console.warn(
       `[webhooks] delivery to ${row.id} failed:`,
       err instanceof Error ? err.message : err
     );
+    const httpStatus = err instanceof Error
+      ? Number(err.message.match(/endpoint responded (\d{3})/)?.[1]) || null
+      : null;
+    await logN8nFailure(
+      db,
+      row,
+      event,
+      deliveryId,
+      httpStatus,
+      httpStatus ? `n8n respondió HTTP ${httpStatus}.` : 'No se pudo entregar el evento a n8n.',
+    )
     await recordFailure(db, row);
   }
+}
+
+async function logN8nFailure(
+  db: SupabaseClient,
+  row: EndpointRow,
+  event: WebhookEvent,
+  deliveryId: string,
+  httpStatus: number | null,
+  detail: string,
+): Promise<void> {
+  if (row.integration_type !== 'n8n') return
+  await recordN8nDelivery(db, {
+    accountId: row.account_id,
+    endpointId: row.id,
+    deliveryId,
+    eventType: event,
+    outcome: 'failed',
+    httpStatus,
+    detail,
+  })
 }
 
 async function recordFailure(db: SupabaseClient, row: EndpointRow): Promise<void> {

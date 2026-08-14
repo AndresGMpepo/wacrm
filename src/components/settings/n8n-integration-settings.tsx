@@ -25,9 +25,20 @@ type Connection = {
   created_at: string
 }
 
+type Delivery = {
+  id: string
+  endpoint_id: string
+  event_type: string
+  outcome: 'delivered' | 'failed' | 'test'
+  http_status: number | null
+  detail: string
+  created_at: string
+}
+
 export function N8nIntegrationSettings({ onCreateApiKey }: { onCreateApiKey: () => void }) {
   const { canEditSettings } = useAuth()
   const [connections, setConnections] = useState<Connection[]>([])
+  const [deliveries, setDeliveries] = useState<Delivery[]>([])
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -41,10 +52,20 @@ export function N8nIntegrationSettings({ onCreateApiKey }: { onCreateApiKey: () 
       return
     }
     try {
-      const response = await fetch('/api/account/n8n-connections', { cache: 'no-store' })
+      const [response, deliveryResponse] = await Promise.all([
+        fetch('/api/account/n8n-connections', { cache: 'no-store' }),
+        fetch('/api/account/n8n-connections/deliveries', { cache: 'no-store' }),
+      ])
       const payload = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(payload.error ?? 'No se pudieron cargar las conexiones.')
       setConnections(payload.connections ?? [])
+      if (deliveryResponse.ok) {
+        const deliveryPayload = await deliveryResponse.json().catch(() => ({}))
+        setDeliveries(deliveryPayload.deliveries ?? [])
+      } else {
+        // The history migration can be applied independently of this UI.
+        setDeliveries([])
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'No se pudieron cargar las conexiones.')
     } finally {
@@ -146,6 +167,22 @@ export function N8nIntegrationSettings({ onCreateApiKey }: { onCreateApiKey: () 
         <div className="rounded-lg border border-dashed bg-background/30 p-3 text-xs text-muted-foreground"><strong className="text-foreground">Clave API (opcional):</strong> sólo la necesitarás si un flujo de n8n debe consultar datos o enviar acciones a NexoOmni. En ese caso usa un nodo <strong>HTTP Request</strong> con el header <code>Authorization: Bearer TU_CLAVE</code>; no se configura en JWT Auth. <Button variant="link" className="h-auto px-1 text-xs" onClick={onCreateApiKey}>Crear clave opcional <ExternalLink className="size-3" /></Button></div>
 
         {loading ? <div className="flex justify-center py-4"><Loader2 className="size-5 animate-spin text-primary" /></div> : connections.length === 0 ? <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">Aún no hay una conexión n8n. Crear una no instala n8n: sólo enlaza de forma segura la cuenta actual con tu instancia externa.</p> : <div className="divide-y rounded-lg border">{connections.map((connection) => <div key={connection.id} className="flex flex-col gap-3 p-4 lg:flex-row lg:items-center lg:justify-between"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="font-medium">{connection.name}</p><Badge className={connection.is_active ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-500' : 'border-border bg-muted text-muted-foreground'}>{connection.is_active ? 'Activa' : 'Pausada'}</Badge>{connection.failure_count > 0 ? <Badge variant="outline" className="text-amber-500">{connection.failure_count} fallo(s) consecutivo(s)</Badge> : null}</div><p className="mt-1 truncate font-mono text-xs text-muted-foreground" title={connection.url}>{connection.url}</p><p className="mt-1 text-xs text-muted-foreground">Eventos: {connection.events.join(', ')}{connection.last_delivery_at ? ` · última entrega ${new Date(connection.last_delivery_at).toLocaleString('es-MX')}` : ' · sin entregas aún'}</p></div><div className="flex shrink-0 flex-wrap gap-2"><Button size="sm" variant="outline" disabled={busyId === connection.id || !connection.is_active} onClick={() => void testConnection(connection)}>{busyId === connection.id ? <Loader2 className="size-4 animate-spin" /> : <Radio className="size-4" />}Probar conexión</Button><Button size="sm" variant="outline" disabled={busyId === connection.id} onClick={() => updateStatus(connection)}>{busyId === connection.id ? <Loader2 className="size-4 animate-spin" /> : connection.is_active ? <Pause className="size-4" /> : <Play className="size-4" />}{connection.is_active ? 'Pausar' : 'Reactivar'}</Button><Button size="sm" variant="outline" className="text-destructive hover:text-destructive" disabled={busyId === connection.id} onClick={() => removeConnection(connection)}><Trash2 className="size-4" />Eliminar</Button></div></div>)}</div>}
+        {deliveries.length > 0 ? (
+          <div className="rounded-lg border bg-background/30">
+            <div className="border-b px-4 py-3">
+              <p className="font-medium">Últimas entregas a n8n</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">Solo se registra el tipo de evento y el resultado; nunca el contenido de chats, contactos o mensajes.</p>
+            </div>
+            <div className="divide-y">
+              {deliveries.map((delivery) => {
+                const connection = connections.find((item) => item.id === delivery.endpoint_id)
+                const label = delivery.outcome === 'delivered' ? 'Entregado' : delivery.outcome === 'test' ? 'Prueba correcta' : 'Falló'
+                const color = delivery.outcome === 'failed' ? 'border-destructive/40 text-destructive' : delivery.outcome === 'test' ? 'border-primary/40 text-primary' : 'border-emerald-500/40 text-emerald-500'
+                return <div key={delivery.id} className="flex flex-col gap-1 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between sm:gap-4"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="font-medium">{connection?.name ?? 'Conexión eliminada'}</p><Badge variant="outline" className={color}>{label}</Badge><code className="text-xs text-muted-foreground">{delivery.event_type}</code></div><p className="mt-1 text-xs text-muted-foreground">{delivery.detail}{delivery.http_status ? ` · HTTP ${delivery.http_status}` : ''}</p></div><p className="shrink-0 text-xs text-muted-foreground">{new Date(delivery.created_at).toLocaleString('es-MX')}</p></div>
+              })}
+            </div>
+          </div>
+        ) : null}
       </CardContent>
 
       <Dialog open={creating} onOpenChange={setCreating}>

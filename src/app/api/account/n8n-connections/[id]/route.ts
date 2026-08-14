@@ -6,6 +6,8 @@ import { checkRateLimit, RATE_LIMITS, rateLimitResponse } from '@/lib/rate-limit
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { buildSignatureHeader } from '@/lib/webhooks/sign'
 import { isDeliverableUrl } from '@/lib/webhooks/ssrf'
+import { recordN8nDelivery } from '@/lib/webhooks/n8n-delivery-log'
+import { supabaseAdmin } from '@/lib/automations/admin-client'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -58,8 +60,9 @@ export async function POST(_: Request, { params }: Params) {
       return NextResponse.json({ error: 'No se pudo leer de forma segura el secreto de esta conexión.' }, { status: 503 })
     }
 
+    const deliveryId = randomUUID()
     const payload = JSON.stringify({
-      id: randomUUID(),
+      id: deliveryId,
       event: 'nexoomni.connection_test',
       occurred_at: new Date().toISOString(),
       account_id: ctx.accountId,
@@ -89,10 +92,27 @@ export async function POST(_: Request, { params }: Params) {
       })
     } catch (error) {
       console.error('[POST /api/account/n8n-connections/:id] connection test fetch failed:', error)
+      await recordN8nDelivery(supabaseAdmin(), {
+        accountId: ctx.accountId,
+        endpointId: connection.id,
+        deliveryId,
+        eventType: 'nexoomni.connection_test',
+        outcome: 'failed',
+        detail: networkDiagnostic(error),
+      })
       return NextResponse.json({ error: networkDiagnostic(error) }, { status: 502 })
     }
 
     if (!response.ok) {
+      await recordN8nDelivery(supabaseAdmin(), {
+        accountId: ctx.accountId,
+        endpointId: connection.id,
+        deliveryId,
+        eventType: 'nexoomni.connection_test',
+        outcome: 'failed',
+        httpStatus: response.status,
+        detail: `n8n HTTP ${response.status}.`,
+      })
       return NextResponse.json({ error: `n8n respondió HTTP ${response.status}. Verifica que uses la URL de producción y que el flujo esté activo.` }, { status: 502 })
     }
 
@@ -107,6 +127,16 @@ export async function POST(_: Request, { params }: Params) {
       // failed; log it so it can be investigated separately.
       console.error('[POST /api/account/n8n-connections/:id] delivery telemetry update failed:', updateError)
     }
+
+    await recordN8nDelivery(supabaseAdmin(), {
+      accountId: ctx.accountId,
+      endpointId: connection.id,
+      deliveryId,
+      eventType: 'nexoomni.connection_test',
+      outcome: 'test',
+      httpStatus: response.status,
+      detail: 'Signed test received correctly by n8n.',
+    })
 
     return NextResponse.json({ message: 'Conexión n8n validada. Se envió un evento de prueba firmado; no ejecutó ninguna acción comercial.' })
   } catch (error) {
