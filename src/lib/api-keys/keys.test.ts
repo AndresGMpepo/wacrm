@@ -35,11 +35,11 @@ describe('generateApiKey', () => {
 
 describe('hashApiKey', () => {
   it('is deterministic', () => {
-    expect(hashApiKey('wacrm_live_abc')).toBe(hashApiKey('wacrm_live_abc'));
+    expect(hashApiKey('nexoomni_live_abc')).toBe(hashApiKey('nexoomni_live_abc'));
   });
 
   it('differs for different inputs', () => {
-    expect(hashApiKey('wacrm_live_abc')).not.toBe(hashApiKey('wacrm_live_abd'));
+    expect(hashApiKey('nexoomni_live_abc')).not.toBe(hashApiKey('nexoomni_live_abd'));
   });
 });
 
@@ -53,11 +53,15 @@ describe('looksLikeApiKey', () => {
     expect(looksLikeApiKey('')).toBe(false);
     expect(looksLikeApiKey('some-invite-token')).toBe(false);
   });
+
+  it('keeps accepting keys created before the NexoOmni rename', () => {
+    expect(looksLikeApiKey('wacrm_live_existing-key')).toBe(true);
+  });
 });
 
 describe('timingSafeHexEqual', () => {
   it('is true for identical digests', () => {
-    const h = hashApiKey('wacrm_live_xyz');
+    const h = hashApiKey('nexoomni_live_xyz');
     expect(timingSafeHexEqual(h, h)).toBe(true);
   });
 

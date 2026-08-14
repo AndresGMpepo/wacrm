@@ -55,6 +55,9 @@ export async function POST(_: Request, { params }: Params) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'X-NexoOmni-Event': 'nexoomni.connection_test',
+        'X-NexoOmni-Webhook-Id': connection.id,
+        'X-NexoOmni-Signature': buildSignatureHeader(payload, secret, timestamp),
         'X-Wacrm-Event': 'nexoomni.connection_test',
         'X-Wacrm-Webhook-Id': connection.id,
         'X-Wacrm-Signature': buildSignatureHeader(payload, secret, timestamp),

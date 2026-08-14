@@ -115,6 +115,11 @@ async function deliverOne(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        // NexoOmni is the public contract. Keep legacy aliases so existing
+        // external automations do not break during the product rename.
+        'X-NexoOmni-Event': event,
+        'X-NexoOmni-Webhook-Id': row.id,
+        'X-NexoOmni-Signature': buildSignatureHeader(payload, secret, tsSeconds),
         'X-Wacrm-Event': event,
         'X-Wacrm-Webhook-Id': row.id,
         'X-Wacrm-Signature': buildSignatureHeader(payload, secret, tsSeconds),

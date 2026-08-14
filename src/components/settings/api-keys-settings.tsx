@@ -96,7 +96,7 @@ export function ApiKeysSettings() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void load();
@@ -213,7 +213,7 @@ export function ApiKeysSettings() {
                         )}
                       </div>
                       <p className="text-muted-foreground mt-0.5 font-mono text-xs">
-                        {k.key_prefix}…
+                        {k.key_prefix.startsWith('wacrm_live_') ? `clave-anterior_${k.key_prefix.slice('wacrm_live_'.length)}` : k.key_prefix}…
                       </p>
                       <div className="mt-1.5 flex flex-wrap gap-1">
                         {k.scopes.length === 0 ? (
