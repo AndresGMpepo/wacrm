@@ -13,6 +13,7 @@ import { SecurityPanel } from '@/components/settings/security-panel';
 import { AppearancePanel } from '@/components/settings/appearance-panel';
 import { OperatingModeSettings } from '@/components/settings/operating-mode-settings';
 import { WhatsAppConfig } from '@/components/settings/whatsapp-config';
+import { MetaMessagingConfig } from '@/components/settings/meta-messaging-config';
 import { YeastarLiveChatConfig } from '@/components/settings/yeastar-live-chat-config';
 import { ConversationAssignmentConfig } from '@/components/settings/conversation-assignment-config';
 import { TelephonyConfig } from '@/components/settings/telephony-config';
@@ -80,6 +81,7 @@ function SettingsPageInner() {
     appearance: <AppearancePanel />,
     'operating-mode': <OperatingModeSettings />,
     whatsapp: <WhatsAppConfig />,
+    'social-messaging': <MetaMessagingConfig />,
     'live-chat': <YeastarLiveChatConfig />,
     assignment: <ConversationAssignmentConfig />,
     telephony: <TelephonyConfig />,

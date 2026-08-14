@@ -21,8 +21,14 @@ import crypto from 'node:crypto'
 export function verifyMetaWebhookSignature(
   rawBody: string,
   signatureHeader: string | null,
+  /**
+   * Social connectors keep an App Secret per tenant. WhatsApp preserves the
+   * existing environment-based configuration, while Facebook/Instagram pass
+   * their decrypted connector secret explicitly from server-only code.
+   */
+  configuredSecret?: string | null,
 ): boolean {
-  const secret = process.env.META_APP_SECRET
+  const secret = configuredSecret ?? process.env.META_APP_SECRET
   if (!secret) {
     console.error(
       '[webhook] META_APP_SECRET is not set — rejecting request. ' +

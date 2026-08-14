@@ -472,13 +472,15 @@ export function MessageThread({
       try {
         const sendUrl = conversation.channel_type === "yeastar_live_chat"
           ? "/api/omnichannel/yeastar/send"
-          : "/api/whatsapp/send";
+          : conversation.channel_type === "facebook" || conversation.channel_type === "instagram"
+            ? "/api/omnichannel/meta/send"
+            : "/api/whatsapp/send";
         const res = await fetch(sendUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             conversation_id: conversation.id,
-            ...(conversation.channel_type === "yeastar_live_chat" ? {} : { message_type: "text" }),
+            ...(conversation.channel_type === "yeastar_live_chat" || conversation.channel_type === "facebook" || conversation.channel_type === "instagram" ? {} : { message_type: "text" }),
             content_text: text,
             reply_to_message_id: replyToId,
           }),
@@ -1165,12 +1167,12 @@ export function MessageThread({
       {/* Composer */}
       <MessageComposer
         conversationId={conversation.id}
-        sessionExpired={conversation.channel_type === "yeastar_live_chat" ? false : sessionInfo.expired}
+        sessionExpired={conversation.channel_type === "yeastar_live_chat" || conversation.channel_type === "facebook" || conversation.channel_type === "instagram" ? false : sessionInfo.expired}
         onSend={handleSend}
         onSendMedia={handleSendMedia}
         onSendInteractive={handleSendInteractive}
         onOpenTemplates={handleOpenTemplates}
-        supportedMediaKinds={conversation.channel_type === "yeastar_live_chat" ? ["image"] : undefined}
+        supportedMediaKinds={conversation.channel_type === "yeastar_live_chat" ? ["image"] : conversation.channel_type === "facebook" || conversation.channel_type === "instagram" ? [] : undefined}
         replyTo={replyTo}
         onClearReply={() => setReplyTo(null)}
       />
