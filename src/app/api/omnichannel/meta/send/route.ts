@@ -35,9 +35,9 @@ export async function POST(request: Request) {
     if (text.length > 2_000) return NextResponse.json({ error: 'El mensaje supera el límite de 2,000 caracteres para este canal.' }, { status: 400 })
     const db = admin()
     const { data: conversation, error: conversationError } = await db.from('conversations')
-      .select('id, connector_id, external_session_id, channel_type').eq('id', conversationId).eq('account_id', accountId).in('channel_type', ['facebook', 'instagram']).maybeSingle()
+      .select('id, connector_id, external_session_id, channel_type, social_comment_id').eq('id', conversationId).eq('account_id', accountId).in('channel_type', ['facebook', 'instagram']).maybeSingle()
     if (conversationError) throw conversationError
-    if (!conversation?.connector_id || !conversation.external_session_id || (conversation.channel_type !== 'facebook' && conversation.channel_type !== 'instagram')) {
+    if (!conversation?.connector_id || (!conversation.external_session_id && !conversation.social_comment_id) || (conversation.channel_type !== 'facebook' && conversation.channel_type !== 'instagram')) {
       return NextResponse.json({ error: 'Esta conversación no tiene un destinatario Meta disponible.' }, { status: 409 })
     }
     const { data: connector, error: connectorError } = await db.from('omnichannel_connectors')
@@ -46,25 +46,37 @@ export async function POST(request: Request) {
     if (!connector?.meta_access_token || connector.status === 'paused') return NextResponse.json({ error: 'El canal Meta está pausado o no tiene un token de envío configurado.' }, { status: 409 })
     let accessToken: string
     try { accessToken = decrypt(connector.meta_access_token) } catch { return NextResponse.json({ error: 'No se pudo leer de forma segura el token de este canal Meta.' }, { status: 503 }) }
-    const response = await fetch(`https://graph.facebook.com/${graphVersion()}/${encodeURIComponent(connector.external_channel_id)}/messages`, {
+    const isPublicComment = Boolean(conversation.social_comment_id)
+    const endpoint = isPublicComment
+      ? `https://graph.facebook.com/${graphVersion()}/${encodeURIComponent(conversation.social_comment_id!)}/${conversation.channel_type === 'instagram' ? 'replies' : 'comments'}`
+      : `https://graph.facebook.com/${graphVersion()}/${encodeURIComponent(connector.external_channel_id)}/messages`
+    const response = await fetch(endpoint, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        recipient: { id: conversation.external_session_id },
-        ...(conversation.channel_type === 'facebook' ? { messaging_type: 'RESPONSE' } : {}),
-        message: { text },
+        ...(isPublicComment
+          ? { message: text }
+          : {
+              recipient: { id: conversation.external_session_id },
+              ...(conversation.channel_type === 'facebook' ? { messaging_type: 'RESPONSE' } : {}),
+              message: { text },
+            }),
         access_token: accessToken,
       }),
       signal: AbortSignal.timeout(15_000),
     })
-    const payload = await response.json().catch(() => ({})) as { message_id?: string; error?: { message?: string } }
-    if (!response.ok || !payload.message_id) {
+    const payload = await response.json().catch(() => ({})) as { message_id?: string; id?: string; error?: { message?: string } }
+    const externalId = isPublicComment ? payload.id : payload.message_id
+    if (!response.ok || !externalId) {
       const detail = payload.error?.message || `HTTP ${response.status}`
       return NextResponse.json({ error: `Meta rechazó el envío: ${detail}` }, { status: 502 })
     }
     const now = new Date().toISOString()
     const { data: message, error: messageError } = await db.from('messages').insert({
       conversation_id: conversation.id, sender_type: 'agent', sender_id: userId, content_type: 'text', content_text: text,
-      message_id: `meta:out:${conversation.connector_id}:${payload.message_id || crypto.randomUUID()}`, status: 'sent', created_at: now,
+      message_id: isPublicComment
+        ? `meta:comment:${conversation.connector_id}:${externalId || crypto.randomUUID()}`
+        : `meta:out:${conversation.connector_id}:${externalId || crypto.randomUUID()}`,
+      status: 'sent', created_at: now,
     }).select().single()
     if (messageError) throw messageError
     const { error: updateError } = await db.from('conversations').update({ last_message_text: text, last_message_at: now, updated_at: now }).eq('id', conversation.id).eq('account_id', accountId)

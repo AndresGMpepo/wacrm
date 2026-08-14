@@ -196,6 +196,10 @@ export interface Conversation {
   external_session_id?: string | null;
   channel_source_label?: string | null;
   channel_source_url?: string | null;
+  /** Present only for a public Facebook/Instagram comment thread. */
+  social_comment_id?: string | null;
+  social_parent_comment_id?: string | null;
+  social_post_id?: string | null;
 }
 
 // ============================================================

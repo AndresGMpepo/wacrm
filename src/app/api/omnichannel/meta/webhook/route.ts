@@ -16,7 +16,13 @@ type MetaMessaging = {
   timestamp?: number
   message?: { mid?: string; text?: string; is_echo?: boolean; attachments?: Array<{ type?: string }> }
 }
-type MetaEntry = { id?: string; messaging?: MetaMessaging[] }
+type MetaCommentValue = {
+  comment_id?: string; id?: string; parent_id?: string; post_id?: string; media_id?: string
+  item?: string; message?: string; text?: string; from?: { id?: string; name?: string }
+  media?: { id?: string }; post?: { id?: string }
+}
+type MetaChange = { field?: string; value?: MetaCommentValue }
+type MetaEntry = { id?: string; time?: number; messaging?: MetaMessaging[]; changes?: MetaChange[] }
 type MetaPayload = { object?: string; entry?: MetaEntry[] }
 type Connector = {
   id: string; account_id: string; provider: 'facebook' | 'instagram'; display_name: string; external_channel_id: string
@@ -30,16 +36,21 @@ function admin() {
   return createAdminClient(url, key, { auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false } })
 }
 
-function eventType(provider: Connector['provider']) { return provider === 'facebook' ? 40001 : 40002 }
+function eventType(provider: Connector['provider'], kind: 'message' | 'comment' = 'message') {
+  if (kind === 'comment') return provider === 'facebook' ? 40011 : 40012
+  return provider === 'facebook' ? 40001 : 40002
+}
 function time(value: unknown) {
-  const milliseconds = typeof value === 'number' ? value : Number(value)
-  if (!Number.isFinite(milliseconds) || milliseconds <= 0) return new Date().toISOString()
+  const raw = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(raw) || raw <= 0) return new Date().toISOString()
+  // Meta's entry.time is seconds, while messaging.timestamp is milliseconds.
+  const milliseconds = raw < 1_000_000_000_000 ? raw * 1000 : raw
   const date = new Date(milliseconds)
   return Number.isNaN(date.getTime()) ? new Date().toISOString() : date.toISOString()
 }
 
-async function claimReceipt(db: ReturnType<typeof admin>, connector: Connector, externalMessageId: string) {
-  const type = eventType(connector.provider)
+async function claimReceipt(db: ReturnType<typeof admin>, connector: Connector, externalMessageId: string, kind: 'message' | 'comment' = 'message') {
+  const type = eventType(connector.provider, kind)
   const { error } = await db.from('omnichannel_webhook_receipts').insert({
     account_id: connector.account_id, connector_id: connector.id, event_type: type, external_message_id: externalMessageId, outcome: 'processing',
   })
@@ -48,7 +59,7 @@ async function claimReceipt(db: ReturnType<typeof admin>, connector: Connector, 
   return false
 }
 
-async function resolveContact(db: ReturnType<typeof admin>, connector: Connector, externalUserId: string, auditUserId: string) {
+async function resolveContact(db: ReturnType<typeof admin>, connector: Connector, externalUserId: string, auditUserId: string, displayName?: string) {
   const { data: mapped, error: mapError } = await db.from('omnichannel_contact_identities')
     .select('contact_id').eq('connector_id', connector.id).eq('external_user_id', externalUserId).maybeSingle()
   if (mapError) throw mapError
@@ -62,7 +73,7 @@ async function resolveContact(db: ReturnType<typeof admin>, connector: Connector
   if (!contactId) {
     const label = connector.provider === 'facebook' ? 'Cliente Facebook' : 'Cliente Instagram'
     const { data: contact, error: contactError } = await db.from('contacts').insert({
-      account_id: connector.account_id, user_id: auditUserId, phone: placeholderPhone, name: `${label} ${externalUserId.slice(-6)}`,
+      account_id: connector.account_id, user_id: auditUserId, phone: placeholderPhone, name: displayName?.slice(0, 120) || `${label} ${externalUserId.slice(-6)}`,
     }).select('id').single()
     if (contactError || !contact) throw contactError ?? new Error('No se pudo crear el contacto de Meta.')
     contactId = contact.id
@@ -122,6 +133,85 @@ async function ingestMessage(db: ReturnType<typeof admin>, connector: Connector,
   return { conversationId: conversation.id }
 }
 
+function valueText(value: MetaCommentValue | undefined, key: keyof MetaCommentValue) {
+  const candidate = value?.[key]
+  return typeof candidate === 'string' ? candidate.trim() : ''
+}
+
+async function findCommentConversation(db: ReturnType<typeof admin>, connector: Connector, parentId: string) {
+  if (!parentId) return null
+  const marker = `meta:comment:${connector.id}:${parentId}`
+  const { data: parentMessage, error } = await db.from('messages').select('conversation_id')
+    .eq('message_id', marker).limit(1).maybeSingle()
+  if (error) throw error
+  if (!parentMessage?.conversation_id) return null
+  const { data: conversation, error: conversationError } = await db.from('conversations')
+    .select('id, unread_count, social_comment_id').eq('id', parentMessage.conversation_id)
+    .eq('account_id', connector.account_id).eq('connector_id', connector.id).maybeSingle()
+  if (conversationError) throw conversationError
+  return conversation
+}
+
+async function ingestComment(db: ReturnType<typeof admin>, connector: Connector, entry: MetaEntry, change: MetaChange) {
+  const value = change.value
+  const commentId = valueText(value, 'comment_id') || valueText(value, 'id')
+  const senderId = value?.from?.id?.trim() || ''
+  if (!commentId || !senderId || senderId === connector.external_channel_id) return { ignored: true }
+  if (!await claimReceipt(db, connector, commentId, 'comment')) return { duplicate: true }
+
+  const auditUserId = await resolveAuditUserId(db, connector.account_id)
+  const contactId = await resolveContact(db, connector, senderId, auditUserId, value?.from?.name)
+  const parentId = valueText(value, 'parent_id')
+  const postId = valueText(value, 'post_id') || valueText(value, 'media_id') || value?.media?.id?.trim() || value?.post?.id?.trim() || ''
+  const parentConversation = await findCommentConversation(db, connector, parentId)
+  const rootCommentId = parentConversation?.social_comment_id || commentId
+  const sessionId = `comment:${rootCommentId}`
+  const { data: rows, error: findError } = await db.from('conversations').select('id, unread_count, social_comment_id')
+    .eq('account_id', connector.account_id).eq('connector_id', connector.id).eq('external_session_id', sessionId).limit(1)
+  if (findError) throw findError
+  let conversation = rows?.[0]
+  let created = false
+  if (!conversation) {
+    const { data, error } = await db.from('conversations').insert({
+      account_id: connector.account_id, user_id: auditUserId, contact_id: contactId, channel_type: connector.provider,
+      connector_id: connector.id, external_session_id: sessionId,
+      channel_source_label: `${connector.display_name} · Comentarios públicos`, social_comment_id: rootCommentId,
+      social_parent_comment_id: parentId || null, social_post_id: postId || null,
+    }).select('id, unread_count, social_comment_id').single()
+    if (error || !data) throw error ?? new Error('No se pudo crear la conversación del comentario Meta.')
+    conversation = data
+    created = true
+  }
+  const contentText = valueText(value, 'message') || valueText(value, 'text') || '[Comentario sin texto]'
+  const createdAt = time(entry.time)
+  const { error: messageError } = await db.from('messages').insert({
+    conversation_id: conversation.id, sender_type: 'customer', content_type: 'text', content_text: contentText,
+    message_id: `meta:comment:${connector.id}:${commentId}`, status: 'delivered', created_at: createdAt,
+  })
+  if (messageError) throw messageError
+  const now = new Date().toISOString()
+  const { error: updateError } = await db.from('conversations').update({
+    status: 'open', last_message_text: contentText, last_message_at: createdAt,
+    unread_count: (conversation.unread_count ?? 0) + 1, updated_at: now,
+  }).eq('id', conversation.id)
+  if (updateError) throw updateError
+  const { error: assignmentError } = await db.rpc('auto_assign_inbound_conversation', { p_account_id: connector.account_id, p_conversation_id: conversation.id })
+  if (assignmentError) console.error('[meta] automatic assignment failed:', assignmentError.message)
+  if (created) await dispatchWebhookEvent(db, connector.account_id, 'conversation.created', { conversation_id: conversation.id, contact_id: contactId, channel_type: connector.provider, connector_id: connector.id, public_comment: true })
+  await dispatchWebhookEvent(db, connector.account_id, 'message.received', { conversation_id: conversation.id, contact_id: contactId, message_id: `meta:comment:${connector.id}:${commentId}`, channel_type: connector.provider, content_type: 'text', text: contentText, public_comment: true })
+  await db.from('omnichannel_webhook_receipts').update({ outcome: 'processed', detail: `Comentario público de ${connector.provider} agregado.`, processed_at: now })
+    .eq('connector_id', connector.id).eq('event_type', eventType(connector.provider, 'comment')).eq('external_message_id', commentId)
+  return { conversationId: conversation.id }
+}
+
+function isInboundComment(connector: Connector, change: MetaChange) {
+  const field = change.field?.toLowerCase()
+  const value = change.value
+  if (!value) return false
+  if (connector.provider === 'facebook') return field === 'feed' && (Boolean(value.comment_id) || (value.item === 'comment' && Boolean(value.id)))
+  return field === 'comments' && Boolean(value.comment_id || value.id)
+}
+
 export async function GET(request: Request) {
   const url = new URL(request.url)
   if (url.searchParams.get('hub.mode') !== 'subscribe') return new NextResponse('Not found', { status: 404 })
@@ -178,6 +268,18 @@ export async function POST(request: Request) {
           const id = event.message?.mid
           if (id) await db.from('omnichannel_webhook_receipts').update({ outcome: 'failed', detail: 'No se pudo procesar el mensaje de Meta.', processed_at: new Date().toISOString() })
             .eq('connector_id', connector.id).eq('event_type', eventType(connector.provider)).eq('external_message_id', id)
+        }
+      }
+      for (const change of entry.changes ?? []) {
+        if (!isInboundComment(connector, change)) continue
+        try {
+          const result = await ingestComment(db, connector, entry, change)
+          if ('conversationId' in result) processed += 1
+        } catch (error) {
+          console.error('[meta] could not ingest comment:', error)
+          const commentId = valueText(change.value, 'comment_id') || valueText(change.value, 'id')
+          if (commentId) await db.from('omnichannel_webhook_receipts').update({ outcome: 'failed', detail: 'No se pudo procesar el comentario de Meta.', processed_at: new Date().toISOString() })
+            .eq('connector_id', connector.id).eq('event_type', eventType(connector.provider, 'comment')).eq('external_message_id', commentId)
         }
       }
       await db.from('omnichannel_connectors').update({ status: 'active', last_event_at: new Date().toISOString(), last_error: null }).eq('id', connector.id)

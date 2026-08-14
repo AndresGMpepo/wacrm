@@ -912,6 +912,11 @@ export function MessageThread({
           <div className="min-w-0">
             <h2 className="truncate text-sm font-semibold text-foreground">{displayName}</h2>
             <p className="truncate text-xs text-muted-foreground">{contact.phone}</p>
+            {conversation.social_comment_id ? (
+              <p className="mt-0.5 truncate text-[10px] font-medium text-primary">
+                Comentario público de {conversation.channel_type === "facebook" ? "Facebook" : "Instagram"}
+              </p>
+            ) : null}
           </div>
           {/* Session timer badge — hidden on the narrowest phones so
               the name + back arrow keep their room. */}
