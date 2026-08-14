@@ -107,6 +107,8 @@ export interface Contact {
   phone_normalized?: string;
   name?: string;
   email?: string;
+  /** Lower-cased and trimmed DB-generated email. Read-only identity key. */
+  email_normalized?: string | null;
   company?: string;
   avatar_url?: string;
   created_at: string;

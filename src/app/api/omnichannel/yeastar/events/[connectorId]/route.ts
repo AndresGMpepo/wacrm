@@ -160,7 +160,27 @@ async function resolveLiveChatContact(
   const emailValue = field(params.preChat?.email, 254)?.toLowerCase() ?? null
   const phoneValue = field(params.preChat?.phone, 80)
 
+  const enrichContact = async (contact: { id: string; name?: string | null; email?: string | null; phone?: string | null }) => {
+    const existingPhone = String(contact.phone ?? '')
+    const existingName = typeof contact.name === 'string' ? contact.name.trim() : ''
+    const existingEmail = typeof contact.email === 'string' ? contact.email.trim().toLowerCase() : ''
+    const update: Record<string, string> = {}
+    if (name && (!existingName || existingName.startsWith('Visitante web '))) update.name = name
+    if (emailValue && !existingEmail) update.email = emailValue
+    if (phoneValue && existingPhone.startsWith('yeastar-chat:')) update.phone = phoneValue
+    if (!Object.keys(update).length) return
+
+    const { error } = await db.from('contacts').update(update).eq('id', contact.id).eq('account_id', params.accountId)
+    // A concurrent registration can reserve a submitted phone. The match is
+    // still valid, so never discard an inbound customer message for that.
+    if (error && !isUniqueViolation(error)) throw error
+  }
+
   if (identity) {
+    const { data: contact, error: contactError } = await db.from('contacts')
+      .select('id, name, email, phone').eq('id', identity.contact_id).eq('account_id', params.accountId).maybeSingle()
+    if (contactError) throw contactError
+    if (contact) await enrichContact(contact)
     await db.from('omnichannel_contact_identities').update({ display_name: name }).eq('connector_id', params.connectorId).eq('external_user_id', params.externalUserId)
     return identity.contact_id as string
   }
@@ -168,31 +188,21 @@ async function resolveLiveChatContact(
   // Phone is the strongest identity and wins if phone/email point at different
   // contacts. We never silently merge two customer records in a webhook.
   const phoneMatch = phoneValue ? await findExistingContact(db, params.accountId, phoneValue) : null
-  let emailMatch: { id: string; name: string | null; email: string | null; phone: string } | null = null
+  let emailMatch: { id: string; name: string | null; email: string | null; phone: string | null } | null = null
   if (!phoneMatch && emailValue) {
     const { data, error } = await db.from('contacts')
-      .select('id, name, email, phone').eq('account_id', params.accountId).ilike('email', emailValue).limit(1)
+      .select('id, name, email, phone').eq('account_id', params.accountId).eq('email_normalized', emailValue).limit(2)
     if (error) throw error
-    emailMatch = data?.[0] ?? null
+    // A repeated email is not sufficient proof that two records are the same
+    // person. Preserve the existing records rather than linking arbitrarily.
+    emailMatch = data?.length === 1 ? data[0] : null
   }
 
   const existing = phoneMatch ?? emailMatch
   let contactId: string
   if (existing) {
     contactId = existing.id
-    const existingPhone = String(existing.phone ?? '')
-    const existingName = typeof existing.name === 'string' ? existing.name.trim() : ''
-    const existingEmail = typeof existing.email === 'string' ? existing.email.trim().toLowerCase() : ''
-    const update: Record<string, string> = {}
-    if (name && (!existingName || existingName.startsWith('Visitante web '))) update.name = name
-    if (emailValue && !existingEmail) update.email = emailValue
-    if (phoneValue && existingPhone.startsWith('yeastar-chat:')) update.phone = phoneValue
-    if (Object.keys(update).length) {
-      const { error } = await db.from('contacts').update(update).eq('id', contactId).eq('account_id', params.accountId)
-      // A concurrent registration can reserve a submitted phone. The match is
-      // still valid, so never discard an inbound customer message for that.
-      if (error && !isUniqueViolation(error)) throw error
-    }
+    await enrichContact(existing)
   } else {
     const { data: contact, error: contactError } = await db.from('contacts').insert({
       account_id: params.accountId,
