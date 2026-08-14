@@ -114,12 +114,10 @@ export function ApiKeysSettings() {
         return;
       }
       toast.success(t('revokeSuccess', { name: key.name }));
-      // Reflect the revoke locally without a refetch.
-      setKeys((prev) =>
-        prev.map((k) =>
-          k.id === key.id ? { ...k, revoked_at: new Date().toISOString() } : k
-        )
-      );
+      // A revoked key leaves the operational list immediately. Its hash can
+      // no longer authenticate a request and the API also filters it out on
+      // future page loads.
+      setKeys((prev) => prev.filter((k) => k.id !== key.id));
     } catch (err) {
       console.error('[ApiKeysSettings] revoke error:', err);
       toast.error(t('networkError'));

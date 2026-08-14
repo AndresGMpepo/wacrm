@@ -9,6 +9,21 @@ import { isDeliverableUrl } from '@/lib/webhooks/ssrf'
 
 type Params = { params: Promise<{ id: string }> }
 
+function networkDiagnostic(error: unknown): string {
+  const cause = error instanceof Error && error.cause && typeof error.cause === 'object'
+    ? error.cause as { code?: unknown; message?: unknown }
+    : null
+  const code = typeof cause?.code === 'string' ? cause.code : null
+
+  if (code === 'ENOTFOUND') return 'No se pudo encontrar el dominio de n8n. Revisa la URL pública.'
+  if (code === 'ECONNREFUSED') return 'n8n rechazó la conexión. Confirma que la instancia está encendida y expuesta por HTTPS.'
+  if (code === 'ECONNRESET') return 'n8n cerró la conexión antes de responder. Revisa el proxy o la configuración HTTPS.'
+  if (code === 'CERT_HAS_EXPIRED' || code === 'UNABLE_TO_VERIFY_LEAF_SIGNATURE') {
+    return 'El certificado HTTPS de n8n no es válido para el servidor. Corrige el certificado y vuelve a probar.'
+  }
+  return 'No fue posible contactar n8n desde NexoOmni. Revisa que la URL sea pública, HTTPS y que el flujo esté activo.'
+}
+
 /**
  * Sends a harmless, signed request to the production n8n Webhook URL.
  * This intentionally does not use a business event: testing a connection
@@ -51,22 +66,31 @@ export async function POST(_: Request, { params }: Params) {
       data: { connection_id: connection.id, connection_name: connection.name, test: true },
     })
     const timestamp = Math.floor(Date.now() / 1000)
-    const response = await fetch(connection.url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-NexoOmni-Event': 'nexoomni.connection_test',
-        'X-NexoOmni-Webhook-Id': connection.id,
-        'X-NexoOmni-Signature': buildSignatureHeader(payload, secret, timestamp),
-        'X-Wacrm-Event': 'nexoomni.connection_test',
-        'X-Wacrm-Webhook-Id': connection.id,
-        'X-Wacrm-Signature': buildSignatureHeader(payload, secret, timestamp),
-        'X-NexoOmni-Test': 'true',
-      },
-      body: payload,
-      redirect: 'manual',
-      signal: AbortSignal.timeout(10_000),
-    })
+    let response: Response
+    try {
+      response = await fetch(connection.url, {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          'X-NexoOmni-Event': 'nexoomni.connection_test',
+          'X-NexoOmni-Webhook-Id': connection.id,
+          'X-NexoOmni-Signature': buildSignatureHeader(payload, secret, timestamp),
+          // Legacy aliases let connections created before the commercial
+          // rename finish their migration without a broken event stream.
+          'X-Wacrm-Event': 'nexoomni.connection_test',
+          'X-Wacrm-Webhook-Id': connection.id,
+          'X-Wacrm-Signature': buildSignatureHeader(payload, secret, timestamp),
+          'X-NexoOmni-Test': 'true',
+        },
+        body: payload,
+        redirect: 'manual',
+        signal: AbortSignal.timeout(10_000),
+      })
+    } catch (error) {
+      console.error('[POST /api/account/n8n-connections/:id] connection test fetch failed:', error)
+      return NextResponse.json({ error: networkDiagnostic(error) }, { status: 502 })
+    }
 
     if (!response.ok) {
       return NextResponse.json({ error: `n8n respondió HTTP ${response.status}. Verifica que uses la URL de producción y que el flujo esté activo.` }, { status: 502 })
@@ -77,7 +101,12 @@ export async function POST(_: Request, { params }: Params) {
       .update({ failure_count: 0, last_delivery_at: new Date().toISOString() })
       .eq('id', connection.id)
       .eq('account_id', ctx.accountId)
-    if (updateError) throw updateError
+    if (updateError) {
+      // The delivery did reach n8n. Do not turn that successful validation
+      // into a generic error merely because the non-critical telemetry write
+      // failed; log it so it can be investigated separately.
+      console.error('[POST /api/account/n8n-connections/:id] delivery telemetry update failed:', updateError)
+    }
 
     return NextResponse.json({ message: 'Conexión n8n validada. Se envió un evento de prueba firmado; no ejecutó ninguna acción comercial.' })
   } catch (error) {

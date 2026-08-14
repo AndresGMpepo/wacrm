@@ -52,6 +52,11 @@ export async function GET() {
       .from('api_keys')
       .select(SAFE_COLUMNS)
       .eq('account_id', ctx.accountId)
+      // A revoked credential is no longer operational. Keeping it out of the
+      // normal roster avoids presenting old test credentials as integrations
+      // that still need attention. The encrypted hash remains server-side for
+      // the security/audit retention policy, but it is never usable again.
+      .is('revoked_at', null)
       .order('created_at', { ascending: false });
 
     if (error) {
