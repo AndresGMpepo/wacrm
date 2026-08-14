@@ -77,8 +77,21 @@ export async function POST(request: Request) {
         db.from('ai_usage_log').select('id', { count: 'exact', head: true }).eq('conversation_id', job.conversation_id).eq('mode', 'analysis'),
       ])
       const { data: policy } = await db.from('ai_configs').select('analysis_daily_limit, analysis_monthly_limit, analysis_max_per_conversation, qa_scoring_enabled, qa_scoring_criteria').eq('account_id', job.account_id).single()
-      if (!policy || (daily.count ?? 0) >= policy.analysis_daily_limit || (monthly.count ?? 0) >= policy.analysis_monthly_limit || (perConversation.count ?? 0) >= policy.analysis_max_per_conversation) {
-        await db.from('ai_analysis_jobs').update({ status: 'skipped_limit', error_message: 'Límite de análisis alcanzado.' }).eq('id', job.id); skipped++; continue
+      const dailyCount = daily.count ?? 0
+      const monthlyCount = monthly.count ?? 0
+      const conversationCount = perConversation.count ?? 0
+      if (!policy) {
+        await db.from('ai_analysis_jobs').update({ status: 'skipped_limit', error_message: 'No hay una política de análisis configurada para esta cuenta.' }).eq('id', job.id); skipped++; continue
+      }
+      const limitReason = dailyCount >= policy.analysis_daily_limit
+        ? `Límite diario alcanzado (${dailyCount}/${policy.analysis_daily_limit}).`
+        : monthlyCount >= policy.analysis_monthly_limit
+          ? `Límite mensual alcanzado (${monthlyCount}/${policy.analysis_monthly_limit}).`
+          : conversationCount >= policy.analysis_max_per_conversation
+            ? `Máximo por conversación alcanzado (${conversationCount}/${policy.analysis_max_per_conversation}).`
+            : null
+      if (limitReason) {
+        await db.from('ai_analysis_jobs').update({ status: 'skipped_limit', error_message: limitReason }).eq('id', job.id); skipped++; continue
       }
       const messages = await buildConversationContext(db, job.conversation_id)
       if (!messages.length) throw new Error('No hay mensajes de texto.')
