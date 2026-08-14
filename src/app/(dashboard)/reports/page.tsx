@@ -6,19 +6,11 @@ import { AlertTriangle, BarChart3, Bot, BriefcaseBusiness, CheckCircle2, Clock3,
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { executiveReportCsv, executiveReportExcelXml, executiveReportPrintHtml, reportExportFilename, type ExecutiveReport } from '@/lib/reports/executive-report-export'
+import { executiveReportCsv, executiveReportExcelXml, executiveReportPrintHtml, reportExportFilename, type ExecutiveReport, type ExecutiveReportInsight } from '@/lib/reports/executive-report-export'
 import { ReportScheduleManager } from '@/components/reports/report-schedule-manager'
 
 type Report = ExecutiveReport
-type ExecutiveInsight = {
-  headline: string
-  summary: string
-  priorities: Array<{ area: 'operacion' | 'comercial' | 'marketing' | 'experiencia'; priority: 'alta' | 'media' | 'baja'; title: string; recommendation: string; rationale: string }>
-  risks: string[]
-  opportunities: string[]
-  indicators_to_watch: string[]
-  data_note: string | null
-}
+type ExecutiveInsight = ExecutiveReportInsight
 
 const PERIODS = [7, 30, 90] as const
 const nf = new Intl.NumberFormat('es-MX')
@@ -39,6 +31,7 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [insight, setInsight] = useState<ExecutiveInsight | null>(null)
+  const [insightGeneratedAt, setInsightGeneratedAt] = useState<string | null>(null)
   const [insightLoading, setInsightLoading] = useState(false)
   const [insightError, setInsightError] = useState<string | null>(null)
 
@@ -49,7 +42,11 @@ export default function ReportsPage() {
       const payload = await response.json().catch(() => null) as Report & { error?: string }
       if (!response.ok) throw new Error(payload?.error ?? 'No se pudieron cargar los reportes.')
       setReport(payload)
-      setInsight(null)
+      const insightResponse = await fetch(`/api/reports/executive/insight?from=${payload.meta.range.from}&to=${payload.meta.range.to}`, { cache: 'no-store' })
+      const insightPayload = await insightResponse.json().catch(() => null) as { insight?: ExecutiveInsight | null; generated_at?: string | null }
+      if (!insightResponse.ok) throw new Error('No se pudo recuperar el último dictamen guardado.')
+      setInsight(insightPayload?.insight ?? null)
+      setInsightGeneratedAt(insightPayload?.generated_at ?? null)
       setInsightError(null)
     } catch (err) { setError(err instanceof Error ? err.message : 'No se pudieron cargar los reportes.') }
     finally { setLoading(false) }
@@ -66,9 +63,10 @@ export default function ReportsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ report }),
       })
-      const payload = await response.json().catch(() => null) as { insight?: ExecutiveInsight; error?: string }
+      const payload = await response.json().catch(() => null) as { insight?: ExecutiveInsight; generated_at?: string | null; error?: string }
       if (!response.ok || !payload?.insight) throw new Error(payload?.error ?? 'No se pudo generar el dictamen de IA.')
       setInsight(payload.insight)
+      setInsightGeneratedAt(payload.generated_at ?? new Date().toISOString())
     } catch (err) {
       setInsightError(err instanceof Error ? err.message : 'No se pudo generar el dictamen de IA.')
     } finally {
@@ -79,7 +77,7 @@ export default function ReportsPage() {
   const download = (format: 'csv' | 'xls') => {
     if (!report) return
     const csv = format === 'csv'
-    const blob = new Blob([csv ? executiveReportCsv(report) : executiveReportExcelXml(report)], {
+    const blob = new Blob([csv ? executiveReportCsv(report, insight) : executiveReportExcelXml(report, insight)], {
       type: csv ? 'text/csv;charset=utf-8' : 'application/vnd.ms-excel;charset=utf-8',
     })
     const url = URL.createObjectURL(blob)
@@ -99,7 +97,7 @@ export default function ReportsPage() {
       setError('El navegador bloqueó la ventana de impresión. Permite ventanas emergentes para descargar el PDF.')
       return
     }
-    printWindow.document.write(executiveReportPrintHtml(report))
+    printWindow.document.write(executiveReportPrintHtml(report, insight))
     printWindow.document.close()
     window.setTimeout(() => {
       printWindow.focus()
@@ -138,6 +136,7 @@ export default function ReportsPage() {
           {insightLoading ? 'Analizando…' : insight ? 'Actualizar dictamen' : 'Generar dictamen IA'}
         </Button>
       </CardHeader>
+      {insightGeneratedAt ? <p className="px-6 text-xs text-muted-foreground">Último dictamen guardado: {new Intl.DateTimeFormat('es-MX', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(insightGeneratedAt))}. Se conserva al salir o recargar esta página.</p> : null}
       {insight ? <CardContent className="space-y-5">
         <div><p className="font-semibold text-foreground">{insight.headline}</p><p className="mt-1 text-sm leading-6 text-muted-foreground">{insight.summary}</p></div>
         <div className="grid gap-3 lg:grid-cols-2">

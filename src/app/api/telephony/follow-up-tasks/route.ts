@@ -10,7 +10,16 @@ export async function GET() {
       .or(`assigned_agent_id.is.null,assigned_agent_id.eq.${userId}`)
       .order('due_at').limit(50)
     if (error) throw error
-    return NextResponse.json({ tasks: data ?? [] })
+    const tasks = data ?? []
+    const conversationIds = [...new Set(tasks.map((task) => task.conversation_id))]
+    const { data: analyses, error: analysesError } = conversationIds.length
+      ? await supabase.from('ai_conversation_analyses')
+        .select('conversation_id, sentiment, sentiment_score, qa_score, next_best_action, analyzed_at')
+        .eq('account_id', accountId).eq('source', 'whatsapp').eq('status', 'completed').in('conversation_id', conversationIds)
+      : { data: [], error: null }
+    if (analysesError) throw analysesError
+    const analysisByConversation = new Map((analyses ?? []).map((analysis) => [analysis.conversation_id, analysis]))
+    return NextResponse.json({ tasks: tasks.map((task) => ({ ...task, latest_analysis: analysisByConversation.get(task.conversation_id) ?? null })) })
   } catch (error) { return toErrorResponse(error) }
 }
 

@@ -6,7 +6,7 @@ import { ArrowRight, BellRing, ChartNoAxesCombined, Inbox, PhoneCall, ShieldAler
 
 const shortcuts = [
   { href: '/inbox', title: 'Bandeja prioritaria', description: 'Responde las conversaciones y mensajes nuevos.', icon: Inbox, tone: 'text-primary' },
-  { href: '/call-tasks', title: 'Llamadas pendientes', description: 'Atiende los seguimientos que requieren llamada.', icon: PhoneCall, tone: 'text-red-400' },
+  { href: '/call-tasks', title: 'Seguimientos por llamada', description: 'Atiende los seguimientos que requieren llamada.', icon: PhoneCall, tone: 'text-red-400' },
   { href: '/supervision', title: 'Supervisión', description: 'Revisa carga, alertas y llamadas del equipo.', icon: ShieldAlert, tone: 'text-amber-400' },
   { href: '/reports', title: 'Reportes ejecutivos', description: 'Consulta tendencias, campañas y desempeño.', icon: ChartNoAxesCombined, tone: 'text-emerald-400', adminOnly: true },
 ]

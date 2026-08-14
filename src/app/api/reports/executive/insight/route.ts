@@ -79,15 +79,47 @@ function isReport(value: unknown): value is ExecutiveReport {
   return Boolean(report.meta && report.operational && report.intelligence && report.commercial && Array.isArray(report.channels) && Array.isArray(report.agents) && report.campaigns)
 }
 
+function reportRange(report: ExecutiveReport) {
+  const { from, to } = report.meta.range
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) {
+    throw new AiError('El periodo del reporte no es válido.', { code: 'invalid_report_range', status: 400 })
+  }
+  return { from, to }
+}
+
+export async function GET(request: Request) {
+  try {
+    const { accountId } = await requireRole('admin')
+    const url = new URL(request.url)
+    const from = url.searchParams.get('from') ?? ''
+    const to = url.searchParams.get('to') ?? ''
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) {
+      return NextResponse.json({ error: 'El periodo del reporte no es válido.' }, { status: 400 })
+    }
+    const { data, error } = await supabaseAdmin()
+      .from('executive_report_insights')
+      .select('insight, generated_at')
+      .eq('account_id', accountId)
+      .eq('range_from', from)
+      .eq('range_to', to)
+      .maybeSingle()
+    if (error) throw error
+    return NextResponse.json({ insight: data?.insight ?? null, generated_at: data?.generated_at ?? null })
+  } catch (error) {
+    return toErrorResponse(error)
+  }
+}
+
 export async function POST(request: Request) {
   try {
-    const { supabase, accountId } = await requireRole('admin')
+    const { supabase, accountId, userId } = await requireRole('admin')
     const limit = checkRateLimit(`ai-report:${accountId}`, RATE_LIMITS.aiReportAccount)
     if (!limit.success) return rateLimitResponse(limit)
 
     const body = await request.json().catch(() => null) as { report?: unknown } | null
     if (!isReport(body?.report)) return NextResponse.json({ error: 'El reporte a analizar no es vÃ¡lido.' }, { status: 400 })
     const report = body.report
+    const range = reportRange(report)
     const config = await loadAiConfig(supabase, accountId)
     if (!config) return NextResponse.json({ error: 'Configura y activa la IA de la cuenta antes de generar el dictamen.' }, { status: 400 })
 
@@ -103,8 +135,13 @@ export async function POST(request: Request) {
     const result = await generateText({ config, systemPrompt, messages: [{ role: 'user', content: JSON.stringify(report) }] })
     const insight = parseInsight(result.text)
     const admin = supabaseAdmin()
+    const generatedAt = new Date().toISOString()
+    const { error: saveError } = await admin
+      .from('executive_report_insights')
+      .upsert({ account_id: accountId, range_from: range.from, range_to: range.to, insight, generated_by: userId, generated_at: generatedAt }, { onConflict: 'account_id,range_from,range_to' })
+    if (saveError) throw saveError
     void logAiUsage(admin, { accountId, conversationId: null, mode: 'report', provider: config.provider, model: config.model, usage: result.usage })
-    return NextResponse.json({ insight })
+    return NextResponse.json({ insight, generated_at: generatedAt })
   } catch (error) {
     if (error instanceof AiError) return NextResponse.json({ error: error.message, code: error.code }, { status: error.status })
     return toErrorResponse(error)
