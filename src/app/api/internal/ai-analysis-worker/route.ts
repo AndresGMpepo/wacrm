@@ -8,6 +8,7 @@ import { decrypt } from '@/lib/whatsapp/encryption'
 import { downloadMedia, getMediaUrl } from '@/lib/whatsapp/meta-api'
 import { describeImageWithOpenAi, transcribeAudioWithOpenAi } from '@/lib/ai/media-analysis'
 import { aiRequestTimeoutMs } from '@/lib/ai/defaults'
+import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
 
 export const maxDuration = 60
 
@@ -104,6 +105,21 @@ export async function POST(request: Request) {
       if (writeError) throw writeError
       await db.from('ai_analysis_jobs').update({ status: 'completed', error_message: null }).eq('id', job.id)
       await logAiUsage(db, { accountId: job.account_id, conversationId: job.conversation_id, mode: 'analysis', provider: config.provider, model: config.model, usage: result.usage })
+      // Keep outbound automation useful but privacy-preserving: n8n receives
+      // analysis metadata, never the transcript, customer identifiers, media,
+      // summary or the model's private reasoning.
+      const eventData = {
+        conversation_id: job.conversation_id,
+        sentiment: analysis.sentiment,
+        sentiment_score: analysis.sentiment_score,
+        qa_score: analysis.qa_score,
+        next_best_action: analysis.next_best_action,
+        analyzed_at: new Date().toISOString(),
+      }
+      await dispatchWebhookEvent(db, job.account_id, 'ai.analysis.completed', eventData)
+      if (analysis.sentiment === 'negative') {
+        await dispatchWebhookEvent(db, job.account_id, 'ai.critical_detected', eventData)
+      }
       completed++
     } catch (cause) {
       await db.from('ai_analysis_jobs').update({ status: 'failed', error_message: cause instanceof Error ? cause.message.slice(0, 500) : 'Error desconocido' }).eq('id', job.id)

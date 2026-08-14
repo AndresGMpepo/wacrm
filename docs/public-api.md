@@ -241,6 +241,21 @@ Yeastar, Meta, or web chat.
 { "body": "n8n: create a follow-up task before Friday." }
 ```
 
+### `GET /api/v1/team-members`
+
+Lists active team members that can receive an assignment. Scope:
+`conversations:assign`. It returns only `user_id`, `full_name`, and `role`,
+so an automation can select an explicit supervisor without receiving customer
+or login data.
+
+```json
+{
+  "data": [
+    { "user_id": "…", "full_name": "Supervisor", "role": "admin" }
+  ]
+}
+```
+
 ### `POST /api/v1/broadcasts`
 
 Launch a template broadcast to a list of recipients. Scope:
@@ -316,6 +331,8 @@ things happen in your account. **Migration required:** apply
 | `message.received`       | An inbound message arrives from a contact         |
 | `message.status_updated` | A message you sent changed delivery status        |
 | `conversation.created`   | A new conversation is opened for a contact        |
+| `ai.analysis.completed`  | A conversation analysis finished                  |
+| `ai.critical_detected`   | Negative sentiment needs supervisor attention     |
 
 ### Managing endpoints
 

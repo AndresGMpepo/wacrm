@@ -6,6 +6,7 @@ import { checkRateLimit, RATE_LIMITS, rateLimitResponse } from '@/lib/rate-limit
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { buildSignatureHeader } from '@/lib/webhooks/sign'
 import { isDeliverableUrl } from '@/lib/webhooks/ssrf'
+import { normalizeEvents, type WebhookEvent } from '@/lib/webhooks/events'
 import { recordN8nDelivery } from '@/lib/webhooks/n8n-delivery-log'
 import { supabaseAdmin } from '@/lib/automations/admin-client'
 
@@ -153,14 +154,23 @@ export async function PATCH(request: Request, { params }: Params) {
     const limit = checkRateLimit(`admin:n8n-connection-update:${ctx.userId}`, RATE_LIMITS.adminAction)
     if (!limit.success) return rateLimitResponse(limit)
     const { id } = await params
-    const body = await request.json().catch(() => null) as { is_active?: unknown } | null
-    if (typeof body?.is_active !== 'boolean') {
-      return NextResponse.json({ error: 'is_active debe ser booleano.' }, { status: 400 })
+    const body = await request.json().catch(() => null) as { is_active?: unknown; events?: unknown } | null
+    const hasStatusChange = typeof body?.is_active === 'boolean'
+    const hasEventsChange = body?.events !== undefined
+    if (!hasStatusChange && !hasEventsChange) {
+      return NextResponse.json({ error: 'Indica is_active o events para actualizar la conexión.' }, { status: 400 })
+    }
+    const events = hasEventsChange ? normalizeEvents(body?.events) as WebhookEvent[] | null : null
+    if (hasEventsChange && !events) {
+      return NextResponse.json({ error: 'Selecciona al menos un evento válido.' }, { status: 400 })
     }
 
-    const updates = body.is_active
-      ? { is_active: true, failure_count: 0 }
-      : { is_active: false }
+    const updates: { is_active?: boolean; failure_count?: number; events?: WebhookEvent[] } = {}
+    if (hasStatusChange) {
+      updates.is_active = body!.is_active as boolean
+      if (body!.is_active) updates.failure_count = 0
+    }
+    if (events) updates.events = events
     const { error } = await ctx.supabase
       .from('webhook_endpoints')
       .update(updates)

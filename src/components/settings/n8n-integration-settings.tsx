@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { Copy, ExternalLink, Loader2, Pause, Play, Plus, Radio, Trash2, Webhook } from 'lucide-react'
+import { Copy, ExternalLink, Loader2, Pause, Play, Plus, Radio, Settings2, Trash2, Webhook } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Badge } from '@/components/ui/badge'
@@ -44,6 +44,8 @@ export function N8nIntegrationSettings({ onCreateApiKey }: { onCreateApiKey: () 
   const [saving, setSaving] = useState(false)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [secret, setSecret] = useState<string | null>(null)
+  const [editingConnection, setEditingConnection] = useState<Connection | null>(null)
+  const [editingEvents, setEditingEvents] = useState<WebhookEvent[]>([])
   const [form, setForm] = useState({ name: 'n8n principal', url: '', events: [...WEBHOOK_EVENTS] as WebhookEvent[] })
 
   const load = useCallback(async () => {
@@ -118,6 +120,25 @@ export function N8nIntegrationSettings({ onCreateApiKey }: { onCreateApiKey: () 
     } finally { setBusyId(null) }
   }
 
+  async function updateEvents() {
+    if (!editingConnection) return
+    setBusyId(editingConnection.id)
+    try {
+      const response = await fetch(`/api/account/n8n-connections/${editingConnection.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ events: editingEvents }),
+      })
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(payload.error ?? 'No se pudieron actualizar los eventos.')
+      setConnections((current) => current.map((item) => item.id === editingConnection.id ? { ...item, events: editingEvents } : item))
+      setEditingConnection(null)
+      toast.success('Eventos de n8n actualizados.')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'No se pudieron actualizar los eventos.')
+    } finally { setBusyId(null) }
+  }
+
   async function testConnection(connection: Connection) {
     setBusyId(connection.id)
     try {
@@ -167,6 +188,15 @@ export function N8nIntegrationSettings({ onCreateApiKey }: { onCreateApiKey: () 
         <div className="rounded-lg border border-dashed bg-background/30 p-3 text-xs text-muted-foreground"><strong className="text-foreground">Clave API (opcional):</strong> sólo la necesitarás si un flujo de n8n debe consultar datos o enviar acciones a NexoOmni. En ese caso usa un nodo <strong>HTTP Request</strong> con el header <code>Authorization: Bearer TU_CLAVE</code>; no se configura en JWT Auth. <Button variant="link" className="h-auto px-1 text-xs" onClick={onCreateApiKey}>Crear clave opcional <ExternalLink className="size-3" /></Button></div>
 
         {loading ? <div className="flex justify-center py-4"><Loader2 className="size-5 animate-spin text-primary" /></div> : connections.length === 0 ? <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">Aún no hay una conexión n8n. Crear una no instala n8n: sólo enlaza de forma segura la cuenta actual con tu instancia externa.</p> : <div className="divide-y rounded-lg border">{connections.map((connection) => <div key={connection.id} className="flex flex-col gap-3 p-4 lg:flex-row lg:items-center lg:justify-between"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="font-medium">{connection.name}</p><Badge className={connection.is_active ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-500' : 'border-border bg-muted text-muted-foreground'}>{connection.is_active ? 'Activa' : 'Pausada'}</Badge>{connection.failure_count > 0 ? <Badge variant="outline" className="text-amber-500">{connection.failure_count} fallo(s) consecutivo(s)</Badge> : null}</div><p className="mt-1 truncate font-mono text-xs text-muted-foreground" title={connection.url}>{connection.url}</p><p className="mt-1 text-xs text-muted-foreground">Eventos: {connection.events.join(', ')}{connection.last_delivery_at ? ` · última entrega ${new Date(connection.last_delivery_at).toLocaleString('es-MX')}` : ' · sin entregas aún'}</p></div><div className="flex shrink-0 flex-wrap gap-2"><Button size="sm" variant="outline" disabled={busyId === connection.id || !connection.is_active} onClick={() => void testConnection(connection)}>{busyId === connection.id ? <Loader2 className="size-4 animate-spin" /> : <Radio className="size-4" />}Probar conexión</Button><Button size="sm" variant="outline" disabled={busyId === connection.id} onClick={() => updateStatus(connection)}>{busyId === connection.id ? <Loader2 className="size-4 animate-spin" /> : connection.is_active ? <Pause className="size-4" /> : <Play className="size-4" />}{connection.is_active ? 'Pausar' : 'Reactivar'}</Button><Button size="sm" variant="outline" className="text-destructive hover:text-destructive" disabled={busyId === connection.id} onClick={() => removeConnection(connection)}><Trash2 className="size-4" />Eliminar</Button></div></div>)}</div>}
+        {connections.length > 0 ? (
+          <div className="rounded-lg border border-dashed bg-background/30 p-3">
+            <p className="text-sm font-medium">Eventos de automatización</p>
+            <p className="mt-1 text-xs text-muted-foreground">Activa <code>ai.critical_detected</code> para enviar a n8n sólo los análisis negativos. NexoOmni no entrega el transcript ni archivos del cliente.</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {connections.map((connection) => <Button key={connection.id} size="sm" variant="outline" disabled={busyId === connection.id} onClick={() => { setEditingConnection(connection); setEditingEvents(connection.events) }}><Settings2 className="size-4" />Eventos: {connection.name}</Button>)}
+            </div>
+          </div>
+        ) : null}
         {deliveries.length > 0 ? (
           <div className="rounded-lg border bg-background/30">
             <div className="border-b px-4 py-3">
@@ -200,6 +230,14 @@ export function N8nIntegrationSettings({ onCreateApiKey }: { onCreateApiKey: () 
 
       <Dialog open={secret !== null} onOpenChange={(open) => { if (!open) setSecret(null) }}>
         <DialogContent className="sm:max-w-xl"><DialogHeader><DialogTitle>Secreto de firma de NexoOmni</DialogTitle><DialogDescription>NexoOmni ya guardó una copia cifrada. La prueba de conexión funciona sin configurarlo en n8n; guárdalo sólo si después deseas validar la firma de cada evento.</DialogDescription></DialogHeader><div className="space-y-2"><Label>Secreto HMAC</Label><div className="flex gap-2"><Input readOnly value={secret ?? ''} className="font-mono text-xs" onFocus={(event) => event.currentTarget.select()} /><Button type="button" variant="outline" onClick={() => secret && void copy(secret, 'Secreto copiado.') }><Copy className="size-4" />Copiar</Button></div></div><div className="rounded-md border border-amber-500/25 bg-amber-500/5 p-3 text-xs text-muted-foreground">Cada evento llega como JSON y contiene <code>id</code>, <code>event</code>, <code>occurred_at</code>, <code>account_id</code> y <code>data</code>. Para verificación avanzada, NexoOmni envía el header <code>X-NexoOmni-Signature</code>.</div><DialogFooter><Button onClick={() => setSecret(null)}>Continuar a la prueba</Button></DialogFooter></DialogContent>
+      </Dialog>
+
+      <Dialog open={editingConnection !== null} onOpenChange={(open) => { if (!open) setEditingConnection(null) }}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader><DialogTitle>Eventos de {editingConnection?.name}</DialogTitle><DialogDescription>Selecciona los eventos que n8n podrá recibir desde esta cuenta.</DialogDescription></DialogHeader>
+          <div className="space-y-2 rounded-md border p-3">{WEBHOOK_EVENTS.map((event) => <label key={event} className="flex cursor-pointer gap-2.5 text-sm"><Checkbox checked={editingEvents.includes(event)} onCheckedChange={(checked) => setEditingEvents((current) => checked === true ? [...current, event] : current.filter((item) => item !== event))} /><span><code className="text-xs">{event}</code><span className="mt-0.5 block text-xs text-muted-foreground">{WEBHOOK_EVENT_DESCRIPTIONS[event]}</span></span></label>)}</div>
+          <DialogFooter><Button variant="outline" onClick={() => setEditingConnection(null)}>Cancelar</Button><Button disabled={busyId === editingConnection?.id || editingEvents.length === 0} onClick={() => void updateEvents()}>{busyId === editingConnection?.id ? <Loader2 className="size-4 animate-spin" /> : <Settings2 className="size-4" />}Guardar eventos</Button></DialogFooter>
+        </DialogContent>
       </Dialog>
     </Card>
   )

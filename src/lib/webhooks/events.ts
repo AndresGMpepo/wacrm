@@ -11,6 +11,8 @@ export const WEBHOOK_EVENTS = [
   'message.received', // an inbound omnichannel message landed
   'message.status_updated', // a sent message advanced (sent/delivered/read)
   'conversation.created', // a new conversation was opened for a contact
+  'ai.analysis.completed', // an AI conversation analysis finished
+  'ai.critical_detected', // analysis detected a negative conversation
 ] as const;
 
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
@@ -21,6 +23,10 @@ export const WEBHOOK_EVENT_DESCRIPTIONS: Record<WebhookEvent, string> = {
   'message.status_updated':
     'A message you sent changed delivery status (sent/delivered/read/failed)',
   'conversation.created': 'A new conversation was opened',
+  'ai.analysis.completed':
+    'Conversation analysis finished (score, sentiment, QA and next action only)',
+  'ai.critical_detected':
+    'A conversation was classified with negative sentiment and needs attention',
 };
 
 /** Type-narrow an unknown value into a valid `WebhookEvent`. */
