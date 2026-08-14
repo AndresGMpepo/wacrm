@@ -117,21 +117,32 @@ export async function POST(request: Request) {
 
 async function processCallFollowUps(db: ReturnType<typeof supabaseAdmin>) {
   const { data: policies, error } = await db.from('call_follow_up_policies').select('account_id, no_reply_minutes').eq('enabled', true).limit(25)
-  if (error) return { created: 0 }
+  if (error) return { created: 0, eligible: 0, duplicates: 0, failed: 1 }
   let created = 0
+  let eligible = 0
+  let duplicates = 0
+  let failed = 0
   for (const policy of policies ?? []) {
     const cutoff = new Date(Date.now() - Number(policy.no_reply_minutes) * 60_000).toISOString()
     const { data: conversations } = await db.from('conversations').select('id, assigned_agent_id').eq('account_id', policy.account_id).eq('status', 'open').order('updated_at', { ascending: true }).limit(50)
     for (const conversation of conversations ?? []) {
       const { data: last } = await db.from('messages').select('sender_type, created_at').eq('conversation_id', conversation.id).order('created_at', { ascending: false }).limit(1).maybeSingle()
       if (!last || last.sender_type === 'customer' || last.created_at > cutoff) continue
-      const { error: insertError } = await db.from('call_follow_up_tasks').insert({ account_id: policy.account_id, conversation_id: conversation.id, assigned_agent_id: conversation.assigned_agent_id, due_at: new Date().toISOString() })
-      if (!insertError) created++
+      eligible++
+      const { error: insertError } = await db.from('call_follow_up_tasks').insert({ account_id: policy.account_id, conversation_id: conversation.id, assigned_agent_id: conversation.assigned_agent_id, due_at: new Date().toISOString(), source: 'no_reply' })
+      if (!insertError) {
+        created++
+      } else if (insertError.code === '23505') {
+        duplicates++
+      } else {
+        failed++
+        console.error('[follow-ups] Could not create task', { accountId: policy.account_id, conversationId: conversation.id, error: insertError.message })
+      }
       // The partial unique index intentionally turns a duplicate pending task
       // into a harmless no-op on later worker passes.
     }
   }
-  return { created }
+  return { created, eligible, duplicates, failed }
 }
 
 async function processMediaJobs(db: ReturnType<typeof supabaseAdmin>) {

@@ -140,10 +140,10 @@ export function TelephonyConfig() {
         </CardContent>
       </Card>
       {canManageIntegration ? <Card className="mt-6">
-        <CardHeader><CardTitle>Reintento por llamada</CardTitle><CardDescription>Crea una tarea para un agente cuando el último mensaje del chat fue del equipo y el cliente no respondió. Nunca marca automáticamente.</CardDescription></CardHeader>
+        <CardHeader><CardTitle>Seguimiento por llamada</CardTitle><CardDescription>Evalúa los chats abiertos cada minuto. Crea una tarea cuando han pasado los minutos configurados desde el último mensaje del equipo y el cliente no respondió. Nunca marca automáticamente.</CardDescription></CardHeader>
         <CardContent className="space-y-4">
           <div className="flex items-center justify-between gap-4 rounded-md border border-border p-3"><div><p className="text-sm font-medium">Crear tareas de llamada por falta de respuesta</p><p className="text-xs text-muted-foreground">La tarea queda pendiente hasta que un agente la complete o descarte.</p></div><Switch checked={followUpEnabled} onCheckedChange={setFollowUpEnabled} disabled={saving || loading} /></div>
-          <div className="max-w-sm space-y-2"><Label htmlFor="no-reply-minutes">Minutos sin respuesta</Label><Input id="no-reply-minutes" type="number" min={1} max={10080} value={noReplyMinutes} onChange={(event) => setNoReplyMinutes(Number(event.target.value) || 1)} disabled={saving || loading || !followUpEnabled} /><p className="text-xs text-muted-foreground">Puedes usar 1 minuto para pruebas; por ejemplo, 120 equivale a dos horas. Solo se crea una tarea pendiente por conversación.</p></div>
+          <div className="max-w-sm space-y-2"><Label htmlFor="no-reply-minutes">Minutos sin respuesta del cliente</Label><Input id="no-reply-minutes" type="number" min={1} max={10080} value={noReplyMinutes} onChange={(event) => setNoReplyMinutes(Number(event.target.value) || 1)} disabled={saving || loading || !followUpEnabled} /><p className="text-xs text-muted-foreground">Puedes usar 1 minuto para pruebas; por ejemplo, 5 crea el seguimiento cinco minutos después de un mensaje del equipo sin respuesta posterior del cliente. Solo se crea una tarea pendiente por conversación.</p></div>
           <Button className="w-fit" onClick={() => void saveFollowUpPolicy()} disabled={saving || loading}>{saving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}Guardar política</Button>
         </CardContent>
       </Card> : null}

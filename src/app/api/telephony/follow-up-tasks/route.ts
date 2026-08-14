@@ -16,6 +16,7 @@ export async function GET() {
       ? await supabase.from('ai_conversation_analyses')
         .select('conversation_id, sentiment, sentiment_score, qa_score, next_best_action, analyzed_at')
         .eq('account_id', accountId).eq('source', 'whatsapp').eq('status', 'completed').in('conversation_id', conversationIds)
+        .order('analyzed_at', { ascending: false })
       : { data: [], error: null }
     if (analysesError) throw analysesError
     const analysisByConversation = new Map((analyses ?? []).map((analysis) => [analysis.conversation_id, analysis]))
