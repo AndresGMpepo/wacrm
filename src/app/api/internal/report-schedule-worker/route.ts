@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 
-import { executiveReportCsv, executiveReportExcelXml, type ExecutiveReport } from '@/lib/reports/executive-report-export'
+import { executiveReportCsv, executiveReportExcelXml, type ExecutiveReport, type ExecutiveReportInsight } from '@/lib/reports/executive-report-export'
 import { nextAfterDelivery, reportAdmin, sendScheduledReportEmail, type ReportSchedule } from '@/lib/reports/scheduled-reports'
 
 export const dynamic = 'force-dynamic'
@@ -31,7 +31,16 @@ export async function POST(request: Request) {
       const report = await reportResponse.json().catch(() => null) as ExecutiveReport | { error?: string } | null
       if (!reportResponse.ok || !report || !('meta' in report)) throw new Error((report as { error?: string } | null)?.error ?? 'No se pudo generar el reporte.')
       const payload = report as ExecutiveReport
-      const messageId = await sendScheduledReportEmail({ to: schedule.recipients, subject: `NexoOmni · ${schedule.name} · ${payload.meta.range.from} al ${payload.meta.range.to}`, html: mailHtml(payload), csv: executiveReportCsv(payload), xls: executiveReportExcelXml(payload) })
+      const { data: storedInsight, error: insightError } = await db
+        .from('executive_report_insights')
+        .select('insight')
+        .eq('account_id', schedule.account_id)
+        .eq('range_from', payload.meta.range.from)
+        .eq('range_to', payload.meta.range.to)
+        .maybeSingle()
+      if (insightError) throw insightError
+      const insight = (storedInsight?.insight ?? null) as ExecutiveReportInsight | null
+      const messageId = await sendScheduledReportEmail({ to: schedule.recipients, subject: `NexoOmni · ${schedule.name} · ${payload.meta.range.from} al ${payload.meta.range.to}`, html: mailHtml(payload), csv: executiveReportCsv(payload, insight), xls: executiveReportExcelXml(payload, insight) })
       await db.from('executive_report_deliveries').insert({ account_id: schedule.account_id, schedule_id: schedule.id, scheduled_for: scheduledFor, range_from: payload.meta.range.from, range_to: payload.meta.range.to, recipients: schedule.recipients, status: 'sent', provider_message_id: messageId, sent_at: new Date().toISOString() })
       await db.from('executive_report_schedules').update({ next_run_at: nextAfterDelivery(schedule), last_sent_at: new Date().toISOString(), last_error: null, enabled: schedule.frequency === 'once' ? false : true }).eq('id', schedule.id)
       sent++
