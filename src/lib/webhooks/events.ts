@@ -19,14 +19,14 @@ export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
 
 /** Human-readable descriptions (surfaced in docs / a future UI). */
 export const WEBHOOK_EVENT_DESCRIPTIONS: Record<WebhookEvent, string> = {
-  'message.received': 'An inbound WhatsApp or Live Chat message was received from a contact',
+  'message.received': 'Se recibió un mensaje entrante de WhatsApp, chat web u otro canal conectado.',
   'message.status_updated':
-    'A message you sent changed delivery status (sent/delivered/read/failed)',
-  'conversation.created': 'A new conversation was opened',
+    'Un mensaje enviado cambió de estado: enviado, entregado, leído o fallido.',
+  'conversation.created': 'Se abrió una conversación nueva.',
   'ai.analysis.completed':
-    'Conversation analysis finished (score, sentiment, QA and next action only)',
+    'Finalizó un análisis de conversación: puntuación, sentimiento, QA y siguiente acción.',
   'ai.critical_detected':
-    'A conversation was classified with negative sentiment and needs attention',
+    'La IA detectó sentimiento negativo y recomienda atención prioritaria.',
 };
 
 /** Type-narrow an unknown value into a valid `WebhookEvent`. */

@@ -10,10 +10,13 @@ describe("plantillas de flujos", () => {
         {
           name: template.name,
           trigger_type: template.trigger_type,
-          trigger_config: template.trigger_config,
+          trigger_config: template.trigger_config as Record<string, unknown>,
           entry_node_id: template.entry_node_id,
         },
-        template.nodes,
+        template.nodes.map((node) => ({
+          ...node,
+          config: node.config as Record<string, unknown>,
+        })),
       );
 
       expect(
