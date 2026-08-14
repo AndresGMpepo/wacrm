@@ -167,6 +167,10 @@ export const RATE_LIMITS = {
    *  capping a stampede; excess inbounds simply don't get an auto-reply
    *  (they still land in the inbox for a human). */
   aiAutoReplyAccount: { limit: 30, windowMs: 60_000 },
+  /** Executive report insight generation is manual and deliberately small:
+   * four fresh readings per account per hour lets leaders compare periods
+   * without turning refresh clicks into unbounded BYO-key spend. */
+  aiReportAccount: { limit: 4, windowMs: 60 * 60_000 },
 } as const;
 
 /** Test-only helper. Clears the in-memory state so unit tests don't

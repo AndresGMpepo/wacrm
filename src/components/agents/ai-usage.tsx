@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { BarChart3, Bot, BrainCircuit, PencilLine } from 'lucide-react';
+import { BarChart3, Bot, BrainCircuit, FileBarChart, PencilLine } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
 import { canEditSettings } from '@/lib/auth/roles';
 import {
@@ -37,6 +37,7 @@ interface UsageResponse {
     auto_reply: { calls: number; tokens: number };
     draft: { calls: number; tokens: number };
     analysis: { calls: number; tokens: number };
+    report: { calls: number; tokens: number };
   };
   by_model: {
     model: string;
@@ -143,7 +144,7 @@ export function AiUsageCard() {
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-6">
               <Stat label="Total tokens" value={formatCompactNumber(data.totals.total_tokens)} />
               <Stat label="LLM calls" value={String(data.totals.calls)} />
               <Stat
@@ -160,6 +161,11 @@ export function AiUsageCard() {
                 label="Análisis"
                 value={formatCompactNumber(data.by_mode.analysis.tokens)}
                 icon={BrainCircuit}
+              />
+              <Stat
+                label="Reportes"
+                value={formatCompactNumber(data.by_mode.report.tokens)}
+                icon={FileBarChart}
               />
             </div>
 

@@ -12,7 +12,7 @@ const DEFAULT_WINDOW_DAYS = 30
 
 interface UsageRow {
   created_at: string
-  mode: 'auto_reply' | 'draft' | 'analysis'
+  mode: 'auto_reply' | 'draft' | 'analysis' | 'report'
   provider: string
   model: string
   prompt_tokens: number
@@ -83,6 +83,7 @@ export async function GET(request: Request) {
       auto_reply: { calls: 0, tokens: 0 },
       draft: { calls: 0, tokens: 0 },
       analysis: { calls: 0, tokens: 0 },
+      report: { calls: 0, tokens: 0 },
     }
     const modelMap = new Map<
       string,
@@ -102,7 +103,7 @@ export async function GET(request: Request) {
       completionTokens += r.completion_tokens
       totalTokens += r.total_tokens
 
-      // `mode` is DB-CHECK-constrained to these two values.
+      // Keep this object in sync with the DB check constraint in migration 071.
       byMode[r.mode].calls += 1
       byMode[r.mode].tokens += r.total_tokens
 

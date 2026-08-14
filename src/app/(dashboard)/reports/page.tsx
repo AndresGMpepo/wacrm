@@ -1,14 +1,24 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, BarChart3, Bot, BriefcaseBusiness, CheckCircle2, Clock3, Download, Loader2, Megaphone, RefreshCw, UsersRound } from 'lucide-react'
+import { AlertTriangle, BarChart3, Bot, BriefcaseBusiness, CheckCircle2, Clock3, Download, Loader2, Megaphone, RefreshCw, Sparkles, UsersRound } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { executiveReportCsv, executiveReportExcelXml, executiveReportPrintHtml, reportExportFilename, type ExecutiveReport } from '@/lib/reports/executive-report-export'
 import { ReportScheduleManager } from '@/components/reports/report-schedule-manager'
 
 type Report = ExecutiveReport
+type ExecutiveInsight = {
+  headline: string
+  summary: string
+  priorities: Array<{ area: 'operacion' | 'comercial' | 'marketing' | 'experiencia'; priority: 'alta' | 'media' | 'baja'; title: string; recommendation: string; rationale: string }>
+  risks: string[]
+  opportunities: string[]
+  indicators_to_watch: string[]
+  data_note: string | null
+}
 
 const PERIODS = [7, 30, 90] as const
 const nf = new Intl.NumberFormat('es-MX')
@@ -28,6 +38,9 @@ export default function ReportsPage() {
   const [report, setReport] = useState<Report | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [insight, setInsight] = useState<ExecutiveInsight | null>(null)
+  const [insightLoading, setInsightLoading] = useState(false)
+  const [insightError, setInsightError] = useState<string | null>(null)
 
   const load = async () => {
     setLoading(true); setError(null)
@@ -36,10 +49,32 @@ export default function ReportsPage() {
       const payload = await response.json().catch(() => null) as Report & { error?: string }
       if (!response.ok) throw new Error(payload?.error ?? 'No se pudieron cargar los reportes.')
       setReport(payload)
+      setInsight(null)
+      setInsightError(null)
     } catch (err) { setError(err instanceof Error ? err.message : 'No se pudieron cargar los reportes.') }
     finally { setLoading(false) }
   }
   useEffect(() => { void load() }, [days]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const generateInsight = async () => {
+    if (!report) return
+    setInsightLoading(true)
+    setInsightError(null)
+    try {
+      const response = await fetch('/api/reports/executive/insight', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ report }),
+      })
+      const payload = await response.json().catch(() => null) as { insight?: ExecutiveInsight; error?: string }
+      if (!response.ok || !payload?.insight) throw new Error(payload?.error ?? 'No se pudo generar el dictamen de IA.')
+      setInsight(payload.insight)
+    } catch (err) {
+      setInsightError(err instanceof Error ? err.message : 'No se pudo generar el dictamen de IA.')
+    } finally {
+      setInsightLoading(false)
+    }
+  }
 
   const download = (format: 'csv' | 'xls') => {
     if (!report) return
@@ -91,6 +126,37 @@ export default function ReportsPage() {
     <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between"><div><h1 className="text-2xl font-bold tracking-tight text-foreground">Reportes ejecutivos</h1><p className="mt-1 max-w-2xl text-sm text-muted-foreground">Lectura directiva de operación, experiencia, campañas y pipeline. Las métricas se mantienen separadas por empresa.</p></div><div className="flex flex-wrap items-center gap-2"><div className="flex rounded-lg border border-border bg-card p-1">{PERIODS.map((period) => <button key={period} type="button" onClick={() => setDays(period)} className={`rounded-md px-3 py-1.5 text-sm font-medium ${days === period ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}>{period} días</button>)}</div><Button variant="outline" size="sm" onClick={() => download('csv')}><Download className="size-4" /> CSV</Button><Button variant="outline" size="sm" onClick={() => download('xls')}><Download className="size-4" /> Excel</Button><Button variant="outline" size="sm" onClick={printPdf}><Download className="size-4" /> PDF</Button><Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}><RefreshCw className={`size-4 ${loading ? 'animate-spin' : ''}`} /> Actualizar</Button></div></div>
 
     <Card className={insightBorder}><CardContent className="flex gap-3 pt-4"><div className={executiveReading.tone === 'red' ? 'text-red-400' : executiveReading.tone === 'amber' ? 'text-amber-400' : 'text-primary'}><InsightIcon className="mt-0.5 size-5" /></div><div><p className="font-semibold text-foreground">{executiveReading.title}</p><p className="mt-1 text-sm leading-6 text-muted-foreground">{executiveReading.text}</p><p className="mt-2 text-xs text-muted-foreground">Periodo: {report.meta.range.from} al {report.meta.range.to} · Perfil: {report.meta.operating_mode === 'commercial' ? 'Comercial' : report.meta.operating_mode === 'support' ? 'Soporte' : 'Híbrido'}</p></div></CardContent></Card>
+
+    <Card className="border-primary/25">
+      <CardHeader className="gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <CardTitle className="flex items-center gap-2"><Sparkles className="size-4 text-primary" /> Dictamen IA para dirección</CardTitle>
+          <CardDescription className="mt-1">Lectura bajo demanda de los indicadores visibles. No ejecuta cambios ni envía mensajes; usa la IA configurada por esta empresa.</CardDescription>
+        </div>
+        <Button size="sm" onClick={() => void generateInsight()} disabled={insightLoading}>
+          <Sparkles className={`size-4 ${insightLoading ? 'animate-pulse' : ''}`} />
+          {insightLoading ? 'Analizando…' : insight ? 'Actualizar dictamen' : 'Generar dictamen IA'}
+        </Button>
+      </CardHeader>
+      {insight ? <CardContent className="space-y-5">
+        <div><p className="font-semibold text-foreground">{insight.headline}</p><p className="mt-1 text-sm leading-6 text-muted-foreground">{insight.summary}</p></div>
+        <div className="grid gap-3 lg:grid-cols-2">
+          {insight.priorities.map((item, index) => <div key={`${item.area}-${item.title}-${index}`} className="rounded-lg border border-border bg-muted/20 p-3">
+            <div className="flex items-center justify-between gap-2"><p className="font-medium text-foreground">{item.title}</p><Badge variant={item.priority === 'alta' ? 'destructive' : item.priority === 'media' ? 'secondary' : 'outline'}>{item.priority}</Badge></div>
+            <p className="mt-2 text-sm text-foreground">{item.recommendation}</p>
+            {item.rationale ? <p className="mt-2 text-xs leading-5 text-muted-foreground">Base: {item.rationale}</p> : null}
+            <p className="mt-2 text-xs font-medium capitalize text-primary">{item.area}</p>
+          </div>)}
+        </div>
+        <div className="grid gap-4 lg:grid-cols-3">
+          <div><p className="text-sm font-medium text-foreground">Riesgos</p><ul className="mt-2 space-y-1 text-sm text-muted-foreground">{insight.risks.length ? insight.risks.map((item) => <li key={item}>• {item}</li>) : <li>Sin riesgos concluyentes con los datos actuales.</li>}</ul></div>
+          <div><p className="text-sm font-medium text-foreground">Oportunidades</p><ul className="mt-2 space-y-1 text-sm text-muted-foreground">{insight.opportunities.length ? insight.opportunities.map((item) => <li key={item}>• {item}</li>) : <li>Sin oportunidades concluyentes con los datos actuales.</li>}</ul></div>
+          <div><p className="text-sm font-medium text-foreground">Indicadores a vigilar</p><ul className="mt-2 space-y-1 text-sm text-muted-foreground">{insight.indicators_to_watch.length ? insight.indicators_to_watch.map((item) => <li key={item}>• {item}</li>) : <li>Revisa el volumen, la primera respuesta y los casos negativos.</li>}</ul></div>
+        </div>
+        {insight.data_note ? <p className="rounded-md border border-amber-500/25 bg-amber-500/10 p-3 text-xs text-amber-200">Nota de datos: {insight.data_note}</p> : null}
+      </CardContent> : null}
+      {insightError ? <CardContent className="pt-0 text-sm text-red-400">{insightError}</CardContent> : null}
+    </Card>
 
     <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
       <MetricCard icon={UsersRound} label="Conversaciones nuevas" value={nf.format(report.operational.new_conversations)} detail={`${report.operational.new_conversations - report.operational.previous_new_conversations >= 0 ? '+' : ''}${report.operational.new_conversations - report.operational.previous_new_conversations} vs. periodo anterior`} />
