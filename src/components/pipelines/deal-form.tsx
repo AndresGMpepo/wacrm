@@ -44,6 +44,13 @@ interface DealFormProps {
   onSaved: () => void;
 }
 
+type CampaignOption = {
+  id: string;
+  name: string;
+  template_name: string;
+  created_at: string;
+};
+
 export function DealForm({
   open,
   onOpenChange,
@@ -65,9 +72,11 @@ export function DealForm({
   const [assignedTo, setAssignedTo] = useState("");
   const [expectedCloseDate, setExpectedCloseDate] = useState("");
   const [notes, setNotes] = useState("");
+  const [sourceBroadcastId, setSourceBroadcastId] = useState("");
 
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [campaignOptions, setCampaignOptions] = useState<CampaignOption[]>([]);
   const [linkedConversation, setLinkedConversation] =
     useState<Conversation | null>(null);
 
@@ -94,6 +103,7 @@ export function DealForm({
       setAssignedTo(deal.assigned_to ?? "");
       setExpectedCloseDate(deal.expected_close_date ?? "");
       setNotes(deal.notes ?? "");
+      setSourceBroadcastId(deal.source_broadcast_id ?? "");
     } else {
       setTitle("");
       setValue("");
@@ -103,6 +113,7 @@ export function DealForm({
       setAssignedTo("");
       setExpectedCloseDate("");
       setNotes("");
+      setSourceBroadcastId("");
     }
   }, [open, deal, defaultStageId, stages, defaultCurrency]);
   /* eslint-enable react-hooks/set-state-in-effect */
@@ -151,6 +162,34 @@ export function DealForm({
     };
   }, [open, contactId, supabase]);
 
+  // Only campaigns that actually included this contact can be selected.
+  // The database trigger in migration 074 additionally enforces account scope.
+  useEffect(() => {
+    if (!open || !contactId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setCampaignOptions([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from("broadcast_recipients")
+        .select("broadcast:broadcasts!inner(id, name, template_name, created_at)")
+        .eq("contact_id", contactId)
+        .order("created_at", { ascending: false });
+      if (cancelled) return;
+      const unique = new Map<string, CampaignOption>();
+      for (const row of (data ?? []) as unknown as Array<{ broadcast: CampaignOption | CampaignOption[] | null }>) {
+        const broadcast = Array.isArray(row.broadcast) ? row.broadcast[0] : row.broadcast;
+        if (broadcast?.id) unique.set(broadcast.id, broadcast);
+      }
+      setCampaignOptions([...unique.values()].sort((a, b) => b.created_at.localeCompare(a.created_at)));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, contactId, supabase]);
+
   async function handleSave() {
     if (!title.trim() || !contactId || !stageId) {
       toast.error(t("toastRequired"));
@@ -168,6 +207,7 @@ export function DealForm({
       assigned_to: assignedTo || null,
       notes: notes.trim() || null,
       expected_close_date: expectedCloseDate || null,
+      source_broadcast_id: sourceBroadcastId || null,
     };
 
     if (deal) {
@@ -273,7 +313,10 @@ export function DealForm({
               <Label className="text-muted-foreground">{t("contact")}</Label>
               <select
                 value={contactId}
-                onChange={(e) => setContactId(e.target.value)}
+                onChange={(e) => {
+                  setContactId(e.target.value);
+                  setSourceBroadcastId("");
+                }}
                 className="h-9 w-full rounded-lg border border-border bg-muted px-2.5 text-sm text-foreground outline-none focus:border-primary focus:ring-1 focus:ring-primary"
               >
                 <option value="">{t("selectContact")}</option>
@@ -293,6 +336,28 @@ export function DealForm({
                   {t("linkToConversation")}
                 </Link>
               )}
+            </div>
+
+            <div className="grid gap-2 rounded-lg border border-border/70 bg-muted/20 p-3">
+              <div>
+                <Label className="text-muted-foreground">Origen de campaña</Label>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                  Opcional. Selecciona sólo la campaña que el equipo confirma como origen del trato; NexoOmni no atribuye ventas automáticamente.
+                </p>
+              </div>
+              <select
+                value={sourceBroadcastId}
+                onChange={(e) => setSourceBroadcastId(e.target.value)}
+                disabled={!contactId || campaignOptions.length === 0}
+                className="h-9 w-full rounded-lg border border-border bg-muted px-2.5 text-sm text-foreground outline-none focus:border-primary focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <option value="">{!contactId ? "Selecciona primero un contacto" : campaignOptions.length ? "Sin atribución de campaña" : "Este contacto no participó en una campaña"}</option>
+                {campaignOptions.map((campaign) => (
+                  <option key={campaign.id} value={campaign.id}>
+                    {campaign.name} · {campaign.template_name}
+                  </option>
+                ))}
+              </select>
             </div>
 
             <div className="grid grid-cols-[1fr_110px] gap-3">

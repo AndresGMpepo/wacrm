@@ -8,7 +8,7 @@ const report: ExecutiveReport = {
   channels: [{ channel: '=WhatsApp', conversations: 12, resolved: 8, first_response_minutes: 4 }],
   agents: [{ id: 'agent-1', name: '+Agente', open_conversations: 1, first_response_minutes: 3, measured_responses: 4 }],
   intelligence: { analyzed: 10, negative: 1, negative_rate: 10, average_sentiment_score: 72, average_qa_score: 89 },
-  commercial: { open_pipeline_value: 15000, open_deals: 2, won_deals: 1, lost_deals: 0, won_value: 9000 },
+  commercial: { open_pipeline_value: 15000, open_deals: 2, won_deals: 1, lost_deals: 0, won_value: 9000, attributed_deals: 1, attributed_won_deals: 1, attributed_won_value: 9000 },
   campaigns: { totals: { recipients: 10, sent: 10, delivered: 9, read: 8, replied: 2, failed: 1 }, delivery_rate: 90, read_rate: 80, reply_rate: 20, items: [] },
 }
 

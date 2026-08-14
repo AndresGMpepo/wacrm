@@ -393,6 +393,8 @@ export interface Deal {
   currency?: string;
   notes?: string;
   expected_close_date?: string;
+  /** Campaign selected manually as the deal source; never inferred from a reply. */
+  source_broadcast_id?: string | null;
   status?: DealStatus;
   created_at: string;
   updated_at?: string;

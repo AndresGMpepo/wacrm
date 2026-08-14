@@ -15,7 +15,7 @@ type ConversationRow = {
 }
 type MessageRow = { conversation_id: string; sender_type: string; created_at: string }
 type AnalysisRow = { sentiment: string | null; sentiment_score: number | null; qa_score: number | null }
-type DealRow = { value: number | string | null; status: string; updated_at: string }
+type DealRow = { value: number | string | null; status: string; updated_at: string; source_broadcast_id: string | null }
 type BroadcastRow = {
   id: string; name: string; template_name: string; status: string; created_at: string
   total_recipients: number | null; sent_count: number | null; delivered_count: number | null
@@ -99,7 +99,7 @@ export async function GET(request: Request) {
       db.from('profiles').select('user_id, full_name').eq('account_id', accountId).order('full_name'),
       db.from('conversations').select('assigned_agent_id').eq('account_id', accountId).in('status', ['open', 'pending']),
       db.from('ai_conversation_analyses').select('sentiment, sentiment_score, qa_score').eq('account_id', accountId).eq('status', 'completed').gte('analyzed_at', range.from).lt('analyzed_at', range.toExclusive),
-      db.from('deals').select('value, status, updated_at').eq('account_id', accountId).gte('updated_at', range.from).lt('updated_at', range.toExclusive),
+      db.from('deals').select('value, status, updated_at, source_broadcast_id').eq('account_id', accountId).gte('updated_at', range.from).lt('updated_at', range.toExclusive),
       db.from('deals').select('value').eq('account_id', accountId).eq('status', 'open'),
       db.from('broadcasts').select('id, name, template_name, status, created_at, total_recipients, sent_count, delivered_count, read_count, replied_count, failed_count').eq('account_id', accountId).gte('created_at', range.from).lt('created_at', range.toExclusive).order('created_at', { ascending: false }).limit(12),
     ])
@@ -179,6 +179,25 @@ export async function GET(request: Request) {
     const wonDeals = deals.filter((row) => row.status === 'won')
     const lostDeals = deals.filter((row) => row.status === 'lost')
     const broadcasts = (broadcastsResult.data ?? []) as BroadcastRow[]
+    const attributedBroadcastIds = [...new Set(deals.map((deal) => deal.source_broadcast_id).filter((id): id is string => Boolean(id)))]
+    const attributedBroadcastsResult = attributedBroadcastIds.length
+      ? await db.from('broadcasts').select('id, name, template_name, status, created_at, total_recipients, sent_count, delivered_count, read_count, replied_count, failed_count').eq('account_id', accountId).in('id', attributedBroadcastIds)
+      : { data: [] as BroadcastRow[], error: null }
+    if (attributedBroadcastsResult.error) throw attributedBroadcastsResult.error
+    const reportBroadcasts = new Map<string, BroadcastRow>()
+    for (const broadcast of [...broadcasts, ...((attributedBroadcastsResult.data ?? []) as BroadcastRow[])]) reportBroadcasts.set(broadcast.id, broadcast)
+    const attributionByBroadcast = new Map<string, { deals: number; won_deals: number; won_value: number; pipeline_value: number }>()
+    for (const deal of deals) {
+      if (!deal.source_broadcast_id) continue
+      const current = attributionByBroadcast.get(deal.source_broadcast_id) ?? { deals: 0, won_deals: 0, won_value: 0, pipeline_value: 0 }
+      current.deals += 1
+      current.pipeline_value += numeric(deal.value)
+      if (deal.status === 'won') {
+        current.won_deals += 1
+        current.won_value += numeric(deal.value)
+      }
+      attributionByBroadcast.set(deal.source_broadcast_id, current)
+    }
     const campaignTotals = broadcasts.reduce((totals, campaign) => ({
       recipients: totals.recipients + (campaign.total_recipients ?? 0),
       sent: totals.sent + (campaign.sent_count ?? 0),
@@ -226,17 +245,24 @@ export async function GET(request: Request) {
         won_deals: wonDeals.length,
         lost_deals: lostDeals.length,
         won_value: wonDeals.reduce((sum, deal) => sum + numeric(deal.value), 0),
+        attributed_deals: [...attributionByBroadcast.values()].reduce((sum, item) => sum + item.deals, 0),
+        attributed_won_deals: [...attributionByBroadcast.values()].reduce((sum, item) => sum + item.won_deals, 0),
+        attributed_won_value: [...attributionByBroadcast.values()].reduce((sum, item) => sum + item.won_value, 0),
       },
       campaigns: {
         totals: campaignTotals,
         delivery_rate: percentage(campaignTotals.delivered, campaignTotals.sent),
         read_rate: percentage(campaignTotals.read, campaignTotals.delivered),
         reply_rate: percentage(campaignTotals.replied, campaignTotals.delivered),
-        items: broadcasts.map((campaign) => ({
+        items: [...reportBroadcasts.values()].sort((a, b) => b.created_at.localeCompare(a.created_at)).map((campaign) => ({
           ...campaign,
           delivery_rate: percentage(numeric(campaign.delivered_count), numeric(campaign.sent_count)),
           read_rate: percentage(numeric(campaign.read_count), numeric(campaign.delivered_count)),
           reply_rate: percentage(numeric(campaign.replied_count), numeric(campaign.delivered_count)),
+          attributed_deals: attributionByBroadcast.get(campaign.id)?.deals ?? 0,
+          attributed_won_deals: attributionByBroadcast.get(campaign.id)?.won_deals ?? 0,
+          attributed_won_value: attributionByBroadcast.get(campaign.id)?.won_value ?? 0,
+          attributed_pipeline_value: attributionByBroadcast.get(campaign.id)?.pipeline_value ?? 0,
         })),
       },
     })
