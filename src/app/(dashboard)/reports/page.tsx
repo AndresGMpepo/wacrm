@@ -2,9 +2,9 @@
 
 import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, BarChart3, Bot, BriefcaseBusiness, CheckCircle2, Clock3, Download, Loader2, Megaphone, RefreshCw, Sparkles, UsersRound } from 'lucide-react'
+import { AlertTriangle, ArrowUpRight, BarChart3, Bot, BriefcaseBusiness, CheckCircle2, Clock3, Download, Loader2, Megaphone, PhoneCall, RefreshCw, Siren, Sparkles, UsersRound } from 'lucide-react'
 
-import { Button } from '@/components/ui/button'
+import { Button, buttonVariants } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { executiveReportCsv, executiveReportExcelXml, executiveReportPrintHtml, reportExportFilename, type ExecutiveReport, type ExecutiveReportInsight } from '@/lib/reports/executive-report-export'
@@ -12,6 +12,12 @@ import { ReportScheduleManager } from '@/components/reports/report-schedule-mana
 
 type Report = ExecutiveReport
 type ExecutiveInsight = ExecutiveReportInsight
+type ActionQueue = {
+  refreshed_at: string
+  critical: Array<{ conversation_id: string; contact_name: string; sentiment_score: number | null; qa_score: number | null; next_best_action: string | null; analyzed_at: string }>
+  overdue_follow_ups: Array<{ id: string; conversation_id: string; contact_name: string; due_at: string; created_at: string }>
+  stalled_deals: Array<{ id: string; title: string; contact_name: string; value: number; currency: string; expected_close_date: string | null; updated_at: string; stage_name: string }>
+}
 
 const PERIODS = [7, 30, 90] as const
 const nf = new Intl.NumberFormat('es-MX')
@@ -35,6 +41,8 @@ export default function ReportsPage() {
   const [insightGeneratedAt, setInsightGeneratedAt] = useState<string | null>(null)
   const [insightLoading, setInsightLoading] = useState(false)
   const [insightError, setInsightError] = useState<string | null>(null)
+  const [actionQueue, setActionQueue] = useState<ActionQueue | null>(null)
+  const [actionQueueError, setActionQueueError] = useState<string | null>(null)
 
   const load = async () => {
     setLoading(true); setError(null)
@@ -49,6 +57,15 @@ export default function ReportsPage() {
       setInsight(insightPayload?.insight ?? null)
       setInsightGeneratedAt(insightPayload?.generated_at ?? null)
       setInsightError(null)
+      try {
+        const actionResponse = await fetch('/api/reports/action-queue', { cache: 'no-store' })
+        const actionPayload = await actionResponse.json().catch(() => null) as ActionQueue & { error?: string }
+        if (!actionResponse.ok) throw new Error(actionPayload?.error ?? 'No se pudo cargar la cola de acciones.')
+        setActionQueue(actionPayload)
+        setActionQueueError(null)
+      } catch (actionError) {
+        setActionQueueError(actionError instanceof Error ? actionError.message : 'No se pudo cargar la cola de acciones.')
+      }
     } catch (err) { setError(err instanceof Error ? err.message : 'No se pudieron cargar los reportes.') }
     finally { setLoading(false) }
   }
@@ -125,6 +142,13 @@ export default function ReportsPage() {
     <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between"><div><h1 className="text-2xl font-bold tracking-tight text-foreground">Reportes ejecutivos</h1><p className="mt-1 max-w-2xl text-sm text-muted-foreground">Lectura directiva de operación, experiencia, campañas y pipeline. Las métricas se mantienen separadas por empresa.</p></div><div className="flex flex-wrap items-center gap-2"><div className="flex rounded-lg border border-border bg-card p-1">{PERIODS.map((period) => <button key={period} type="button" onClick={() => setDays(period)} className={`rounded-md px-3 py-1.5 text-sm font-medium ${days === period ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}>{period} días</button>)}</div><Button variant="outline" size="sm" onClick={() => download('csv')}><Download className="size-4" /> CSV</Button><Button variant="outline" size="sm" onClick={() => download('xls')}><Download className="size-4" /> Excel</Button><Button variant="outline" size="sm" onClick={printPdf}><Download className="size-4" /> PDF</Button><Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}><RefreshCw className={`size-4 ${loading ? 'animate-spin' : ''}`} /> Actualizar</Button></div></div>
 
     <Card className={insightBorder}><CardContent className="flex gap-3 pt-4"><div className={executiveReading.tone === 'red' ? 'text-red-400' : executiveReading.tone === 'amber' ? 'text-amber-400' : 'text-primary'}><InsightIcon className="mt-0.5 size-5" /></div><div><p className="font-semibold text-foreground">{executiveReading.title}</p><p className="mt-1 text-sm leading-6 text-muted-foreground">{executiveReading.text}</p><p className="mt-2 text-xs text-muted-foreground">Periodo: {report.meta.range.from} al {report.meta.range.to} · Perfil: {report.meta.operating_mode === 'commercial' ? 'Comercial' : report.meta.operating_mode === 'support' ? 'Soporte' : 'Híbrido'}</p></div></CardContent></Card>
+
+    <section className="grid gap-4 xl:grid-cols-3">
+      <Card className="border-red-500/30"><CardHeader className="pb-2"><CardTitle className="flex items-center gap-2 text-base"><Siren className="size-4 text-red-400" /> Casos críticos</CardTitle><CardDescription>Conversaciones abiertas cuyo último análisis disponible es negativo.</CardDescription></CardHeader><CardContent className="space-y-2">{actionQueue?.critical.length ? actionQueue.critical.map((item) => <div key={item.conversation_id} className="rounded-lg border border-border px-3 py-2.5"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate text-sm font-medium text-foreground">{item.contact_name}</p><p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{item.next_best_action || 'Revisar la conversación y definir el siguiente paso.'}</p><p className="mt-1 text-xs text-red-300">Sentimiento {item.sentiment_score ?? '—'}/100 · QA {item.qa_score ?? '—'}/100</p></div><Link className={buttonVariants({ variant: 'outline', size: 'sm', className: 'shrink-0' })} href={`/inbox?c=${item.conversation_id}`}>Abrir <ArrowUpRight className="size-3.5" /></Link></div></div>) : <p className="text-sm text-muted-foreground">No hay casos críticos abiertos.</p>}</CardContent></Card>
+      <Card><CardHeader className="pb-2"><CardTitle className="flex items-center gap-2 text-base"><PhoneCall className="size-4 text-amber-400" /> Seguimientos vencidos</CardTitle><CardDescription>Tareas por falta de respuesta que ya requieren atención humana.</CardDescription></CardHeader><CardContent className="space-y-2">{actionQueue?.overdue_follow_ups.length ? actionQueue.overdue_follow_ups.map((item) => <div key={item.id} className="rounded-lg border border-border px-3 py-2.5"><div className="flex items-start justify-between gap-3"><div><p className="text-sm font-medium text-foreground">{item.contact_name}</p><p className="mt-1 text-xs text-muted-foreground">Pendiente desde {new Intl.DateTimeFormat('es-MX', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(item.due_at))}</p></div><Link className={buttonVariants({ variant: 'outline', size: 'sm', className: 'shrink-0' })} href={`/inbox?c=${item.conversation_id}`}>Atender <ArrowUpRight className="size-3.5" /></Link></div></div>) : <p className="text-sm text-muted-foreground">No hay seguimientos vencidos.</p>}</CardContent></Card>
+      <Card><CardHeader className="pb-2"><CardTitle className="flex items-center gap-2 text-base"><BriefcaseBusiness className="size-4 text-primary" /> Oportunidades sin actividad</CardTitle><CardDescription>Tratos abiertos sin movimiento durante al menos siete días.</CardDescription></CardHeader><CardContent className="space-y-2">{actionQueue?.stalled_deals.length ? actionQueue.stalled_deals.map((item) => <div key={item.id} className="rounded-lg border border-border px-3 py-2.5"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate text-sm font-medium text-foreground">{item.title}</p><p className="mt-1 truncate text-xs text-muted-foreground">{item.contact_name} · {item.stage_name || 'Sin etapa'}</p><p className="mt-1 text-xs text-muted-foreground">{money(item.value, item.currency)} · última actividad {new Intl.DateTimeFormat('es-MX', { dateStyle: 'medium' }).format(new Date(item.updated_at))}</p></div><Link className={buttonVariants({ variant: 'outline', size: 'sm', className: 'shrink-0' })} href="/pipelines">Ver <ArrowUpRight className="size-3.5" /></Link></div></div>) : <p className="text-sm text-muted-foreground">No hay oportunidades sin actividad.</p>}</CardContent></Card>
+    </section>
+    {actionQueueError ? <p className="text-sm text-amber-300">La cola de acciones no pudo actualizarse: {actionQueueError}</p> : null}
 
     <Card className="border-primary/25">
       <CardHeader className="gap-3 sm:flex-row sm:items-start sm:justify-between">
