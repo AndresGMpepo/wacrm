@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { Copy, ExternalLink, Loader2, Pause, Play, Plus, Trash2, Webhook } from 'lucide-react'
+import { Copy, ExternalLink, Loader2, Pause, Play, Plus, Radio, Trash2, Webhook } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Badge } from '@/components/ui/badge'
@@ -97,6 +97,19 @@ export function N8nIntegrationSettings({ onCreateApiKey }: { onCreateApiKey: () 
     } finally { setBusyId(null) }
   }
 
+  async function testConnection(connection: Connection) {
+    setBusyId(connection.id)
+    try {
+      const response = await fetch(`/api/account/n8n-connections/${connection.id}`, { method: 'POST' })
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(payload.error ?? 'No se pudo validar la conexión n8n.')
+      toast.success(payload.message ?? 'Conexión n8n validada.')
+      await load()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'No se pudo validar la conexión n8n.')
+    } finally { setBusyId(null) }
+  }
+
   async function removeConnection(connection: Connection) {
     if (!window.confirm(`¿Eliminar la conexión “${connection.name}”? n8n dejará de recibir eventos de esta cuenta.`)) return
     setBusyId(connection.id)
@@ -131,7 +144,7 @@ export function N8nIntegrationSettings({ onCreateApiKey }: { onCreateApiKey: () 
           <div><p className="font-medium">3. Valida la firma</p><p className="mt-1 text-xs text-muted-foreground">En n8n verifica <code className="text-[11px]">X-Wacrm-Signature</code> antes de procesar el evento.</p></div>
         </div>
 
-        {loading ? <div className="flex justify-center py-4"><Loader2 className="size-5 animate-spin text-primary" /></div> : connections.length === 0 ? <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">Aún no hay una conexión n8n. Crear una no instala n8n: sólo enlaza de forma segura la cuenta actual con tu instancia externa.</p> : <div className="divide-y rounded-lg border">{connections.map((connection) => <div key={connection.id} className="flex flex-col gap-3 p-4 lg:flex-row lg:items-center lg:justify-between"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="font-medium">{connection.name}</p><Badge className={connection.is_active ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-500' : 'border-border bg-muted text-muted-foreground'}>{connection.is_active ? 'Activa' : 'Pausada'}</Badge>{connection.failure_count > 0 ? <Badge variant="outline" className="text-amber-500">{connection.failure_count} fallo(s) consecutivo(s)</Badge> : null}</div><p className="mt-1 truncate font-mono text-xs text-muted-foreground" title={connection.url}>{connection.url}</p><p className="mt-1 text-xs text-muted-foreground">Eventos: {connection.events.join(', ')}{connection.last_delivery_at ? ` · última entrega ${new Date(connection.last_delivery_at).toLocaleString('es-MX')}` : ' · sin entregas aún'}</p></div><div className="flex shrink-0 gap-2"><Button size="sm" variant="outline" disabled={busyId === connection.id} onClick={() => updateStatus(connection)}>{busyId === connection.id ? <Loader2 className="size-4 animate-spin" /> : connection.is_active ? <Pause className="size-4" /> : <Play className="size-4" />}{connection.is_active ? 'Pausar' : 'Reactivar'}</Button><Button size="sm" variant="outline" className="text-destructive hover:text-destructive" disabled={busyId === connection.id} onClick={() => removeConnection(connection)}><Trash2 className="size-4" />Eliminar</Button></div></div>)}</div>}
+        {loading ? <div className="flex justify-center py-4"><Loader2 className="size-5 animate-spin text-primary" /></div> : connections.length === 0 ? <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">Aún no hay una conexión n8n. Crear una no instala n8n: sólo enlaza de forma segura la cuenta actual con tu instancia externa.</p> : <div className="divide-y rounded-lg border">{connections.map((connection) => <div key={connection.id} className="flex flex-col gap-3 p-4 lg:flex-row lg:items-center lg:justify-between"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="font-medium">{connection.name}</p><Badge className={connection.is_active ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-500' : 'border-border bg-muted text-muted-foreground'}>{connection.is_active ? 'Activa' : 'Pausada'}</Badge>{connection.failure_count > 0 ? <Badge variant="outline" className="text-amber-500">{connection.failure_count} fallo(s) consecutivo(s)</Badge> : null}</div><p className="mt-1 truncate font-mono text-xs text-muted-foreground" title={connection.url}>{connection.url}</p><p className="mt-1 text-xs text-muted-foreground">Eventos: {connection.events.join(', ')}{connection.last_delivery_at ? ` · última entrega ${new Date(connection.last_delivery_at).toLocaleString('es-MX')}` : ' · sin entregas aún'}</p></div><div className="flex shrink-0 flex-wrap gap-2"><Button size="sm" variant="outline" disabled={busyId === connection.id || !connection.is_active} onClick={() => void testConnection(connection)}>{busyId === connection.id ? <Loader2 className="size-4 animate-spin" /> : <Radio className="size-4" />}Probar conexión</Button><Button size="sm" variant="outline" disabled={busyId === connection.id} onClick={() => updateStatus(connection)}>{busyId === connection.id ? <Loader2 className="size-4 animate-spin" /> : connection.is_active ? <Pause className="size-4" /> : <Play className="size-4" />}{connection.is_active ? 'Pausar' : 'Reactivar'}</Button><Button size="sm" variant="outline" className="text-destructive hover:text-destructive" disabled={busyId === connection.id} onClick={() => removeConnection(connection)}><Trash2 className="size-4" />Eliminar</Button></div></div>)}</div>}
       </CardContent>
 
       <Dialog open={creating} onOpenChange={setCreating}>
