@@ -1,5 +1,6 @@
 import 'server-only'
 
+import nodemailer from 'nodemailer'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 
 export type ReportScheduleFrequency = 'daily' | 'weekly' | 'monthly' | 'once'
@@ -85,10 +86,35 @@ export function nextAfterDelivery(schedule: ReportSchedule) {
 }
 
 export async function sendScheduledReportEmail({ to, subject, html, csv, xls }: { to: string[]; subject: string; html: string; csv: string; xls: string }) {
-  const key = process.env.RESEND_API_KEY
+  const host = process.env.REPORTS_SMTP_HOST ?? 'smtp.gmail.com'
+  const port = Number(process.env.REPORTS_SMTP_PORT ?? 465)
+  const user = process.env.REPORTS_SMTP_USER
+  const password = process.env.REPORTS_SMTP_PASS
   const from = process.env.REPORTS_EMAIL_FROM
-  if (!key || !from) throw new Error('Falta configurar RESEND_API_KEY o REPORTS_EMAIL_FROM para enviar reportes.')
-  const response = await fetch('https://api.resend.com/emails', {
+  if (!from) throw new Error('Falta configurar REPORTS_EMAIL_FROM para enviar reportes.')
+  if (Boolean(user) !== Boolean(password)) throw new Error('Configura REPORTS_SMTP_USER y REPORTS_SMTP_PASS juntos, o deja ambos vacíos para usar SMTP Relay por IP.')
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('REPORTS_SMTP_PORT no es válido.')
+  const transporter = nodemailer.createTransport({
+    host,
+    port,
+    secure: process.env.REPORTS_SMTP_SECURE ? process.env.REPORTS_SMTP_SECURE === 'true' : port === 465,
+    ...(user && password ? { auth: { user, pass: password } } : {}),
+    connectionTimeout: 15_000,
+    greetingTimeout: 15_000,
+    socketTimeout: 30_000,
+  })
+  const result = await transporter.sendMail({
+    from,
+    to,
+    subject: `[NexoOmni Reportes] ${subject}`,
+    html,
+    attachments: [
+      { filename: 'nexoomni-reporte-ejecutivo.csv', content: Buffer.from(csv), contentType: 'text/csv; charset=utf-8' },
+      { filename: 'nexoomni-reporte-ejecutivo.xls', content: Buffer.from(xls), contentType: 'application/vnd.ms-excel' },
+    ],
+  })
+  return result.messageId ?? null
+  /* Legacy Resend transport intentionally disabled; reports use SMTP.
     method: 'POST',
     headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -101,7 +127,7 @@ export async function sendScheduledReportEmail({ to, subject, html, csv, xls }: 
   })
   const payload = await response.json().catch(() => null) as { id?: string; message?: string } | null
   if (!response.ok) throw new Error(payload?.message || `El proveedor de correo devolvió HTTP ${response.status}.`)
-  return payload?.id ?? null
+  return payload?.id ?? null */
 }
 
 export type ReportDb = SupabaseClient
