@@ -3,6 +3,7 @@ import { createClient as createAdminClient } from '@supabase/supabase-js'
 
 import { requireEntitlement } from '@/lib/account/entitlements'
 import { toErrorResponse } from '@/lib/auth/account'
+import { describeMetaConnectionError, type MetaProvider } from '@/lib/omnichannel/meta-diagnostics'
 import { checkRateLimit, RATE_LIMITS, rateLimitResponse } from '@/lib/rate-limit'
 import { decrypt } from '@/lib/whatsapp/encryption'
 
@@ -96,16 +97,19 @@ export async function POST(_request: Request, { params }: { params: Promise<{ co
       }
 
       const detail = graphError(target.payload, `HTTP ${target.response.status}`)
-      const storedError = tokenIsValid
-        ? 'El token es válido, pero no permite acceder al ID configurado. Revisa que sea el ID de la Página/cuenta profesional y usa su token de acceso.'
-        : `El token de Meta no pudo validarse: ${detail}`
+      const provider: MetaProvider = connector.provider === 'instagram' ? 'instagram' : 'facebook'
+      const diagnostic = describeMetaConnectionError(
+        tokenIsValid
+          ? 'El token es válido, pero no permite acceder al ID configurado.'
+          : detail,
+        provider,
+      )
+      const storedError = `${diagnostic.message} ${diagnostic.nextStep}`
       await db.from('omnichannel_connectors')
         .update({ status: 'error', last_error: storedError.slice(0, 500), updated_at: new Date().toISOString() })
         .eq('id', connector.id)
 
-      const guidance = tokenIsValid
-        ? `El token es válido, pero no tiene acceso al ID ${connector.external_channel_id}. Usa el ID real de la Página de Facebook o cuenta profesional de Instagram y un Page/Instagram access token de esa misma cuenta.`
-        : `Meta rechazó el token o no pudo comprobarlo: ${detail}`
+      const guidance = `${diagnostic.title}: ${diagnostic.message} ${diagnostic.nextStep}`
       const availableHint = available.length ? ` Páginas disponibles para este token: ${available.join(', ')}.` : ''
       return NextResponse.json({ error: `${guidance}${availableHint}`, availableChannels: available }, { status: 422 })
     }
