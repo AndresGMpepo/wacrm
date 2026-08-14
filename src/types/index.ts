@@ -446,6 +446,12 @@ export interface BroadcastRecipient {
    * Added in migration 003.
    */
   whatsapp_message_id?: string;
+  /**
+   * Set when this recipient answers the campaign through WhatsApp. The link
+   * lets the campaign detail open the resulting customer conversation.
+   * Added in migration 073.
+   */
+  response_conversation_id?: string | null;
   created_at: string;
   contact?: Contact;
 }

@@ -208,6 +208,7 @@ export default function BroadcastDetailPage() {
       t('table.sent'),
       t('table.delivered'),
       t('table.read'),
+      'Conversación',
       t('table.error'),
     ];
     const rows = recipients.map((r) => [
@@ -217,6 +218,7 @@ export default function BroadcastDetailPage() {
       r.sent_at ?? '',
       r.delivered_at ?? '',
       r.read_at ?? '',
+      r.response_conversation_id ?? '',
       r.error_message ?? '',
     ]);
     const csv = toCsv([header, ...rows]);
@@ -478,6 +480,7 @@ export default function BroadcastDetailPage() {
                   <TableHead className="text-muted-foreground">{t('table.sent')}</TableHead>
                   <TableHead className="text-muted-foreground">{t('table.delivered')}</TableHead>
                   <TableHead className="text-muted-foreground">{t('table.read')}</TableHead>
+                  <TableHead className="text-muted-foreground">Conversación</TableHead>
                   <TableHead className="text-muted-foreground">{t('table.error')}</TableHead>
                 </TableRow>
               </TableHeader>
@@ -513,6 +516,20 @@ export default function BroadcastDetailPage() {
                         {recipient.read_at
                           ? new Date(recipient.read_at).toLocaleString()
                           : '-'}
+                      </TableCell>
+                      <TableCell>
+                        {recipient.response_conversation_id ? (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 border-border text-xs"
+                            onClick={() => router.push(`/inbox?c=${recipient.response_conversation_id}`)}
+                          >
+                            Abrir chat
+                          </Button>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">Sin respuesta</span>
+                        )}
                       </TableCell>
                       <TableCell className="max-w-xs truncate text-xs text-red-400">
                         {recipient.error_message ?? '-'}

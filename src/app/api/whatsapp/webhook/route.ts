@@ -445,7 +445,11 @@ async function handleStatusUpdate(status: {
  * Runs on a best-effort basis — failures here must not break the
  * main inbound-message flow, so errors are swallowed with a log.
  */
-async function flagBroadcastReplyIfAny(accountId: string, contactId: string) {
+async function flagBroadcastReplyIfAny(
+  accountId: string,
+  contactId: string,
+  conversationId: string,
+) {
   try {
     // Most recent outbound broadcast in this account that hasn't
     // been replied to yet. Account-scoped so a shared inbox reply
@@ -465,7 +469,11 @@ async function flagBroadcastReplyIfAny(accountId: string, contactId: string) {
     const row = recs[0]
     const { error: updErr } = await supabaseAdmin()
       .from('broadcast_recipients')
-      .update({ status: 'replied', replied_at: new Date().toISOString() })
+      .update({
+        status: 'replied',
+        replied_at: new Date().toISOString(),
+        response_conversation_id: conversationId,
+      })
       .eq('id', row.id)
 
     if (updErr) {
@@ -719,7 +727,7 @@ async function processMessage(
   // If this contact was a recent broadcast recipient, flag the reply
   // so the broadcast's `replied_count` advances (via the aggregate
   // trigger installed in migration 003).
-  await flagBroadcastReplyIfAny(accountId, contactRecord.id)
+  await flagBroadcastReplyIfAny(accountId, contactRecord.id, conversation.id)
 
   // ============================================================
   // Flow runner dispatch.
