@@ -17,7 +17,7 @@ type MessageRow = { conversation_id: string; sender_type: string; created_at: st
 type AnalysisRow = { sentiment: string | null; sentiment_score: number | null; qa_score: number | null }
 type DealRow = { value: number | string | null; status: string; updated_at: string }
 type BroadcastRow = {
-  id: string; name: string; status: string; created_at: string
+  id: string; name: string; template_name: string; status: string; created_at: string
   total_recipients: number | null; sent_count: number | null; delivered_count: number | null
   read_count: number | null; replied_count: number | null; failed_count: number | null
 }
@@ -101,7 +101,7 @@ export async function GET(request: Request) {
       db.from('ai_conversation_analyses').select('sentiment, sentiment_score, qa_score').eq('account_id', accountId).eq('status', 'completed').gte('analyzed_at', range.from).lt('analyzed_at', range.toExclusive),
       db.from('deals').select('value, status, updated_at').eq('account_id', accountId).gte('updated_at', range.from).lt('updated_at', range.toExclusive),
       db.from('deals').select('value').eq('account_id', accountId).eq('status', 'open'),
-      db.from('broadcasts').select('id, name, status, created_at, total_recipients, sent_count, delivered_count, read_count, replied_count, failed_count').eq('account_id', accountId).gte('created_at', range.from).lt('created_at', range.toExclusive).order('created_at', { ascending: false }).limit(12),
+      db.from('broadcasts').select('id, name, template_name, status, created_at, total_recipients, sent_count, delivered_count, read_count, replied_count, failed_count').eq('account_id', accountId).gte('created_at', range.from).lt('created_at', range.toExclusive).order('created_at', { ascending: false }).limit(12),
     ])
 
     for (const result of [accountResult, conversationResult, previousConversationResult, backlogResult, resolvedResult, profilesResult, openConversationsResult, analysesResult, dealsResult, openDealsResult, broadcastsResult]) {
@@ -232,7 +232,12 @@ export async function GET(request: Request) {
         delivery_rate: percentage(campaignTotals.delivered, campaignTotals.sent),
         read_rate: percentage(campaignTotals.read, campaignTotals.delivered),
         reply_rate: percentage(campaignTotals.replied, campaignTotals.delivered),
-        items: broadcasts,
+        items: broadcasts.map((campaign) => ({
+          ...campaign,
+          delivery_rate: percentage(numeric(campaign.delivered_count), numeric(campaign.sent_count)),
+          read_rate: percentage(numeric(campaign.read_count), numeric(campaign.delivered_count)),
+          reply_rate: percentage(numeric(campaign.replied_count), numeric(campaign.delivered_count)),
+        })),
       },
     })
   } catch (error) {
