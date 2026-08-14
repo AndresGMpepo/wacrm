@@ -48,6 +48,8 @@ it. Grant the minimum.
 | `contacts:read`      | List and read contacts                   |
 | `contacts:write`     | Create and update contacts               |
 | `conversations:read` | List and read conversations              |
+| `conversations:assign` | Assign or unassign a conversation to an active team member |
+| `conversation-notes:write` | Create a private team note on a conversation |
 | `broadcasts:send`    | Launch broadcast campaigns               |
 | `webhooks:manage`    | Register and manage outbound webhooks    |
 
@@ -218,6 +220,26 @@ Paginated. Each message includes its `direction` (`inbound` /
 `outbound`), `status` (delivery state), `whatsapp_message_id`, and
 `content_*`. The conversation is verified to belong to your account
 first (`404` otherwise).
+
+### `PATCH /api/v1/conversations/{id}/assignment`
+
+Assigns a conversation to an active member of the same account. Scope:
+`conversations:assign`. This never sends a customer message and does not change
+the conversation status. Send `null` to remove the current assignment.
+
+```json
+{ "assigned_agent_id": "<team-member-user-id>" }
+```
+
+### `POST /api/v1/conversations/{id}/internal-notes`
+
+Creates a private note for the NexoOmni team. Scope:
+`conversation-notes:write`. This note is never delivered through WhatsApp,
+Yeastar, Meta, or web chat.
+
+```json
+{ "body": "n8n: create a follow-up task before Friday." }
+```
 
 ### `POST /api/v1/broadcasts`
 

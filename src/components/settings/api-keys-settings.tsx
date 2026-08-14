@@ -277,7 +277,7 @@ export function ApiKeysSettings() {
         onCreateApiKey={() => {
           setCreatePreset({
             name: 'n8n producción',
-            scopes: ['contacts:read', 'contacts:write', 'messages:send', 'messages:read', 'conversations:read'],
+            scopes: ['contacts:read', 'contacts:write', 'messages:send', 'messages:read', 'conversations:read', 'conversations:assign', 'conversation-notes:write'],
           });
           setCreateOpen(true);
         }}
