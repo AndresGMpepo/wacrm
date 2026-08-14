@@ -375,6 +375,7 @@ export interface PipelineStage {
 }
 
 export type DealStatus = 'open' | 'won' | 'lost';
+export type DealSourceChannel = 'whatsapp' | 'yeastar_live_chat' | 'yeastar_voice' | 'facebook' | 'instagram' | 'tiktok' | 'other';
 
 export interface Deal {
   id: string;
@@ -395,6 +396,8 @@ export interface Deal {
   expected_close_date?: string;
   /** Campaign selected manually as the deal source; never inferred from a reply. */
   source_broadcast_id?: string | null;
+  /** Channel confirmed by the team as the commercial origin of this deal. */
+  source_channel?: DealSourceChannel | null;
   status?: DealStatus;
   created_at: string;
   updated_at?: string;

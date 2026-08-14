@@ -4,7 +4,12 @@ export type ExecutiveReport = {
   channels: { channel: string; conversations: number; resolved: number; first_response_minutes: number | null }[]
   agents: { id: string; name: string; open_conversations: number; first_response_minutes: number | null; measured_responses: number }[]
   intelligence: { analyzed: number; negative: number; negative_rate: number | null; average_sentiment_score: number | null; average_qa_score: number | null }
-  commercial: { open_pipeline_value: number; open_deals: number; won_deals: number; lost_deals: number; won_value: number; attributed_deals: number; attributed_won_deals: number; attributed_won_value: number }
+  commercial: {
+    open_pipeline_value: number; open_deals: number; won_deals: number; lost_deals: number; won_value: number
+    attributed_deals: number; attributed_won_deals: number; attributed_won_value: number
+    source_channels: { channel: string; deals: number; won_deals: number; lost_deals: number; open_deals: number; pipeline_value: number; won_value: number }[]
+  }
+  funnel: { stage: string; position: number; deals: number; won_deals: number; lost_deals: number; open_deals: number; value: number; won_value: number }[]
   campaigns: { totals: { recipients: number; sent: number; delivered: number; read: number; replied: number; failed: number }; delivery_rate: number | null; read_rate: number | null; reply_rate: number | null; items: { id: string; name: string; template_name: string; status: string; created_at: string; total_recipients: number | null; sent_count: number | null; delivered_count: number | null; read_count: number | null; replied_count: number | null; failed_count: number | null; delivery_rate: number | null; read_rate: number | null; reply_rate: number | null; attributed_deals: number; attributed_won_deals: number; attributed_won_value: number; attributed_pipeline_value: number }[] }
 }
 
@@ -51,6 +56,14 @@ function reportSheets(report: ExecutiveReport, insight?: ExecutiveReportInsight 
       ['Tratos atribuidos a campañas', report.commercial.attributed_deals], ['Tratos ganados atribuidos a campañas', report.commercial.attributed_won_deals], ['Valor ganado atribuido a campañas', report.commercial.attributed_won_value],
     ] },
     { name: 'Canales', rows: [['Canal', 'Conversaciones nuevas', 'Cierres', 'Primera respuesta'], ...report.channels.map((channel) => [channel.channel, channel.conversations, channel.resolved, minutes(channel.first_response_minutes)])] },
+    { name: 'Atribución por canal', rows: [
+      ['Canal confirmado', 'Tratos', 'Abiertos', 'Ganados', 'Perdidos', 'Valor de tratos', 'Valor ganado'],
+      ...report.commercial.source_channels.map((channel) => [channel.channel, channel.deals, channel.open_deals, channel.won_deals, channel.lost_deals, channel.pipeline_value, channel.won_value]),
+    ] },
+    { name: 'Embudo', rows: [
+      ['Etapa', 'Tratos', 'Abiertos', 'Ganados', 'Perdidos', 'Valor de tratos', 'Valor ganado'],
+      ...report.funnel.map((stage) => [stage.stage, stage.deals, stage.open_deals, stage.won_deals, stage.lost_deals, stage.value, stage.won_value]),
+    ] },
     { name: 'Agentes', rows: [['Agente', 'Chats abiertos', 'Primera respuesta', 'Respuestas medidas'], ...report.agents.map((agent) => [agent.name, agent.open_conversations, minutes(agent.first_response_minutes), agent.measured_responses])] },
     { name: 'Campañas', rows: [
       ['Campaña', 'Plantilla', 'Estado', 'Creada', 'Destinatarios', 'Enviados', 'Entregados', 'Entrega', 'Lectura', 'Respuesta', 'Tratos atribuidos', 'Ganados atribuidos', 'Valor ganado atribuido', 'Leídos', 'Respondidos', 'Fallidos'],

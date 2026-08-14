@@ -9,6 +9,7 @@ import type {
   Contact,
   Conversation,
   Deal,
+  DealSourceChannel,
   DealStatus,
   PipelineStage,
   Profile,
@@ -51,6 +52,29 @@ type CampaignOption = {
   created_at: string;
 };
 
+const DEAL_CHANNEL_OPTIONS: Array<{ value: DealSourceChannel; label: string }> = [
+  { value: "whatsapp", label: "WhatsApp" },
+  { value: "yeastar_live_chat", label: "Chat web Yeastar" },
+  { value: "yeastar_voice", label: "Llamada Yeastar" },
+  { value: "facebook", label: "Facebook" },
+  { value: "instagram", label: "Instagram" },
+  { value: "tiktok", label: "TikTok" },
+  { value: "other", label: "Otro" },
+];
+
+function relatedConversationChannel(conversation: Conversation | null): DealSourceChannel | null {
+  switch (conversation?.channel_type) {
+    case "whatsapp":
+    case "yeastar_live_chat":
+    case "facebook":
+    case "instagram":
+    case "tiktok":
+      return conversation.channel_type;
+    default:
+      return null;
+  }
+}
+
 export function DealForm({
   open,
   onOpenChange,
@@ -73,6 +97,7 @@ export function DealForm({
   const [expectedCloseDate, setExpectedCloseDate] = useState("");
   const [notes, setNotes] = useState("");
   const [sourceBroadcastId, setSourceBroadcastId] = useState("");
+  const [sourceChannel, setSourceChannel] = useState<DealSourceChannel | "">("");
 
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
@@ -104,6 +129,7 @@ export function DealForm({
       setExpectedCloseDate(deal.expected_close_date ?? "");
       setNotes(deal.notes ?? "");
       setSourceBroadcastId(deal.source_broadcast_id ?? "");
+      setSourceChannel(deal.source_channel ?? "");
     } else {
       setTitle("");
       setValue("");
@@ -114,6 +140,7 @@ export function DealForm({
       setExpectedCloseDate("");
       setNotes("");
       setSourceBroadcastId("");
+      setSourceChannel("");
     }
   }, [open, deal, defaultStageId, stages, defaultCurrency]);
   /* eslint-enable react-hooks/set-state-in-effect */
@@ -208,6 +235,7 @@ export function DealForm({
       notes: notes.trim() || null,
       expected_close_date: expectedCloseDate || null,
       source_broadcast_id: sourceBroadcastId || null,
+      source_channel: sourceChannel || null,
     };
 
     if (deal) {
@@ -358,6 +386,24 @@ export function DealForm({
                   </option>
                 ))}
               </select>
+            </div>
+
+            <div className="grid gap-2 rounded-lg border border-border/70 bg-muted/20 p-3">
+              <div>
+                <Label className="text-muted-foreground">Canal de origen</Label>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                  Confirma cómo llegó esta oportunidad. La conversación reciente sólo se muestra como sugerencia: si no confirmas un canal, el trato queda sin atribución.
+                </p>
+              </div>
+              <select
+                value={sourceChannel}
+                onChange={(e) => setSourceChannel(e.target.value as DealSourceChannel | "")}
+                className="h-9 w-full rounded-lg border border-border bg-muted px-2.5 text-sm text-foreground outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+              >
+                <option value="">Sin canal confirmado</option>
+                {DEAL_CHANNEL_OPTIONS.map((channel) => <option key={channel.value} value={channel.value}>{channel.label}</option>)}
+              </select>
+              {relatedConversationChannel(linkedConversation) ? <p className="text-xs text-muted-foreground">Sugerencia por conversación relacionada: {DEAL_CHANNEL_OPTIONS.find((item) => item.value === relatedConversationChannel(linkedConversation))?.label}.</p> : null}
             </div>
 
             <div className="grid grid-cols-[1fr_110px] gap-3">

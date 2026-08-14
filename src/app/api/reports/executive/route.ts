@@ -15,7 +15,9 @@ type ConversationRow = {
 }
 type MessageRow = { conversation_id: string; sender_type: string; created_at: string }
 type AnalysisRow = { sentiment: string | null; sentiment_score: number | null; qa_score: number | null }
-type DealRow = { value: number | string | null; status: string; updated_at: string; source_broadcast_id: string | null }
+type DealChannel = 'whatsapp' | 'yeastar_live_chat' | 'yeastar_voice' | 'facebook' | 'instagram' | 'tiktok' | 'other'
+type DealStageRow = { name: string; position: number }
+type DealRow = { value: number | string | null; status: string; updated_at: string; source_broadcast_id: string | null; source_channel: DealChannel | null; stage: DealStageRow | DealStageRow[] | null }
 type BroadcastRow = {
   id: string; name: string; template_name: string; status: string; created_at: string
   total_recipients: number | null; sent_count: number | null; delivered_count: number | null
@@ -42,6 +44,16 @@ function dateOnly(date: Date) { return date.toISOString().slice(0, 10) }
 function plusDays(date: Date, days: number) { return new Date(date.getTime() + days * 86_400_000) }
 function numeric(value: number | string | null) { return Number(value ?? 0) || 0 }
 function percentage(numerator: number, denominator: number) { return denominator > 0 ? Math.round((numerator / denominator) * 100) : null }
+function dealChannelLabel(channel: DealChannel | null) {
+  return channel === 'whatsapp' ? 'WhatsApp'
+    : channel === 'yeastar_live_chat' ? 'Chat web Yeastar'
+      : channel === 'yeastar_voice' ? 'Llamada Yeastar'
+        : channel === 'facebook' ? 'Facebook'
+          : channel === 'instagram' ? 'Instagram'
+            : channel === 'tiktok' ? 'TikTok'
+              : channel === 'other' ? 'Otro'
+                : 'Sin canal confirmado'
+}
 
 function parseRange(url: URL) {
   const today = new Date()
@@ -99,7 +111,7 @@ export async function GET(request: Request) {
       db.from('profiles').select('user_id, full_name').eq('account_id', accountId).order('full_name'),
       db.from('conversations').select('assigned_agent_id').eq('account_id', accountId).in('status', ['open', 'pending']),
       db.from('ai_conversation_analyses').select('sentiment, sentiment_score, qa_score').eq('account_id', accountId).eq('status', 'completed').gte('analyzed_at', range.from).lt('analyzed_at', range.toExclusive),
-      db.from('deals').select('value, status, updated_at, source_broadcast_id').eq('account_id', accountId).gte('updated_at', range.from).lt('updated_at', range.toExclusive),
+      db.from('deals').select('value, status, updated_at, source_broadcast_id, source_channel, stage:pipeline_stages(name, position)').eq('account_id', accountId).gte('updated_at', range.from).lt('updated_at', range.toExclusive),
       db.from('deals').select('value').eq('account_id', accountId).eq('status', 'open'),
       db.from('broadcasts').select('id, name, template_name, status, created_at, total_recipients, sent_count, delivered_count, read_count, replied_count, failed_count').eq('account_id', accountId).gte('created_at', range.from).lt('created_at', range.toExclusive).order('created_at', { ascending: false }).limit(12),
     ])
@@ -178,6 +190,28 @@ export async function GET(request: Request) {
     const deals = (dealsResult.data ?? []) as DealRow[]
     const wonDeals = deals.filter((row) => row.status === 'won')
     const lostDeals = deals.filter((row) => row.status === 'lost')
+    const commercialByChannel = new Map<string, { channel: string; deals: number; won_deals: number; lost_deals: number; open_deals: number; pipeline_value: number; won_value: number }>()
+    const funnelByStage = new Map<string, { stage: string; position: number; deals: number; won_deals: number; lost_deals: number; open_deals: number; value: number; won_value: number }>()
+    for (const deal of deals) {
+      const channel = dealChannelLabel(deal.source_channel)
+      const channelCurrent = commercialByChannel.get(channel) ?? { channel, deals: 0, won_deals: 0, lost_deals: 0, open_deals: 0, pipeline_value: 0, won_value: 0 }
+      channelCurrent.deals += 1
+      channelCurrent.pipeline_value += numeric(deal.value)
+      if (deal.status === 'won') { channelCurrent.won_deals += 1; channelCurrent.won_value += numeric(deal.value) }
+      if (deal.status === 'lost') channelCurrent.lost_deals += 1
+      if (deal.status === 'open') channelCurrent.open_deals += 1
+      commercialByChannel.set(channel, channelCurrent)
+
+      const stageValue = Array.isArray(deal.stage) ? deal.stage[0] : deal.stage
+      const stage = stageValue?.name || 'Sin etapa'
+      const stageCurrent = funnelByStage.get(stage) ?? { stage, position: stageValue?.position ?? Number.MAX_SAFE_INTEGER, deals: 0, won_deals: 0, lost_deals: 0, open_deals: 0, value: 0, won_value: 0 }
+      stageCurrent.deals += 1
+      stageCurrent.value += numeric(deal.value)
+      if (deal.status === 'won') { stageCurrent.won_deals += 1; stageCurrent.won_value += numeric(deal.value) }
+      if (deal.status === 'lost') stageCurrent.lost_deals += 1
+      if (deal.status === 'open') stageCurrent.open_deals += 1
+      funnelByStage.set(stage, stageCurrent)
+    }
     const broadcasts = (broadcastsResult.data ?? []) as BroadcastRow[]
     const attributedBroadcastIds = [...new Set(deals.map((deal) => deal.source_broadcast_id).filter((id): id is string => Boolean(id)))]
     const attributedBroadcastsResult = attributedBroadcastIds.length
@@ -248,7 +282,9 @@ export async function GET(request: Request) {
         attributed_deals: [...attributionByBroadcast.values()].reduce((sum, item) => sum + item.deals, 0),
         attributed_won_deals: [...attributionByBroadcast.values()].reduce((sum, item) => sum + item.won_deals, 0),
         attributed_won_value: [...attributionByBroadcast.values()].reduce((sum, item) => sum + item.won_value, 0),
+        source_channels: [...commercialByChannel.values()].sort((a, b) => b.won_value - a.won_value || b.deals - a.deals || a.channel.localeCompare(b.channel)),
       },
+      funnel: [...funnelByStage.values()].sort((a, b) => a.position - b.position || a.stage.localeCompare(b.stage)),
       campaigns: {
         totals: campaignTotals,
         delivery_rate: percentage(campaignTotals.delivered, campaignTotals.sent),
