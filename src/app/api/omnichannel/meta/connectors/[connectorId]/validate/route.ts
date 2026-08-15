@@ -43,7 +43,7 @@ async function graphGet(path: string, accessToken: string) {
   return { response, payload }
 }
 
-async function graphPost(path: string, accessToken: string) {
+async function graphPost(path: string, accessToken: string, subscribedFields: string) {
   const url = new URL(`https://graph.facebook.com/${graphVersion()}${path}`)
   const response = await fetch(url, {
     method: 'POST',
@@ -51,9 +51,10 @@ async function graphPost(path: string, accessToken: string) {
       Authorization: `Bearer ${accessToken}`,
       'Content-Type': 'application/x-www-form-urlencoded',
     },
-    // Messenger requires the Page subscription fields explicitly. `feed` also
-    // permits the public-comment intake already supported by this connector.
-    body: new URLSearchParams({ subscribed_fields: 'messages,messaging_postbacks,feed' }),
+    // Meta requires the requested Page fields explicitly. We keep Messenger
+    // separate from public comments because `feed` needs an additional
+    // permission and must not make an otherwise working inbox look broken.
+    body: new URLSearchParams({ subscribed_fields: subscribedFields }),
     signal: AbortSignal.timeout(15_000),
     cache: 'no-store',
   })
@@ -137,13 +138,31 @@ export async function POST(_request: Request, { params }: { params: Promise<{ co
     // We try to subscribe the Page as a convenience, but this action requires a
     // stronger Page-admin permission than reading the Page. A failure here must
     // never disconnect or mark an otherwise valid existing integration as error.
+    let subscriptionNote = ''
     let subscriptionWarning = ''
     if (connector.provider === 'facebook') {
-      const subscription = await graphPost(`/${encodeURIComponent(connector.external_channel_id)}/subscribed_apps`, accessToken)
-      const subscribed = subscription.response.ok && subscription.payload?.success === true
-      if (!subscribed) {
-        const detail = graphError(subscription.payload, `HTTP ${subscription.response.status}`)
-        subscriptionWarning = ` No fue posible actualizar automáticamente la suscripción de la página (${detail}). Esto no desconecta el webhook existente. Para administrarla, usa un usuario con control total de la página y 2FA si el negocio lo exige.`
+      const path = `/${encodeURIComponent(connector.external_channel_id)}/subscribed_apps`
+      const messengerSubscription = await graphPost(path, accessToken, 'messages,messaging_postbacks')
+      const messengerSubscribed = messengerSubscription.response.ok && messengerSubscription.payload?.success === true
+
+      if (messengerSubscribed) {
+        subscriptionNote = ' Messenger quedó suscrito a la app.'
+      } else {
+        const detail = graphError(messengerSubscription.payload, `HTTP ${messengerSubscription.response.status}`)
+        subscriptionWarning = ` No fue posible actualizar Messenger por API (${detail}). Si el canal ya recibe mensajes, su suscripción vigente no se altera.`
+      }
+
+      // `feed` is only needed for public comments. It commonly requires
+      // pages_manage_metadata, which some otherwise valid Messenger tokens do
+      // not have. Report it independently instead of treating it as an inbox
+      // failure or invalidating the connector.
+      const commentsSubscription = await graphPost(path, accessToken, 'feed')
+      const commentsSubscribed = commentsSubscription.response.ok && commentsSubscription.payload?.success === true
+      if (commentsSubscribed) {
+        subscriptionNote += ' Los comentarios públicos también quedaron suscritos.'
+      } else {
+        const detail = graphError(commentsSubscription.payload, `HTTP ${commentsSubscription.response.status}`)
+        subscriptionWarning += ` Los comentarios públicos siguen pendientes: Meta exige pages_manage_metadata para suscribir el campo feed (${detail}).`
       }
     }
 
@@ -151,7 +170,6 @@ export async function POST(_request: Request, { params }: { params: Promise<{ co
       .update({ status: 'active', last_error: null, updated_at: new Date().toISOString() })
       .eq('id', connector.id)
     const label = graphLabel(target.payload ?? {})
-    const subscriptionNote = connector.provider === 'facebook' && !subscriptionWarning ? ' La página quedó suscrita a la app.' : ''
     return NextResponse.json({ message: `Conexión con Meta validada${label ? ` (${label})` : ''}.${subscriptionNote}${subscriptionWarning} Envía un mensaje nuevo desde una cuenta distinta a la administradora para confirmar el webhook.` })
   } catch (error) {
     return toErrorResponse(error)
