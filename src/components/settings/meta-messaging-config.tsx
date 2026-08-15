@@ -16,11 +16,11 @@ type Connector = { id: string; provider: Provider; displayName: string; channelI
 
 function connectorState(connector: Connector) {
   if (!connector.webhookConfigured || !connector.outboundConfigured) return { label: 'Faltan credenciales Meta', className: 'text-destructive' }
-  if (connector.status === 'active' && !connector.lastEventAt) return { label: 'Conexión validada — pendiente del primer evento', className: 'text-emerald-500' }
+  if (connector.status === 'active' && !connector.lastEventAt) return { label: 'Suscripción solicitada — pendiente del primer evento', className: 'text-amber-500' }
   if (connector.status === 'active') return { label: 'Activo — recibe mensajes Meta', className: 'text-emerald-500' }
   if (connector.status === 'paused') return { label: 'Pausado', className: 'text-amber-500' }
   if (connector.status === 'error') return { label: 'Revisar el último evento', className: 'text-destructive' }
-  return { label: 'Configurado — pendiente de verificación', className: 'text-amber-500' }
+  return { label: 'Configurado — Meta aún no entrega eventos', className: 'text-amber-500' }
 }
 
 export function MetaMessagingConfig() {
@@ -95,7 +95,9 @@ export function MetaMessagingConfig() {
           <li>Agrega <strong>Messenger</strong> o <strong>Instagram</strong>. Copia el <strong>App Secret</strong> desde Configuración de la app → Básica.</li>
           <li>Obtén el <strong>ID numérico de la Página/cuenta profesional</strong> y su <strong>token de acceso</strong>. No uses correo, App ID ni URL.</li>
           <li>Guarda este formulario. Copia la URL que aparece en la tarjeta del canal y, en Webhooks de Meta, pega esa URL y el mismo <strong>token de verificación</strong> que escribiste aquí.</li>
-          <li>Suscribe <strong>messages</strong> para mensajes privados. Para comentarios públicos suscribe también <strong>feed</strong> en Facebook o <strong>comments</strong> en Instagram. Después pulsa <strong>Validar conexión</strong> en NexoOmni.</li>
+          <li>En la sección <strong>Webhooks</strong> de esa App, suscribe <strong>messages</strong> para Messenger. Para comentarios públicos activa también <strong>feed</strong> en Facebook o <strong>comments</strong> en Instagram.</li>
+          <li>Para que Meta permita suscribir <strong>feed</strong>, el usuario que generó el token debe tener <strong>control total</strong> de la página y el token debe incluir <strong>pages_manage_metadata</strong>. Si el negocio exige 2FA, ese usuario también debe tenerla activada.</li>
+          <li>Pulsa <strong>Validar conexión</strong> y envía un mensaje desde un perfil distinto al administrador. El canal sólo mostrará “Activo — recibe mensajes Meta” cuando NexoOmni haya recibido ese primer evento.</li>
         </ol>
         <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-xs">
           <a className="inline-flex items-center gap-1 text-primary underline-offset-4 hover:underline" href="https://developers.facebook.com/docs/messenger-platform/getting-started" target="_blank" rel="noreferrer">Manual oficial Messenger <ExternalLink className="size-3" /></a>

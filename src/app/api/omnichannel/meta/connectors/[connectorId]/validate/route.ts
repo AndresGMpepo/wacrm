@@ -82,7 +82,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ co
     const { connectorId } = await params
     const db = admin()
     const { data: connector, error } = await db.from('omnichannel_connectors')
-      .select('id, provider, display_name, external_channel_id, meta_access_token, status')
+      .select('id, provider, display_name, external_channel_id, meta_access_token, status, last_event_at')
       .eq('id', connectorId)
       .eq('account_id', accountId)
       .in('provider', ['facebook', 'instagram'])
@@ -140,10 +140,11 @@ export async function POST(_request: Request, { params }: { params: Promise<{ co
     // never disconnect or mark an otherwise valid existing integration as error.
     let subscriptionNote = ''
     let subscriptionWarning = ''
+    let messengerSubscribed = connector.provider !== 'facebook'
     if (connector.provider === 'facebook') {
       const path = `/${encodeURIComponent(connector.external_channel_id)}/subscribed_apps`
       const messengerSubscription = await graphPost(path, accessToken, 'messages,messaging_postbacks')
-      const messengerSubscribed = messengerSubscription.response.ok && messengerSubscription.payload?.success === true
+      messengerSubscribed = messengerSubscription.response.ok && messengerSubscription.payload?.success === true
 
       if (messengerSubscribed) {
         subscriptionNote = ' Messenger quedó suscrito a la app.'
@@ -166,8 +167,14 @@ export async function POST(_request: Request, { params }: { params: Promise<{ co
       }
     }
 
+    // Do not report an unconfirmed Facebook subscription as active just because
+    // the Page itself is readable. The first signed event is the authoritative
+    // proof that the Page is delivering to this webhook.
+    const status = connector.provider === 'facebook' && !messengerSubscribed && !connector.last_event_at
+      ? 'configured'
+      : 'active'
     await db.from('omnichannel_connectors')
-      .update({ status: 'active', last_error: null, updated_at: new Date().toISOString() })
+      .update({ status, last_error: null, updated_at: new Date().toISOString() })
       .eq('id', connector.id)
     const label = graphLabel(target.payload ?? {})
     return NextResponse.json({ message: `Conexión con Meta validada${label ? ` (${label})` : ''}.${subscriptionNote}${subscriptionWarning} Envía un mensaje nuevo desde una cuenta distinta a la administradora para confirmar el webhook.` })
