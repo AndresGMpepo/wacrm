@@ -7,6 +7,7 @@ import { requireEntitlement } from '@/lib/account/entitlements'
 import { toErrorResponse } from '@/lib/auth/account'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { checkRateLimit, RATE_LIMITS, rateLimitResponse } from '@/lib/rate-limit'
+import { describeMetaSendError, type MetaProvider } from '@/lib/omnichannel/meta-diagnostics'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 20
@@ -51,7 +52,13 @@ export async function POST(request: Request) {
       ? `https://graph.facebook.com/${graphVersion()}/${encodeURIComponent(conversation.social_comment_id!)}/${conversation.channel_type === 'instagram' ? 'replies' : 'comments'}`
       : `https://graph.facebook.com/${graphVersion()}/${encodeURIComponent(connector.external_channel_id)}/messages`
     const response = await fetch(endpoint, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        // Graph accepts a bearer Page/Instagram token. Keeping it out of the
+        // JSON payload prevents it from being included in request-body logs.
+        Authorization: `Bearer ${accessToken}`,
+      },
       body: JSON.stringify({
         ...(isPublicComment
           ? { message: text }
@@ -60,15 +67,26 @@ export async function POST(request: Request) {
               ...(conversation.channel_type === 'facebook' ? { messaging_type: 'RESPONSE' } : {}),
               message: { text },
             }),
-        access_token: accessToken,
       }),
       signal: AbortSignal.timeout(15_000),
     })
-    const payload = await response.json().catch(() => ({})) as { message_id?: string; id?: string; error?: { message?: string } }
+    const payload = await response.json().catch(() => ({})) as {
+      message_id?: string; id?: string
+      error?: { message?: string; code?: number; error_subcode?: number; type?: string }
+    }
     const externalId = isPublicComment ? payload.id : payload.message_id
     if (!response.ok || !externalId) {
       const detail = payload.error?.message || `HTTP ${response.status}`
-      return NextResponse.json({ error: `Meta rechazó el envío: ${detail}` }, { status: 502 })
+      console.warn('[meta] outgoing message rejected', {
+        provider: conversation.channel_type,
+        publicComment: isPublicComment,
+        status: response.status,
+        graphCode: payload.error?.code,
+        graphSubcode: payload.error?.error_subcode,
+        detail,
+      })
+      const diagnostic = describeMetaSendError(detail, conversation.channel_type as MetaProvider, isPublicComment)
+      return NextResponse.json({ error: diagnostic.message, code: diagnostic.code, next_step: diagnostic.nextStep }, { status: 502 })
     }
     const now = new Date().toISOString()
     const { data: message, error: messageError } = await db.from('messages').insert({

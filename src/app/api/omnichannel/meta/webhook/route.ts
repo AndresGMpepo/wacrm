@@ -29,11 +29,71 @@ type Connector = {
   meta_access_token: string | null; meta_app_secret: string | null; meta_verify_token: string | null; status: string
 }
 
+type MetaProfile = {
+  name?: string
+  avatarUrl?: string
+}
+
 function admin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY
   if (!url || !key) throw new Error('Missing Supabase server configuration')
   return createAdminClient(url, key, { auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false } })
+}
+
+function graphVersion() {
+  const configured = process.env.META_GRAPH_API_VERSION?.trim()
+  return /^v\d+\.\d+$/.test(configured ?? '') ? configured as string : 'v22.0'
+}
+
+function safeHttpsUrl(value: unknown) {
+  if (typeof value !== 'string' || !value.trim()) return undefined
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:' ? url.toString() : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Messenger webhooks intentionally contain only the page-scoped sender ID.
+ * Resolve the optional public profile server-side with the connector's token.
+ * A profile lookup must never prevent the actual customer message from entering
+ * the inbox: Meta can restrict it independently from webhook delivery.
+ */
+async function resolveMetaProfile(connector: Connector, externalUserId: string): Promise<MetaProfile | undefined> {
+  if (!connector.meta_access_token || !externalUserId) return undefined
+  try {
+    const token = decrypt(connector.meta_access_token)
+    const response = await fetch(
+      `https://graph.facebook.com/${graphVersion()}/${encodeURIComponent(externalUserId)}?fields=id,name,profile_pic`,
+      {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(8_000),
+      },
+    )
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({})) as { error?: { code?: number; message?: string } }
+      console.info('[meta] profile lookup unavailable', {
+        provider: connector.provider,
+        status: response.status,
+        graphCode: body.error?.code,
+        detail: body.error?.message,
+      })
+      return undefined
+    }
+    const data = await response.json().catch(() => ({})) as { name?: unknown; profile_pic?: unknown }
+    const name = typeof data.name === 'string' && data.name.trim() ? data.name.trim().slice(0, 120) : undefined
+    const avatarUrl = safeHttpsUrl(data.profile_pic)
+    return name || avatarUrl ? { name, avatarUrl } : undefined
+  } catch (error) {
+    console.info('[meta] profile lookup failed without blocking ingestion', {
+      provider: connector.provider,
+      error: error instanceof Error ? error.message : 'unknown',
+    })
+    return undefined
+  }
 }
 
 function eventType(provider: Connector['provider'], kind: 'message' | 'comment' = 'message') {
@@ -59,24 +119,51 @@ async function claimReceipt(db: ReturnType<typeof admin>, connector: Connector, 
   return false
 }
 
-async function resolveContact(db: ReturnType<typeof admin>, connector: Connector, externalUserId: string, auditUserId: string, displayName?: string) {
+async function resolveContact(db: ReturnType<typeof admin>, connector: Connector, externalUserId: string, auditUserId: string, profile?: MetaProfile) {
   const { data: mapped, error: mapError } = await db.from('omnichannel_contact_identities')
     .select('contact_id').eq('connector_id', connector.id).eq('external_user_id', externalUserId).maybeSingle()
   if (mapError) throw mapError
-  if (mapped?.contact_id) return mapped.contact_id as string
+  if (mapped?.contact_id) {
+    const contactId = mapped.contact_id as string
+    const { data: contact, error: contactError } = await db.from('contacts')
+      .select('name, avatar_url').eq('id', contactId).eq('account_id', connector.account_id).maybeSingle()
+    if (contactError) throw contactError
+    const fallbackName = `${connector.provider === 'facebook' ? 'Cliente Facebook' : 'Cliente Instagram'} ${externalUserId.slice(-6)}`
+    const update: { name?: string; avatar_url?: string } = {}
+    if (profile?.name && (!contact?.name || contact.name === fallbackName)) update.name = profile.name
+    if (profile?.avatarUrl && !contact?.avatar_url) update.avatar_url = profile.avatarUrl
+    if (Object.keys(update).length > 0) {
+      const { error: updateError } = await db.from('contacts').update(update).eq('id', contactId).eq('account_id', connector.account_id)
+      if (updateError) throw updateError
+    }
+    return contactId
+  }
 
   const placeholderPhone = `meta:${connector.provider}:${externalUserId}`
   const { data: contactByPhone, error: phoneError } = await db.from('contacts')
-    .select('id').eq('account_id', connector.account_id).eq('phone', placeholderPhone).maybeSingle()
+    .select('id, name, avatar_url').eq('account_id', connector.account_id).eq('phone', placeholderPhone).maybeSingle()
   if (phoneError) throw phoneError
   let contactId = contactByPhone?.id as string | undefined
   if (!contactId) {
     const label = connector.provider === 'facebook' ? 'Cliente Facebook' : 'Cliente Instagram'
     const { data: contact, error: contactError } = await db.from('contacts').insert({
-      account_id: connector.account_id, user_id: auditUserId, phone: placeholderPhone, name: displayName?.slice(0, 120) || `${label} ${externalUserId.slice(-6)}`,
+      account_id: connector.account_id,
+      user_id: auditUserId,
+      phone: placeholderPhone,
+      name: profile?.name || `${label} ${externalUserId.slice(-6)}`,
+      avatar_url: profile?.avatarUrl || null,
     }).select('id').single()
     if (contactError || !contact) throw contactError ?? new Error('No se pudo crear el contacto de Meta.')
     contactId = contact.id
+  } else if (contactByPhone && (profile?.name || profile?.avatarUrl)) {
+    const fallbackName = `${connector.provider === 'facebook' ? 'Cliente Facebook' : 'Cliente Instagram'} ${externalUserId.slice(-6)}`
+    const update: { name?: string; avatar_url?: string } = {}
+    if (profile.name && (!contactByPhone.name || contactByPhone.name === fallbackName)) update.name = profile.name
+    if (profile.avatarUrl && !contactByPhone.avatar_url) update.avatar_url = profile.avatarUrl
+    if (Object.keys(update).length > 0) {
+      const { error: updateError } = await db.from('contacts').update(update).eq('id', contactId).eq('account_id', connector.account_id)
+      if (updateError) throw updateError
+    }
   }
   const { error: identityError } = await db.from('omnichannel_contact_identities').insert({
     account_id: connector.account_id, connector_id: connector.id, external_user_id: externalUserId, contact_id: contactId,
@@ -96,7 +183,8 @@ async function ingestMessage(db: ReturnType<typeof admin>, connector: Connector,
   if (!senderId || !messageId || event.message?.is_echo || senderId === connector.external_channel_id) return { ignored: true }
   if (!await claimReceipt(db, connector, messageId)) return { duplicate: true }
   const auditUserId = await resolveAuditUserId(db, connector.account_id)
-  const contactId = await resolveContact(db, connector, senderId, auditUserId)
+  const profile = await resolveMetaProfile(connector, senderId)
+  const contactId = await resolveContact(db, connector, senderId, auditUserId, profile)
   const { data: rows, error: findError } = await db.from('conversations').select('id, unread_count')
     .eq('account_id', connector.account_id).eq('connector_id', connector.id).eq('external_session_id', senderId).limit(1)
   if (findError) throw findError
@@ -160,7 +248,9 @@ async function ingestComment(db: ReturnType<typeof admin>, connector: Connector,
   if (!await claimReceipt(db, connector, commentId, 'comment')) return { duplicate: true }
 
   const auditUserId = await resolveAuditUserId(db, connector.account_id)
-  const contactId = await resolveContact(db, connector, senderId, auditUserId, value?.from?.name)
+  const contactId = await resolveContact(db, connector, senderId, auditUserId, {
+    name: value?.from?.name?.trim() || undefined,
+  })
   const parentId = valueText(value, 'parent_id')
   const postId = valueText(value, 'post_id') || valueText(value, 'media_id') || value?.media?.id?.trim() || value?.post?.id?.trim() || ''
   const parentConversation = await findCommentConversation(db, connector, parentId)

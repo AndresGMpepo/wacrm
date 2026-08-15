@@ -6,6 +6,12 @@ export type MetaConnectionDiagnostic = {
   nextStep: string
 }
 
+export type MetaSendDiagnostic = {
+  code: string
+  message: string
+  nextStep: string
+}
+
 /**
  * Meta returns Graph API messages intended for developers. Keep those details out
  * of the product UI and turn the common cases into a safe, actionable diagnosis.
@@ -57,4 +63,58 @@ export function describeMetaConnectionError(rawError: string | null | undefined,
 export function metaConnectionErrorText(rawError: string | null | undefined, provider: MetaProvider) {
   const diagnostic = describeMetaConnectionError(rawError, provider)
   return `${diagnostic.message} ${diagnostic.nextStep}`
+}
+
+/**
+ * The Graph API error is useful in server logs, but is confusing and often
+ * exposes implementation details to an agent. Keep the visible response short
+ * and tell the account owner what needs to be checked in Meta.
+ */
+export function describeMetaSendError(
+  rawError: string | null | undefined,
+  provider: MetaProvider,
+  isPublicComment: boolean,
+): MetaSendDiagnostic {
+  const raw = (rawError ?? '').toLowerCase()
+  const channel = provider === 'facebook' ? 'Facebook Messenger' : 'Instagram'
+
+  if (/24.?hour|outside.*window|message tag|standard messaging window/.test(raw)) {
+    return {
+      code: 'messaging_window_closed',
+      message: `No se puede responder porque la ventana de atención de 24 horas de ${channel} ya terminó.`,
+      nextStep: 'Pide al cliente que escriba nuevamente o utiliza una plantilla autorizada por Meta cuando aplique.',
+    }
+  }
+
+  if (/pages_messaging|instagram_manage_messages|permission|missing permission|reviewable feature|not authorized/.test(raw)) {
+    return {
+      code: 'missing_send_permission',
+      message: `Meta no autorizó a NexoOmni para enviar respuestas por ${channel}.`,
+      nextStep: isPublicComment
+        ? 'Revisa que el token de la página o cuenta tenga permisos de administración y de comentarios para ese activo.'
+        : 'Genera nuevamente el token del activo con el permiso pages_messaging (o instagram_manage_messages) y vuelve a validar el canal.',
+    }
+  }
+
+  if (/recipient.*not.*found|recipient.*invalid|cannot.*message|does not exist|unsupported get request/.test(raw)) {
+    return {
+      code: 'recipient_unavailable',
+      message: 'Meta no reconoce al destinatario de esta conversación para enviarle un mensaje.',
+      nextStep: 'Verifica que el cliente haya escrito a la página recientemente y que el canal configurado sea la misma página que recibió el mensaje.',
+    }
+  }
+
+  if (/invalid oauth|expired|access token|oauth/.test(raw)) {
+    return {
+      code: 'invalid_access_token',
+      message: `El token de acceso de ${channel} ya no es válido para enviar mensajes.`,
+      nextStep: 'Actualiza el token del canal en Configuración, Facebook e Instagram, y valida la conexión.',
+    }
+  }
+
+  return {
+    code: 'meta_send_rejected',
+    message: `Meta rechazó el envío por ${channel}. La conversación y el mensaje no se perdieron.`,
+    nextStep: 'Valida la conexión del canal y revisa los permisos del token de acceso en Meta.',
+  }
 }
