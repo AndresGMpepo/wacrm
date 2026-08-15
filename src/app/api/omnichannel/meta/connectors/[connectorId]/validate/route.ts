@@ -47,7 +47,13 @@ async function graphPost(path: string, accessToken: string) {
   const url = new URL(`https://graph.facebook.com/${graphVersion()}${path}`)
   const response = await fetch(url, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${accessToken}` },
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    // Messenger requires the Page subscription fields explicitly. `feed` also
+    // permits the public-comment intake already supported by this connector.
+    body: new URLSearchParams({ subscribed_fields: 'messages,messaging_postbacks,feed' }),
     signal: AbortSignal.timeout(15_000),
     cache: 'no-store',
   })
