@@ -133,21 +133,17 @@ export async function POST(_request: Request, { params }: { params: Promise<{ co
       return NextResponse.json({ error: `${guidance}${availableHint}`, availableChannels: available }, { status: 422 })
     }
 
-    // The callback URL and fields are configured once in Meta's Webhooks panel,
-    // but a Facebook Page must also be subscribed to this app. A token may read
-    // a Page while it still receives no Messenger events, so do this verification
-    // here instead of presenting a misleading successful validation.
+    // The callback URL and fields are configured once in Meta's Webhooks panel.
+    // We try to subscribe the Page as a convenience, but this action requires a
+    // stronger Page-admin permission than reading the Page. A failure here must
+    // never disconnect or mark an otherwise valid existing integration as error.
+    let subscriptionWarning = ''
     if (connector.provider === 'facebook') {
       const subscription = await graphPost(`/${encodeURIComponent(connector.external_channel_id)}/subscribed_apps`, accessToken)
       const subscribed = subscription.response.ok && subscription.payload?.success === true
       if (!subscribed) {
         const detail = graphError(subscription.payload, `HTTP ${subscription.response.status}`)
-        const message = 'El token puede leer la página, pero Meta no pudo suscribirla a la app para recibir mensajes.'
-        const nextStep = 'Verifica que el token sea de esta página y tenga pages_manage_metadata y pages_messaging; después vuelve a validar.'
-        await db.from('omnichannel_connectors')
-          .update({ status: 'error', last_error: `${message} ${detail} ${nextStep}`.slice(0, 500), updated_at: new Date().toISOString() })
-          .eq('id', connector.id)
-        return NextResponse.json({ error: `${message} ${detail}. ${nextStep}` }, { status: 422 })
+        subscriptionWarning = ` No fue posible actualizar automáticamente la suscripción de la página (${detail}). Esto no desconecta el webhook existente. Para administrarla, usa un usuario con control total de la página y 2FA si el negocio lo exige.`
       }
     }
 
@@ -155,8 +151,8 @@ export async function POST(_request: Request, { params }: { params: Promise<{ co
       .update({ status: 'active', last_error: null, updated_at: new Date().toISOString() })
       .eq('id', connector.id)
     const label = graphLabel(target.payload ?? {})
-    const subscriptionNote = connector.provider === 'facebook' ? ' La página quedó suscrita a la app.' : ''
-    return NextResponse.json({ message: `Conexión con Meta validada${label ? ` (${label})` : ''}.${subscriptionNote} Envía un mensaje nuevo desde una cuenta distinta a la administradora para confirmar el webhook.` })
+    const subscriptionNote = connector.provider === 'facebook' && !subscriptionWarning ? ' La página quedó suscrita a la app.' : ''
+    return NextResponse.json({ message: `Conexión con Meta validada${label ? ` (${label})` : ''}.${subscriptionNote}${subscriptionWarning} Envía un mensaje nuevo desde una cuenta distinta a la administradora para confirmar el webhook.` })
   } catch (error) {
     return toErrorResponse(error)
   }
