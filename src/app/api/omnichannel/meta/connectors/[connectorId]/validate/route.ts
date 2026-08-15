@@ -14,6 +14,7 @@ type GraphObject = {
   id?: unknown
   name?: unknown
   username?: unknown
+  success?: unknown
   error?: { message?: unknown }
   data?: Array<{ id?: unknown; name?: unknown; username?: unknown }>
 }
@@ -34,6 +35,18 @@ async function graphGet(path: string, accessToken: string) {
   const url = new URL(`https://graph.facebook.com/${graphVersion()}${path}`)
   // Meta accepts bearer authentication, keeping the credential out of the URL and logs.
   const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    signal: AbortSignal.timeout(15_000),
+    cache: 'no-store',
+  })
+  const payload = await response.json().catch(() => null) as GraphObject | null
+  return { response, payload }
+}
+
+async function graphPost(path: string, accessToken: string) {
+  const url = new URL(`https://graph.facebook.com/${graphVersion()}${path}`)
+  const response = await fetch(url, {
+    method: 'POST',
     headers: { Authorization: `Bearer ${accessToken}` },
     signal: AbortSignal.timeout(15_000),
     cache: 'no-store',
@@ -114,11 +127,30 @@ export async function POST(_request: Request, { params }: { params: Promise<{ co
       return NextResponse.json({ error: `${guidance}${availableHint}`, availableChannels: available }, { status: 422 })
     }
 
+    // The callback URL and fields are configured once in Meta's Webhooks panel,
+    // but a Facebook Page must also be subscribed to this app. A token may read
+    // a Page while it still receives no Messenger events, so do this verification
+    // here instead of presenting a misleading successful validation.
+    if (connector.provider === 'facebook') {
+      const subscription = await graphPost(`/${encodeURIComponent(connector.external_channel_id)}/subscribed_apps`, accessToken)
+      const subscribed = subscription.response.ok && subscription.payload?.success === true
+      if (!subscribed) {
+        const detail = graphError(subscription.payload, `HTTP ${subscription.response.status}`)
+        const message = 'El token puede leer la página, pero Meta no pudo suscribirla a la app para recibir mensajes.'
+        const nextStep = 'Verifica que el token sea de esta página y tenga pages_manage_metadata y pages_messaging; después vuelve a validar.'
+        await db.from('omnichannel_connectors')
+          .update({ status: 'error', last_error: `${message} ${detail} ${nextStep}`.slice(0, 500), updated_at: new Date().toISOString() })
+          .eq('id', connector.id)
+        return NextResponse.json({ error: `${message} ${detail}. ${nextStep}` }, { status: 422 })
+      }
+    }
+
     await db.from('omnichannel_connectors')
       .update({ status: 'active', last_error: null, updated_at: new Date().toISOString() })
       .eq('id', connector.id)
     const label = graphLabel(target.payload ?? {})
-    return NextResponse.json({ message: `Conexión con Meta validada${label ? ` (${label})` : ''}. Falta recibir el primer mensaje o comentario para confirmar el webhook.` })
+    const subscriptionNote = connector.provider === 'facebook' ? ' La página quedó suscrita a la app.' : ''
+    return NextResponse.json({ message: `Conexión con Meta validada${label ? ` (${label})` : ''}.${subscriptionNote} Envía un mensaje nuevo desde una cuenta distinta a la administradora para confirmar el webhook.` })
   } catch (error) {
     return toErrorResponse(error)
   }

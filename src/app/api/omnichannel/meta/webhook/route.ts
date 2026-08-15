@@ -70,7 +70,10 @@ async function resolveMetaProfile(connector: Connector, externalUserId: string):
       `https://graph.facebook.com/${graphVersion()}/${encodeURIComponent(externalUserId)}?fields=id,name,profile_pic`,
       {
         headers: { Authorization: `Bearer ${token}` },
-        signal: AbortSignal.timeout(8_000),
+        // Profile enrichment is useful, but delivery of the customer message is
+        // more important. Keep the external lookup well below Meta's webhook
+        // response window and continue with the safe fallback when unavailable.
+        signal: AbortSignal.timeout(2_500),
       },
     )
     if (!response.ok) {
@@ -343,7 +346,19 @@ export async function POST(request: Request) {
         return verifyMetaWebhookSignature(rawBody, signature, decrypt(connector.meta_app_secret))
       } catch { return false }
     })
-    if (!signed) return NextResponse.json({ error: 'Firma de webhook Meta inválida.' }, { status: 401 })
+    if (!signed) {
+      // A successful Graph validation does not prove the App Secret used by Meta
+      // matches the secret stored here. Persist an actionable state so the
+      // administrator does not see a channel as merely “pending” forever.
+      if (connectors.length > 0) {
+        await db.from('omnichannel_connectors').update({
+          status: 'error',
+          last_error: 'Meta llegó al webhook, pero la firma no coincide. Revisa el App Secret de la misma app de Meta y guárdalo de nuevo en NexoOmni.',
+          updated_at: new Date().toISOString(),
+        }).in('id', connectors.map((connector) => connector.id))
+      }
+      return NextResponse.json({ error: 'Firma de webhook Meta inválida.' }, { status: 401 })
+    }
     const byChannel = new Map(connectors.map((connector) => [connector.external_channel_id, connector]))
     let processed = 0
     for (const entry of payload.entry ?? []) {
