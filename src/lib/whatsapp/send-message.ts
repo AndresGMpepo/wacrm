@@ -262,7 +262,18 @@ export async function sendMessageToConversation(
     );
   }
 
-  const accessToken = decrypt(config.access_token);
+  let accessToken: string;
+  try {
+    accessToken = decrypt(config.access_token);
+  } catch (error) {
+    console.error('[send-message] WhatsApp access token cannot be decrypted:',
+      error instanceof Error ? error.message : 'unknown error');
+    throw new SendMessageError(
+      'whatsapp_token_unavailable',
+      'No se pudo leer el token de WhatsApp guardado. Verifica que ENCRYPTION_KEY sea la misma en este servidor y vuelve a guardar la conexión de WhatsApp.',
+      503
+    );
+  }
 
   // Self-heal legacy CBC ciphertexts. Fire-and-forget; idempotent.
   if (isLegacyFormat(config.access_token)) {

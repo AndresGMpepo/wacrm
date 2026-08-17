@@ -34,6 +34,11 @@ type MetaProfile = {
   avatarUrl?: string
 }
 
+type MetaCommentDetails = {
+  text?: string
+  name?: string
+}
+
 function admin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -92,6 +97,42 @@ async function resolveMetaProfile(connector: Connector, externalUserId: string):
     return name || avatarUrl ? { name, avatarUrl } : undefined
   } catch (error) {
     console.info('[meta] profile lookup failed without blocking ingestion', {
+      provider: connector.provider,
+      error: error instanceof Error ? error.message : 'unknown',
+    })
+    return undefined
+  }
+}
+
+/**
+ * Facebook's feed event can contain a comment ID and author but omit the
+ * body. The Page token may read the comment immediately afterwards. This is
+ * enrichment only: a temporary Graph failure must never discard the event.
+ */
+async function resolveMetaCommentDetails(connector: Connector, commentId: string): Promise<MetaCommentDetails | undefined> {
+  if (!connector.meta_access_token || !commentId) return undefined
+  try {
+    const token = decrypt(connector.meta_access_token)
+    const response = await fetch(
+      `https://graph.facebook.com/${graphVersion()}/${encodeURIComponent(commentId)}?fields=message,from{id,name}`,
+      { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(3_500) },
+    )
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({})) as { error?: { code?: number; message?: string } }
+      console.info('[meta] comment text lookup unavailable', {
+        provider: connector.provider,
+        status: response.status,
+        graphCode: body.error?.code,
+        detail: body.error?.message,
+      })
+      return undefined
+    }
+    const data = await response.json().catch(() => ({})) as { message?: unknown; from?: { name?: unknown } }
+    const text = typeof data.message === 'string' && data.message.trim() ? data.message.trim() : undefined
+    const name = typeof data.from?.name === 'string' && data.from.name.trim() ? data.from.name.trim().slice(0, 120) : undefined
+    return text || name ? { text, name } : undefined
+  } catch (error) {
+    console.info('[meta] comment text lookup failed without blocking ingestion', {
       provider: connector.provider,
       error: error instanceof Error ? error.message : 'unknown',
     })
@@ -249,10 +290,12 @@ async function ingestComment(db: ReturnType<typeof admin>, connector: Connector,
   const senderId = value?.from?.id?.trim() || ''
   if (!commentId || !senderId || senderId === connector.external_channel_id) return { ignored: true }
   if (!await claimReceipt(db, connector, commentId, 'comment')) return { duplicate: true }
+  const inlineText = valueText(value, 'message') || valueText(value, 'text')
+  const details = inlineText ? undefined : await resolveMetaCommentDetails(connector, commentId)
 
   const auditUserId = await resolveAuditUserId(db, connector.account_id)
   const contactId = await resolveContact(db, connector, senderId, auditUserId, {
-    name: value?.from?.name?.trim() || undefined,
+    name: value?.from?.name?.trim() || details?.name,
   })
   const parentId = valueText(value, 'parent_id')
   const postId = valueText(value, 'post_id') || valueText(value, 'media_id') || value?.media?.id?.trim() || value?.post?.id?.trim() || ''
@@ -275,7 +318,7 @@ async function ingestComment(db: ReturnType<typeof admin>, connector: Connector,
     conversation = data
     created = true
   }
-  const contentText = valueText(value, 'message') || valueText(value, 'text') || '[Comentario sin texto]'
+  const contentText = inlineText || details?.text || '[Comentario sin texto]'
   const createdAt = time(entry.time)
   const { error: messageError } = await db.from('messages').insert({
     conversation_id: conversation.id, sender_type: 'customer', content_type: 'text', content_text: contentText,
@@ -292,7 +335,13 @@ async function ingestComment(db: ReturnType<typeof admin>, connector: Connector,
   if (assignmentError) console.error('[meta] automatic assignment failed:', assignmentError.message)
   if (created) await dispatchWebhookEvent(db, connector.account_id, 'conversation.created', { conversation_id: conversation.id, contact_id: contactId, channel_type: connector.provider, connector_id: connector.id, public_comment: true })
   await dispatchWebhookEvent(db, connector.account_id, 'message.received', { conversation_id: conversation.id, contact_id: contactId, message_id: `meta:comment:${connector.id}:${commentId}`, channel_type: connector.provider, content_type: 'text', text: contentText, public_comment: true })
-  await db.from('omnichannel_webhook_receipts').update({ outcome: 'processed', detail: `Comentario público de ${connector.provider} agregado.`, processed_at: now })
+  await db.from('omnichannel_webhook_receipts').update({
+    outcome: 'processed',
+    detail: inlineText || details?.text
+      ? `Comentario público de ${connector.provider} agregado.`
+      : `Comentario público de ${connector.provider} agregado sin texto: Meta no entregó el cuerpo y el token no pudo leerlo.`,
+    processed_at: now,
+  })
     .eq('connector_id', connector.id).eq('event_type', eventType(connector.provider, 'comment')).eq('external_message_id', commentId)
   return { conversationId: conversation.id }
 }

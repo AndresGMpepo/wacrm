@@ -283,8 +283,19 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
       }
 
       const config = configRows[0]
-
-      const decryptedAccessToken = decrypt(config.access_token)
+      let decryptedAccessToken: string
+      try {
+        decryptedAccessToken = decrypt(config.access_token)
+      } catch (error) {
+        // The webhook is acknowledged before this background work runs. Make
+        // a key mismatch explicit in the container log instead of silently
+        // dropping every inbound message for this account.
+        console.error(
+          '[whatsapp/webhook] Stored access token cannot be decrypted. Keep ENCRYPTION_KEY identical across deployments, then re-save the WhatsApp connection.',
+          { accountId: config.account_id, phoneNumberId, error: error instanceof Error ? error.message : 'unknown' }
+        )
+        continue
+      }
 
       for (let i = 0; i < value.messages.length; i++) {
         const message = value.messages[i]
