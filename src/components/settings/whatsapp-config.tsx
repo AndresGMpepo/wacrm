@@ -74,7 +74,6 @@ export function WhatsAppConfig() {
   // in the row). When false, the saved config is metadata-only and
   // Meta will silently drop every inbound event — that's the
   // multi-number bug that prompted this work.
-  const isRegistered = Boolean(config?.registered_at);
   const lastRegistrationError = config?.last_registration_error ?? null;
 
   const [verifyingRegistration, setVerifyingRegistration] = useState(false);
@@ -88,6 +87,13 @@ export function WhatsAppConfig() {
   };
   const [registrationProbe, setRegistrationProbe] =
     useState<RegistrationProbe | null>(null);
+
+  // Prefer a fresh Meta verification over the historical local marker.
+  // Some test/imported numbers are registered by Meta before this app
+  // ever stores `registered_at`.
+  const isRegistered = registrationProbe
+    ? registrationProbe.live
+    : Boolean(config?.registered_at);
 
   const webhookUrl =
     typeof window !== 'undefined'
@@ -151,6 +157,23 @@ export function WhatsAppConfig() {
         } catch (err) {
           console.error('Health check failed:', err);
           setConnectionStatus('disconnected');
+        }
+
+        // A configuration can predate local registration tracking even
+        // though Meta already delivers messages. Ask Meta on load so the
+        // banner uses the current remote state, not only a local timestamp.
+        try {
+          const registrationResponse = await fetch(
+            '/api/whatsapp/config/verify-registration',
+            { method: 'GET', cache: 'no-store' },
+          );
+          if (registrationResponse.ok) {
+            setRegistrationProbe(
+              (await registrationResponse.json()) as RegistrationProbe,
+            );
+          }
+        } catch (err) {
+          console.warn('Registration verification unavailable:', err);
         }
       } else {
         setConnectionStatus('disconnected');
@@ -268,7 +291,12 @@ export function WhatsAppConfig() {
         setPin('');
       }
 
-      if (accountId) await fetchConfig(accountId);
+      setConfig((current) => current ? {
+        ...current,
+        registered_at: data.registered_at ?? current.registered_at,
+        last_registration_error:
+          data.last_registration_error ?? current.last_registration_error,
+      } : current);
     } catch (err) {
       console.error('Save error:', err);
       toast.error('Failed to save configuration');
@@ -317,14 +345,19 @@ export function WhatsAppConfig() {
       const data = (await res.json()) as RegistrationProbe;
       setRegistrationProbe(data);
       if (data.live) {
-        toast.success('Number is fully wired — Meta is delivering events.');
+        toast.success('Número validado con Meta. Ya puede recibir y enviar mensajes.');
       } else {
         toast.error(
-          'Number is not fully registered. See the checks below for which step failed.',
+          'Meta no confirmó completamente el número. Revisa los detalles de verificación.',
           { duration: 8000 },
         );
       }
-      if (accountId) await fetchConfig(accountId);
+      setConfig((current) => current ? {
+        ...current,
+        registered_at: data.registered_at ?? current.registered_at,
+        last_registration_error:
+          data.last_registration_error ?? current.last_registration_error,
+      } : current);
     } catch (err) {
       console.error('verify-registration failed:', err);
       toast.error('Could not reach the verification endpoint.');

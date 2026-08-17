@@ -11,6 +11,7 @@
 
 const META_API_VERSION = 'v21.0'
 const META_API_BASE = `https://graph.facebook.com/${META_API_VERSION}`
+const META_SEND_TIMEOUT_MS = 15_000
 
 export interface MetaSendResult {
   messageId: string
@@ -49,6 +50,25 @@ async function throwMetaError(response: Response, fallback: string): Promise<nev
     // response body wasn't JSON — keep the fallback
   }
   throw new Error(message)
+}
+
+/** Keeps agents from waiting indefinitely for a Meta send response. */
+async function sendMetaRequest(url: string, init: RequestInit): Promise<Response> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), META_SEND_TIMEOUT_MS)
+
+  try {
+    return await fetch(url, { ...init, signal: controller.signal })
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(
+        'Meta tardó más de 15 segundos en responder. El mensaje no se confirmó; verifica el estado antes de reenviarlo.',
+      )
+    }
+    throw error
+  } finally {
+    clearTimeout(timeout)
+  }
 }
 
 // ============================================================
@@ -257,7 +277,7 @@ export async function sendTextMessage(
   if (contextMessageId) {
     body.context = { message_id: contextMessageId }
   }
-  const response = await fetch(url, {
+  const response = await sendMetaRequest(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -323,7 +343,7 @@ export async function sendMediaMessage(
   }
   if (contextMessageId) body.context = { message_id: contextMessageId }
 
-  const response = await fetch(url, {
+  const response = await sendMetaRequest(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

@@ -140,10 +140,24 @@ export async function GET() {
     )
   }
 
+  // The WABA subscription only permits inbound webhooks. It does not prove
+  // that this specific number completed POST /{phone-number-id}/register.
+  // Keep the registration marker authoritative: otherwise the UI could say
+  // "registered" while Meta rejects every outbound message.
   const live =
     checks.phone_metadata_ok &&
-    (checks.waba_subscribed_to_app ?? false) &&
+    checks.waba_subscribed_to_app === true &&
     checks.locally_marked_registered
+
+  if (
+    checks.phone_metadata_ok &&
+    checks.waba_subscribed_to_app === true &&
+    !checks.locally_marked_registered
+  ) {
+    errors.push(
+      'El número aún no se ha registrado para envío. Ingresa el PIN de verificación en dos pasos de seis dígitos y guarda la configuración.',
+    )
+  }
 
   return NextResponse.json({
     live,

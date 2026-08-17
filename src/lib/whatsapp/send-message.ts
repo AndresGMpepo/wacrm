@@ -438,9 +438,17 @@ export async function sendMessageToConversation(
     const message =
       err instanceof Error ? err.message : 'Unknown Meta API error';
     console.error('[send-message] Meta send failed for all variants:', message);
+    const registrationError = /not fully registered|not registered|133010/i.test(message);
+    const timeoutError = /tardó más de 15 segundos/i.test(message);
+    const guidance = registrationError
+      ? 'El número aún no está registrado en WhatsApp Cloud API. Abre Configuración → WhatsApp, ingresa el PIN de verificación en dos pasos de seis dígitos y guarda la configuración.'
+      : timeoutError
+        ? 'No se confirmó el envío con Meta. Revisa el estado del mensaje antes de reenviarlo para evitar duplicados.'
+        : 'Revisa que el token guardado pertenezca al número configurado y tenga el permiso whatsapp_business_messaging.';
+    const userMessage = `Meta rechazó el envío: ${message}. ${guidance}`;
     throw new SendMessageError(
       'meta_error',
-      `Meta rechazó el envío: ${message}. Revisa que el token guardado pertenezca al número configurado y tenga el permiso whatsapp_business_messaging.`,
+      userMessage,
       502
     );
   }
