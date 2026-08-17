@@ -560,7 +560,7 @@ export function MessageThread({
         if (!res.ok) {
           const reason = data?.error || `HTTP ${res.status}`;
           console.error("Failed to send media:", reason);
-          toast.error(`Failed to send: ${reason}`);
+          toast.error(`No se pudo enviar el archivo: ${reason}`);
           onUpdateMessage(tempId, { status: "failed" });
           // The upload never reached the recipient — GC the orphaned
           // object rather than leaving it in the public bucket forever.
@@ -572,7 +572,7 @@ export function MessageThread({
       } catch (err) {
         console.error("Failed to send media:", err);
         const reason = err instanceof Error ? err.message : "network error";
-        toast.error(`Failed to send: ${reason}`);
+        toast.error(`No se pudo enviar el archivo: ${reason}`);
         onUpdateMessage(tempId, { status: "failed" });
         void deleteAccountMedia(CHAT_MEDIA_BUCKET, payload.path).catch(() => {});
       }
@@ -617,7 +617,7 @@ export function MessageThread({
         if (!res.ok) {
           const reason = data?.error || `HTTP ${res.status}`;
           console.error("Failed to send interactive message:", reason);
-          toast.error(`Failed to send: ${reason}`);
+          toast.error(`No se pudo enviar el mensaje interactivo: ${reason}`);
           onUpdateMessage(tempId, { status: "failed" });
           return;
         }
@@ -626,7 +626,7 @@ export function MessageThread({
       } catch (err) {
         console.error("Failed to send interactive message:", err);
         const reason = err instanceof Error ? err.message : "network error";
-        toast.error(`Failed to send: ${reason}`);
+        toast.error(`No se pudo enviar el mensaje interactivo: ${reason}`);
         onUpdateMessage(tempId, { status: "failed" });
       }
     },
@@ -706,7 +706,7 @@ export function MessageThread({
         if (!res.ok) {
           const reason = payload?.error || `HTTP ${res.status}`;
           console.error("Failed to send template:", reason);
-          toast.error(`Failed to send template: ${reason}`);
+          toast.error(`No se pudo enviar la plantilla: ${reason}`);
           onUpdateMessage(tempId, { status: "failed" });
           return;
         }
@@ -715,7 +715,7 @@ export function MessageThread({
       } catch (err) {
         console.error("Failed to send template:", err);
         const reason = err instanceof Error ? err.message : "network error";
-        toast.error(`Failed to send template: ${reason}`);
+        toast.error(`No se pudo enviar la plantilla: ${reason}`);
         onUpdateMessage(tempId, { status: "failed" });
       }
     },

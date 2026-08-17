@@ -79,6 +79,91 @@ export function IncomingMessageAlert() {
       }
     };
 
+    // Realtime is the fast path, but a browser can briefly lose its socket
+    // after sleep, a network change, or a token refresh. Keep a small
+    // notification inbox poll as a safety net so an incoming WhatsApp message
+    // never becomes silent just because that single INSERT was missed.
+    const observedNotificationIds = new Set<string>();
+    let hydrated = false;
+
+    const showNotification = (notification: Notification) => {
+      if (observedNotificationIds.has(notification.id)) return;
+      observedNotificationIds.add(notification.id);
+
+      if (
+        notification.type !== 'incoming_message' &&
+        notification.type !== 'negative_sentiment' &&
+        notification.type !== 'call_follow_up'
+      ) {
+        return;
+      }
+
+      playAlert(notification.type);
+      const notify = notification.type === 'negative_sentiment'
+        ? toast.error
+        : notification.type === 'call_follow_up'
+          ? toast.warning
+          : toast;
+      notify(notification.title, {
+        description: notification.body,
+        action: notification.conversation_id
+          ? {
+              label: 'Abrir chat',
+              onClick: () => router.push(`/inbox?c=${notification.conversation_id}`),
+            }
+          : undefined,
+      });
+
+      if (
+        document.visibilityState !== 'visible' &&
+        'Notification' in window &&
+        Notification.permission === 'granted'
+      ) {
+        const browserNotification = new Notification(notification.title, {
+          body: notification.body,
+          icon: '/icon',
+        });
+        browserNotification.onclick = () => {
+          window.focus();
+          if (notification.conversation_id) {
+            router.push(`/inbox?c=${notification.conversation_id}`);
+          }
+          browserNotification.close();
+        };
+      }
+    };
+
+    const refreshMissedNotifications = async () => {
+      const { data, error } = await supabase
+        .from('notifications')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(25);
+
+      if (error || !data) return;
+
+      // Seed existing records without replaying old alerts at login. Every
+      // later record that wasn't delivered by Realtime is announced once.
+      if (!hydrated) {
+        data.forEach((row) => observedNotificationIds.add(row.id));
+        hydrated = true;
+        return;
+      }
+      data.slice().reverse().forEach((row) => showNotification(row as Notification));
+    };
+
+    void refreshMissedNotifications();
+    const notificationPoll = window.setInterval(() => {
+      void refreshMissedNotifications();
+    }, 10_000);
+    const rehydrateOnVisible = () => {
+      if (document.visibilityState === 'visible') {
+        void refreshMissedNotifications();
+      }
+    };
+    document.addEventListener('visibilitychange', rehydrateOnVisible);
+
     const channel = supabase
       .channel(`incoming-message-alert:${user.id}`)
       .on(
@@ -90,54 +175,14 @@ export function IncomingMessageAlert() {
           filter: `user_id=eq.${user.id}`,
         },
         (payload) => {
-          const notification = payload.new as Notification;
-          if (
-            notification.type !== 'incoming_message' &&
-            notification.type !== 'negative_sentiment' &&
-            notification.type !== 'call_follow_up'
-          ) {
-            return;
-          }
-
-          playAlert(notification.type);
-          const notify = notification.type === 'negative_sentiment'
-            ? toast.error
-            : notification.type === 'call_follow_up'
-              ? toast.warning
-              : toast;
-          notify(notification.title, {
-            description: notification.body,
-            action: notification.conversation_id
-              ? {
-                  label: 'Abrir chat',
-                  onClick: () =>
-                    router.push(`/inbox?c=${notification.conversation_id}`),
-                }
-              : undefined,
-          });
-
-          if (
-            document.visibilityState !== 'visible' &&
-            'Notification' in window &&
-            Notification.permission === 'granted'
-          ) {
-            const browserNotification = new Notification(notification.title, {
-              body: notification.body,
-              icon: '/icon',
-            });
-            browserNotification.onclick = () => {
-              window.focus();
-              if (notification.conversation_id) {
-                router.push(`/inbox?c=${notification.conversation_id}`);
-              }
-              browserNotification.close();
-            };
-          }
+          showNotification(payload.new as Notification);
         }
       )
       .subscribe();
 
     return () => {
+      window.clearInterval(notificationPoll);
+      document.removeEventListener('visibilitychange', rehydrateOnVisible);
       supabase.removeChannel(channel);
       document.removeEventListener('pointerdown', unlockAudio);
       document.removeEventListener('keydown', unlockAudio);
