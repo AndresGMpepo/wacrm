@@ -10,16 +10,15 @@ import {
 } from "@/lib/inbox/conversations";
 import type { Conversation, Message, Contact, ConversationStatus } from "@/types";
 import { useRealtime } from "@/hooks/use-realtime";
-import { ConversationList } from "@/components/inbox/conversation-list";
+import { ConversationList, type InboxChannelFilter } from "@/components/inbox/conversation-list";
 import { MessageThread } from "@/components/inbox/message-thread";
 import { ContactSidebar } from "@/components/inbox/contact-sidebar";
-import { toast } from "sonner";
 import { WifiOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // Remembers the agent's show/hide choice for the desktop contact panel
 // across reloads and sessions (device-scoped, like the theme prefs).
-const CONTACT_PANEL_STORAGE_KEY = "wacrm:inbox:contact-panel-open";
+const CONTACT_PANEL_STORAGE_KEY = "nexoomni:inbox:contact-panel-open";
 
 // `useSearchParams` (the `?c=<id>` deep link below) requires a Suspense
 // boundary or the production build bails to CSR and errors out. Thin
@@ -42,6 +41,10 @@ function InboxPageInner() {
    * automatically instead of showing the empty center panel.
    */
   const deepLinkConvId = searchParams.get("c");
+  const requestedChannel = searchParams.get("channel");
+  const channelFilter: InboxChannelFilter = ["whatsapp", "facebook", "instagram", "yeastar_live_chat"].includes(requestedChannel ?? "")
+    ? requestedChannel as Exclude<InboxChannelFilter, "all">
+    : "all";
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversation, setActiveConversation] =
@@ -492,10 +495,19 @@ function InboxPageInner() {
       // Reflect the selection in the URL so a refresh lands the user
       // back in the same thread, and so copy-paste links work. Use
       // replace() to avoid polluting browser history with every click.
-      router.replace(`/inbox?c=${conv.id}`, { scroll: false });
+      const params = new URLSearchParams(searchParams.toString());
+      params.set("c", conv.id);
+      router.replace(`/inbox?${params.toString()}`, { scroll: false });
     },
-    [activeConversation?.id, router]
+    [activeConversation?.id, router, searchParams]
   );
+
+  const handleChannelFilterChange = useCallback((next: InboxChannelFilter) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (next === "all") params.delete("channel");
+    else params.set("channel", next);
+    router.replace(`/inbox${params.size ? `?${params.toString()}` : ""}`, { scroll: false });
+  }, [router, searchParams]);
 
   // Mobile "back" — deselect the conversation so the list pane comes
   // back. Also clears the ?c= param so a refresh lands on the list
@@ -599,6 +611,8 @@ function InboxPageInner() {
             conversations={conversations}
             onConversationsLoaded={handleConversationsLoaded}
             resyncToken={resyncToken}
+            channelFilter={channelFilter}
+            onChannelFilterChange={handleChannelFilterChange}
           />
         </div>
 

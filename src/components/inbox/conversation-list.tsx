@@ -34,6 +34,8 @@ interface ConversationListProps {
    * or the tab was throttled. Optional so existing callers keep working.
    */
   resyncToken?: number;
+  channelFilter?: InboxChannelFilter;
+  onChannelFilterChange?: (channel: InboxChannelFilter) => void;
 }
 
 const STATUS_COLORS: Record<ConversationStatus, string> = {
@@ -45,6 +47,28 @@ const STATUS_COLORS: Record<ConversationStatus, string> = {
 
 
 type InboxFilter = ConversationStatus | "all" | "unread";
+export type InboxChannelFilter = "all" | "whatsapp" | "facebook" | "instagram" | "yeastar_live_chat";
+
+function normalizedChannel(channel: Conversation["channel_type"]): Exclude<InboxChannelFilter, "all"> | null {
+  switch (channel) {
+    case "whatsapp":
+    case "zernio_whatsapp": return "whatsapp";
+    case "facebook":
+    case "zernio_facebook": return "facebook";
+    case "instagram":
+    case "zernio_instagram": return "instagram";
+    case "yeastar_live_chat": return "yeastar_live_chat";
+    default: return null;
+  }
+}
+
+const CHANNEL_OPTIONS: { label: string; value: InboxChannelFilter }[] = [
+  { label: "Todos los canales", value: "all" },
+  { label: "WhatsApp", value: "whatsapp" },
+  { label: "Facebook", value: "facebook" },
+  { label: "Instagram", value: "instagram" },
+  { label: "Chat web", value: "yeastar_live_chat" },
+];
 
 export function ConversationList({
   activeConversationId,
@@ -52,6 +76,8 @@ export function ConversationList({
   conversations,
   onConversationsLoaded,
   resyncToken = 0,
+  channelFilter = "all",
+  onChannelFilterChange,
 }: ConversationListProps) {
   const t = useTranslations("Inbox.conversationList");
   
@@ -167,6 +193,10 @@ export function ConversationList({
       result = result.filter((c) => c.status === filter);
     }
 
+    if (channelFilter !== "all") {
+      result = result.filter((c) => normalizedChannel(c.channel_type) === channelFilter);
+    }
+
     // Contact-based filters (tags via OR logic, exact company match).
     if (selectedTagIds.length > 0 || selectedCompany !== null) {
       result = result.filter((c) =>
@@ -188,7 +218,7 @@ export function ConversationList({
     }
 
     return result;
-  }, [conversations, filter, search, selectedTagIds, selectedCompany]);
+  }, [conversations, filter, channelFilter, search, selectedTagIds, selectedCompany]);
 
   const toggleTag = useCallback((id: string) => {
     setSelectedTagIds((prev) =>
@@ -218,6 +248,7 @@ export function ConversationList({
   );
 
   const activeFilter = FILTER_OPTIONS.find((o) => o.value === filter);
+  const activeChannel = CHANNEL_OPTIONS.find((option) => option.value === channelFilter);
 
   return (
     // w-full on mobile so the list occupies the whole viewport when it's
@@ -258,6 +289,24 @@ export function ConversationList({
                   )}
                 >
                   {opt.label}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger className="inline-flex h-7 items-center justify-center gap-1 rounded-md px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground">
+              {activeChannel?.label ?? "Todos los canales"}
+              <ChevronDown className="h-3 w-3" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="border-border bg-popover">
+              {CHANNEL_OPTIONS.map((option) => (
+                <DropdownMenuItem
+                  key={option.value}
+                  onClick={() => onChannelFilterChange?.(option.value)}
+                  className={cn("text-sm", channelFilter === option.value ? "text-primary" : "text-popover-foreground")}
+                >
+                  {option.label}
                 </DropdownMenuItem>
               ))}
             </DropdownMenuContent>
@@ -506,19 +555,32 @@ function ConversationItem({
             />
           </div>
         </div>
-        {conversation.channel_source_label ? (
+        {conversation.channel_type ? (
           <p
             className="mt-1 truncate text-[10px] font-medium text-primary"
             title={conversation.channel_source_url ?? undefined}
           >
-            {conversation.social_comment_id
-              ? "Comentario público"
-              : conversation.channel_type === "yeastar_live_chat"
-                ? "Chat web"
-                : "Canal"}: {conversation.channel_source_label}
+            {channelOriginLabel(conversation)}
+            {conversation.channel_source_label ? ` · ${conversation.channel_source_label}` : ""}
           </p>
         ) : null}
       </div>
     </button>
   );
+}
+
+function channelOriginLabel(conversation: Conversation) {
+  if (conversation.social_comment_id) {
+    return conversation.channel_type === "instagram" ? "Comentario público de Instagram" : "Comentario público de Facebook";
+  }
+  switch (conversation.channel_type) {
+    case "whatsapp": return "WhatsApp";
+    case "zernio_whatsapp": return "WhatsApp";
+    case "facebook": return "Facebook Messenger";
+    case "zernio_facebook": return "Facebook Messenger";
+    case "instagram": return "Instagram";
+    case "zernio_instagram": return "Instagram";
+    case "yeastar_live_chat": return "Chat web";
+    default: return "Canal";
+  }
 }

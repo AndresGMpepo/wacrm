@@ -470,8 +470,11 @@ export function MessageThread({
       setReplyTo(null);
 
       try {
+        const isZernioConversation = conversation.channel_type?.startsWith("zernio_");
         const sendUrl = conversation.channel_type === "yeastar_live_chat"
           ? "/api/omnichannel/yeastar/send"
+          : isZernioConversation
+            ? "/api/omnichannel/zernio/send"
           : conversation.channel_type === "facebook" || conversation.channel_type === "instagram"
             ? "/api/omnichannel/meta/send"
             : "/api/whatsapp/send";
@@ -480,7 +483,7 @@ export function MessageThread({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             conversation_id: conversation.id,
-            ...(conversation.channel_type === "yeastar_live_chat" || conversation.channel_type === "facebook" || conversation.channel_type === "instagram" ? {} : { message_type: "text" }),
+            ...(conversation.channel_type === "yeastar_live_chat" || conversation.channel_type === "facebook" || conversation.channel_type === "instagram" || isZernioConversation ? {} : { message_type: "text" }),
             content_text: text,
             reply_to_message_id: replyToId,
           }),

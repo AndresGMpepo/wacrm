@@ -31,7 +31,7 @@ type ContactConversation = {
   status: "open" | "pending" | "closed";
   last_message_text: string | null;
   last_message_at: string | null;
-  channel_type: "whatsapp" | "yeastar_live_chat" | "facebook" | "instagram" | "tiktok" | null;
+  channel_type: "whatsapp" | "yeastar_live_chat" | "facebook" | "instagram" | "tiktok" | "zernio_whatsapp" | "zernio_facebook" | "zernio_instagram" | null;
   channel_source_label: string | null;
 };
 
@@ -158,8 +158,9 @@ export function ContactSidebar({ contact, conversationId, internalNotesOpenSigna
   const initials = displayName.charAt(0).toUpperCase();
   const channelLabel = (conversation: ContactConversation) => {
     if (conversation.channel_type === "yeastar_live_chat") return conversation.channel_source_label ? `Chat web · ${conversation.channel_source_label}` : "Chat web Yeastar";
-    if (conversation.channel_type === "facebook") return "Facebook";
-    if (conversation.channel_type === "instagram") return "Instagram";
+    if (conversation.channel_type === "facebook" || conversation.channel_type === "zernio_facebook") return "Facebook";
+    if (conversation.channel_type === "instagram" || conversation.channel_type === "zernio_instagram") return "Instagram";
+    if (conversation.channel_type === "zernio_whatsapp") return "WhatsApp";
     if (conversation.channel_type === "tiktok") return "TikTok";
     return "WhatsApp";
   };
