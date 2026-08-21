@@ -10,6 +10,8 @@ const MAX_ACCOUNT_NAME = 80
 const SUBSCRIPTION_STATUSES = ['active', 'trial', 'suspended', 'cancelled'] as const
 const MAX_REFERENCE = 160
 const MAX_NOTES = 4000
+const MAX_OWNER_NAME = 120
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 function parseEndDate(value: unknown) {
   if (value === '' || value === null || value === undefined) return null
@@ -42,6 +44,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ac
     const contractReference = typeof body?.contract_reference === 'string' ? body.contract_reference.trim() : ''
     const invoiceReference = typeof body?.invoice_reference === 'string' ? body.invoice_reference.trim() : ''
     const internalNotes = typeof body?.internal_notes === 'string' ? body.internal_notes.trim() : ''
+    const ownerName = typeof body?.owner_name === 'string' ? body.owner_name.trim() : undefined
+    const ownerEmail = typeof body?.owner_email === 'string' ? body.owner_email.trim().toLowerCase() : undefined
     if (!name || name.length > MAX_ACCOUNT_NAME) return NextResponse.json({ error: 'Indica un nombre comercial de hasta 80 caracteres.' }, { status: 400 })
     if (!(PLAN_CODES as readonly string[]).includes(planCode)) return NextResponse.json({ error: 'El plan seleccionado no es válido.' }, { status: 400 })
     if (!Number.isInteger(seatLimit) || seatLimit < 1 || seatLimit > 1000) return NextResponse.json({ error: 'Los usuarios contratados deben estar entre 1 y 1000.' }, { status: 400 })
@@ -50,8 +54,28 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ac
 
     if (!Number.isInteger(graceDays) || graceDays < 0 || graceDays > 90) return NextResponse.json({ error: 'El período de gracia debe estar entre 0 y 90 días.' }, { status: 400 })
     if (contractReference.length > MAX_REFERENCE || invoiceReference.length > MAX_REFERENCE || internalNotes.length > MAX_NOTES) return NextResponse.json({ error: 'Una referencia o nota excede el tamaño permitido.' }, { status: 400 })
+    if (ownerName !== undefined && (!ownerName || ownerName.length > MAX_OWNER_NAME)) return NextResponse.json({ error: 'Indica un nombre válido para el propietario.' }, { status: 400 })
+    if (ownerEmail !== undefined && !EMAIL_RE.test(ownerEmail)) return NextResponse.json({ error: 'Indica un correo válido para el propietario.' }, { status: 400 })
 
     const admin = adminClient()
+    const { data: account, error: accountLookupError } = await admin.from('accounts').select('owner_user_id').eq('id', accountId).maybeSingle()
+    if (accountLookupError) throw accountLookupError
+    if (!account) return NextResponse.json({ error: 'La cuenta no existe.' }, { status: 404 })
+    const { data: ownerProfile, error: ownerProfileError } = await admin.from('profiles').select('full_name, email').eq('account_id', accountId).eq('user_id', account.owner_user_id).maybeSingle()
+    if (ownerProfileError) throw ownerProfileError
+    if (ownerName !== undefined || ownerEmail !== undefined) {
+      const currentEmail = ownerProfile?.email?.trim().toLowerCase() ?? ''
+      if (ownerEmail !== undefined && ownerEmail !== currentEmail) {
+        const { error: authUpdateError } = await admin.auth.admin.updateUserById(account.owner_user_id, { email: ownerEmail, email_confirm: false })
+        if (authUpdateError) return NextResponse.json({ error: `No se pudo actualizar el correo del propietario: ${authUpdateError.message}` }, { status: 400 })
+      }
+      const { error: ownerUpdateError } = await admin.from('profiles').update({
+        ...(ownerName !== undefined ? { full_name: ownerName } : {}),
+        ...(ownerEmail !== undefined ? { email: ownerEmail } : {}),
+        updated_at: new Date().toISOString(),
+      }).eq('account_id', accountId).eq('user_id', account.owner_user_id)
+      if (ownerUpdateError) throw ownerUpdateError
+    }
     const { data: current } = await admin.from('account_subscriptions').select('plan_code, seat_limit, status, ends_at, grace_days, contract_reference, invoice_reference, internal_notes').eq('account_id', accountId).maybeSingle()
     const { count, error: countError } = await admin.from('profiles').select('*', { count: 'exact', head: true }).eq('account_id', accountId)
     if (countError) throw countError
@@ -61,7 +85,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ac
     if (accountError) throw accountError
     const { error: subscriptionError } = await admin.from('account_subscriptions').update({ plan_code: planCode, seat_limit: seatLimit, status, ends_at: endsAt, grace_days: body?.grace_days === undefined ? current?.grace_days ?? 0 : graceDays, contract_reference: body?.contract_reference === undefined ? current?.contract_reference ?? null : contractReference || null, invoice_reference: body?.invoice_reference === undefined ? current?.invoice_reference ?? null : invoiceReference || null, internal_notes: body?.internal_notes === undefined ? current?.internal_notes ?? null : internalNotes || null }).eq('account_id', accountId)
     if (subscriptionError) throw subscriptionError
-    const { error: auditError } = await admin.from('platform_commercial_audit').insert({ account_id: accountId, account_name: name, actor_user_id: operator.user.id, action: status !== current?.status ? `service_${status}` : 'commercial_record_updated', details: { before: current, after: { plan_code: planCode, seat_limit: seatLimit, status, ends_at: endsAt, grace_days: graceDays, contract_reference: contractReference || null, invoice_reference: invoiceReference || null, internal_notes: internalNotes || null } } })
+    const { error: auditError } = await admin.from('platform_commercial_audit').insert({ account_id: accountId, account_name: name, actor_user_id: operator.user.id, action: ownerName !== undefined || ownerEmail !== undefined ? 'owner_profile_updated' : status !== current?.status ? `service_${status}` : 'commercial_record_updated', details: { before: { subscription: current, owner: ownerProfile }, after: { plan_code: planCode, seat_limit: seatLimit, status, ends_at: endsAt, grace_days: graceDays, contract_reference: contractReference || null, invoice_reference: invoiceReference || null, internal_notes: internalNotes || null, owner_name: ownerName ?? ownerProfile?.full_name ?? null, owner_email: ownerEmail ?? ownerProfile?.email ?? null } } })
     if (auditError) throw auditError
     return NextResponse.json({ message: 'Plan y límite de usuarios actualizados.' })
   } catch (error) {

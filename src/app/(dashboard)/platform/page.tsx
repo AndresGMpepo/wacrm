@@ -61,7 +61,7 @@ export default function PlatformPage() {
   const [submitting, setSubmitting] = useState(false)
   const [allowed, setAllowed] = useState(true)
   const [editing, setEditing] = useState<PlatformAccount | null>(null)
-  const [editForm, setEditForm] = useState({ account_name: '', plan_code: 'ai' as PlanCode, seat_limit: '1', status: 'active' as SubscriptionStatus, ends_at: '', grace_days: '0', contract_reference: '', invoice_reference: '', internal_notes: '' })
+  const [editForm, setEditForm] = useState({ account_name: '', owner_name: '', owner_email: '', plan_code: 'ai' as PlanCode, seat_limit: '1', status: 'active' as SubscriptionStatus, ends_at: '', grace_days: '0', contract_reference: '', invoice_reference: '', internal_notes: '' })
   const [actionId, setActionId] = useState<string | null>(null)
   const [form, setForm] = useState({ account_name: '', owner_name: '', owner_email: '', plan_code: 'ai' as PlanCode, seat_limit: '1', access_days: '0' })
   const [managingAccount, setManagingAccount] = useState<PlatformAccount | null>(null)
@@ -116,7 +116,7 @@ export default function PlatformPage() {
       return
     }
     setEditing(account)
-    setEditForm({ account_name: account.name, plan_code: account.subscription.plan_code, seat_limit: String(account.subscription.seat_limit), status: account.subscription.status, ends_at: dateInputValue(account.subscription.ends_at), grace_days: String(account.subscription.grace_days ?? 0), contract_reference: account.subscription.contract_reference ?? '', invoice_reference: account.subscription.invoice_reference ?? '', internal_notes: account.subscription.internal_notes ?? '' })
+    setEditForm({ account_name: account.name, owner_name: account.owner?.full_name ?? '', owner_email: account.owner?.email ?? '', plan_code: account.subscription.plan_code, seat_limit: String(account.subscription.seat_limit), status: account.subscription.status, ends_at: dateInputValue(account.subscription.ends_at), grace_days: String(account.subscription.grace_days ?? 0), contract_reference: account.subscription.contract_reference ?? '', invoice_reference: account.subscription.invoice_reference ?? '', internal_notes: account.subscription.internal_notes ?? '' })
   }
 
   const saveEdit = async (event: React.FormEvent) => {
@@ -275,6 +275,8 @@ export default function PlatformPage() {
         <CardHeader><CardTitle>Editar cliente</CardTitle><CardDescription>El límite no puede ser menor que los usuarios ya activos.</CardDescription></CardHeader>
         <CardContent><form onSubmit={saveEdit} className="grid gap-4 md:grid-cols-2">
           <div className="space-y-2"><Label htmlFor="edit-account-name">Nombre comercial</Label><Input id="edit-account-name" value={editForm.account_name} onChange={(event) => setEditForm((current) => ({ ...current, account_name: event.target.value }))} required maxLength={80} /></div>
+          <div className="space-y-2"><Label htmlFor="edit-owner-name">Nombre del propietario</Label><Input id="edit-owner-name" value={editForm.owner_name} onChange={(event) => setEditForm((current) => ({ ...current, owner_name: event.target.value }))} required maxLength={120} /></div>
+          <div className="space-y-2"><Label htmlFor="edit-owner-email">Correo del propietario</Label><Input id="edit-owner-email" type="email" value={editForm.owner_email} onChange={(event) => setEditForm((current) => ({ ...current, owner_email: event.target.value }))} required /></div>
           <div className="space-y-2"><Label htmlFor="edit-seat-limit">Usuarios contratados</Label><Input id="edit-seat-limit" type="number" min={1} max={1000} value={editForm.seat_limit} onChange={(event) => setEditForm((current) => ({ ...current, seat_limit: event.target.value }))} required /></div>
           <div className="space-y-2"><Label htmlFor="edit-ends-at">Acceso hasta</Label><Input id="edit-ends-at" type="date" value={editForm.ends_at} onChange={(event) => setEditForm((current) => ({ ...current, ends_at: event.target.value }))} /><p className="text-xs text-muted-foreground">Déjalo vacío para acceso sin vencimiento.</p></div>
           <div className="space-y-2"><Label htmlFor="edit-grace-days">Días de gracia</Label><Input id="edit-grace-days" type="number" min={0} max={90} value={editForm.grace_days} onChange={(event) => setEditForm((current) => ({ ...current, grace_days: event.target.value }))} /><p className="text-xs text-muted-foreground">Tiempo adicional antes de bloquear un servicio vencido.</p></div>
