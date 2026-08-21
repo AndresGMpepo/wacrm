@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Loader2, LockKeyhole, Phone, Save } from 'lucide-react';
+import { ChevronDown, Loader2, LockKeyhole, Phone, Save } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/hooks/use-auth';
 import { useTelephony } from '@/components/telephony/telephony-provider';
@@ -164,6 +164,43 @@ export function TelephonyConfig() {
         </CardContent>
       </Card> : null}
       {canManageIntegration ? <YeastarMonitoringConfig /> : null}
+      {canManageIntegration ? <Card className="mt-6">
+        <CardHeader>
+          <CardTitle>Manual: transcripción y resumen de llamadas</CardTitle>
+          <CardDescription>Configuración necesaria para que Yeastar envíe los CDR y NexoOmni sincronice la IA.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4 text-sm text-muted-foreground">
+          <details open className="rounded-md border border-border p-3">
+            <summary className="flex cursor-pointer items-center gap-2 font-medium text-foreground"><ChevronDown className="size-4" />1. Activar AI Call Transcription en Yeastar</summary>
+            <ol className="mt-3 list-decimal space-y-2 pl-5">
+              <li>Confirma que el PBX usa P-Series Software Edition y firmware <strong>83.23.0.83 o posterior</strong>. Tu versión <strong>83.24.0.30</strong> cumple este requisito.</li>
+              <li>En Yeastar abre la configuración global de <strong>AI Transcription</strong> y activa <strong>AI Call Transcription</strong>.</li>
+              <li>Selecciona el proveedor de transcripción y, si quieres resúmenes, un proveedor LLM compatible.</li>
+              <li>En cada extensión de agente habilita el permiso de transcripción, el idioma y <strong>Automatic Call Transcription</strong>.</li>
+              <li>Activa <strong>Show Transcription Text After the Call</strong> para que Yeastar genere y deje disponible el resultado.</li>
+            </ol>
+          </details>
+          <details className="rounded-md border border-border p-3">
+            <summary className="flex cursor-pointer items-center gap-2 font-medium text-foreground"><ChevronDown className="size-4" />2. Configurar el webhook de eventos</summary>
+            <div className="mt-3 space-y-2">
+              <p>En la configuración de Webhook de Yeastar usa la URL mostrada arriba en el bloque de monitoreo.</p>
+              <p>Suscribe como mínimo los eventos <strong>30011 Call State Changed</strong> y <strong>30012 Call End Details Notification</strong>.</p>
+              <p>El evento 30012 no se llama “IA”: avisa que se generó el CDR. NexoOmni usa el identificador de la llamada para consultar la transcripción y el resumen mediante la API CDR 2.0.</p>
+              <p>El secreto configurado en Yeastar debe coincidir exactamente con el secreto guardado en el bloque de monitoreo de NexoOmni.</p>
+            </div>
+          </details>
+          <details className="rounded-md border border-border p-3">
+            <summary className="flex cursor-pointer items-center gap-2 font-medium text-foreground"><ChevronDown className="size-4" />3. Verificar una llamada</summary>
+            <ol className="mt-3 list-decimal space-y-2 pl-5">
+              <li>Realiza una llamada atendida desde una extensión autorizada.</li>
+              <li>Espera a que finalice la llamada y a que Yeastar complete el análisis.</li>
+              <li>Revisa los recibos recientes del webhook en el bloque de monitoreo.</li>
+              <li>Consulta el apartado <strong>Transcripciones de llamadas</strong> en la navegación de NexoOmni.</li>
+            </ol>
+          </details>
+          <p className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-amber-200"><strong>Retención:</strong> Yeastar puede limpiar grabaciones y registros por antigüedad o almacenamiento. NexoOmni conserva su copia de la transcripción, resumen y datos de trazabilidad una vez sincronizados.</p>
+        </CardContent>
+      </Card> : null}
     </div>
   );
 }

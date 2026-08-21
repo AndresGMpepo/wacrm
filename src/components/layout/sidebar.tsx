@@ -106,6 +106,7 @@ const navItems: NavItem[] = [
   { href: "/broadcasts", labelKey: "broadcasts", icon: Radio },
   { href: "/automations", labelKey: "automations", icon: Zap },
   { href: "/reports", labelKey: "reports", icon: ChartNoAxesCombined, adminOnly: true },
+  { href: "/call-transcriptions", labelKey: "callTranscriptions", icon: PhoneCall, adminOnly: true },
   { href: "/flows", labelKey: "flows", icon: Workflow },
   { href: "/supervision", labelKey: "supervision", icon: ShieldAlert },
   { href: "/agents", labelKey: "aiAgents", icon: Bot },

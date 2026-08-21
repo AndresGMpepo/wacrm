@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto'
 import { NextResponse } from 'next/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { decrypt } from '@/lib/whatsapp/encryption'
+import { findExistingContact } from '@/lib/contacts/dedupe'
 
 export const dynamic = 'force-dynamic'
 
@@ -13,11 +14,33 @@ type CallMember = {
 }
 
 type CallParty = { from?: unknown; to?: unknown; channel_id?: string; member_status?: string; call_path?: string }
+type JsonRecord = Record<string, unknown>
+type CachedToken = { value: string; expiresAt: number }
+const tokenCache = new Map<string, CachedToken>()
 type TrackedCall = { extension: string; channelId: string; status: string; callPath: string | null; peerNumber: string | null; direction: 'inbound' | 'outbound' | 'internal' | 'unknown' }
 type EventChannel = { channelId: string; memberType: 'extension' | 'inbound' | 'outbound' | 'internal'; memberNumber: string | null; fromNumber: string | null; toNumber: string | null; status: string }
 
 function admin() {
   return createAdminClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
+}
+
+function apiUrl(pbxUrl: string, endpoint: string) {
+  return new URL(`openapi/v1.0/${endpoint}`, `${pbxUrl.replace(/\/+$/, '')}/`)
+}
+
+async function accessToken(accountId: string, pbxUrl: string, clientId: string, clientSecret: string) {
+  const cached = tokenCache.get(accountId)
+  if (cached && cached.expiresAt > Date.now()) return cached.value
+  const response = await fetch(apiUrl(pbxUrl, 'get_token'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'User-Agent': 'OpenAPI' },
+    body: JSON.stringify({ username: clientId, password: clientSecret }),
+    signal: AbortSignal.timeout(15_000),
+  })
+  const result = await response.json().catch(() => ({})) as { errcode?: number; errmsg?: string; access_token?: string; access_token_expire_time?: number }
+  if (!response.ok || result.errcode !== 0 || !result.access_token) throw new Error(result.errmsg || 'Yeastar no aceptó las credenciales OpenAPI.')
+  tokenCache.set(accountId, { value: result.access_token, expiresAt: Date.now() + Math.max(60, (result.access_token_expire_time ?? 1800) - 60) * 1000 })
+  return result.access_token
 }
 
 function validSignature(rawBody: string, secret: string, received: string | null) {
@@ -30,19 +53,84 @@ function validSignature(rawBody: string, secret: string, received: string | null
   return actual.length === expectedBuffer.length && timingSafeEqual(actual, expectedBuffer)
 }
 
-function parseEvent(raw: unknown): { eventType: string | null; callId: string; members: CallMember[] } | null {
+function parseEvent(raw: unknown): { eventType: string | null; callId: string; members: CallMember[]; payload: JsonRecord } | null {
   if (!raw || typeof raw !== 'object') return null
   const body = raw as { type?: unknown; msg?: unknown }
   const eventType = body.type == null ? null : String(body.type)
-  if (Number(body.type) !== 30011) return null
+  if (![30011, 30012].includes(Number(body.type))) return null
   const message = typeof body.msg === 'string'
     ? JSON.parse(body.msg) as unknown
     : body.msg
   if (!message || typeof message !== 'object') return null
   const value = message as { call_id?: unknown; members?: unknown }
-  return value.call_id != null && Array.isArray(value.members)
-    ? { eventType, callId: String(value.call_id), members: value.members as CallMember[] }
+  return value.call_id != null
+    ? { eventType, callId: String(value.call_id), members: Array.isArray(value.members) ? value.members as CallMember[] : [], payload: value as JsonRecord }
     : null
+}
+
+function firstText(value: unknown, keys: string[]): string | null {
+  if (!value || typeof value !== 'object') return null
+  const record = value as JsonRecord
+  for (const key of keys) if (typeof record[key] === 'string' && record[key].trim()) return record[key].trim()
+  return null
+}
+
+function findValue(value: unknown, keys: string[]): unknown {
+  if (!value || typeof value !== 'object') return undefined
+  if (Array.isArray(value)) { for (const item of value) { const found = findValue(item, keys); if (found !== undefined) return found } return undefined }
+  const record = value as JsonRecord
+  for (const key of keys) if (record[key] !== undefined && record[key] !== null) return record[key]
+  for (const child of Object.values(record)) { const found = findValue(child, keys); if (found !== undefined) return found }
+  return undefined
+}
+
+function textFromResponse(value: unknown, keys: string[]) { return firstText(findValue(value, keys), ['text', 'value', 'content', 'summary']) ?? firstText(value, keys) }
+
+function scalarText(value: unknown) { return typeof value === 'string' && value.trim() ? value.trim() : null }
+function firstNestedText(value: unknown, keys: string[]): string | null {
+  if (!value || typeof value !== 'object') return null
+  if (Array.isArray(value)) { for (const item of value) { const found = firstNestedText(item, keys); if (found) return found } return null }
+  const record = value as JsonRecord
+  for (const key of keys) {
+    const found = scalarText(record[key])
+    if (found) return found
+  }
+  for (const child of Object.values(record)) { const found = firstNestedText(child, keys); if (found) return found }
+  return null
+}
+
+function firstNestedNumber(value: unknown, keys: string[]) {
+  const textValue = firstNestedText(value, keys)
+  if (!textValue) return null
+  const number = Number(textValue)
+  return Number.isFinite(number) ? number : null
+}
+
+async function fetchAiResult(db: ReturnType<typeof admin>, accountId: string, callId: string, payload: JsonRecord) {
+  const [monitoring, telephony] = await Promise.all([
+    db.from('yeastar_monitoring_configs').select('api_client_id, api_client_secret').eq('account_id', accountId).maybeSingle(),
+    db.from('telephony_configs').select('pbx_url').eq('account_id', accountId).eq('provider', 'yeastar').maybeSingle(),
+  ])
+  if (monitoring.error) throw monitoring.error
+  if (telephony.error) throw telephony.error
+  if (!monitoring.data?.api_client_id || !monitoring.data.api_client_secret || !telephony.data?.pbx_url) throw new Error('Faltan las credenciales OpenAPI de Yeastar para consultar la IA.')
+  const token = await accessToken(accountId, telephony.data.pbx_url, decrypt(monitoring.data.api_client_id), decrypt(monitoring.data.api_client_secret))
+  const cdrId = String(findValue(payload, ['cdr_id', 'cdrId', 'id']) ?? callId)
+  const requestYeastar = async (endpoint: string) => {
+    const url = apiUrl(telephony.data!.pbx_url, endpoint)
+    url.searchParams.set('access_token', token)
+    url.searchParams.set('id', cdrId)
+    url.searchParams.set('call_id', callId)
+    const response = await fetch(url, { headers: { 'User-Agent': 'OpenAPI' }, signal: AbortSignal.timeout(15_000) })
+    const result = await response.json().catch(() => ({}))
+    if (!response.ok || (typeof result === 'object' && result && 'errcode' in result && result.errcode !== 0)) return null
+    return result
+  }
+  const context = await requestYeastar('cdr/getaicontext')
+  const summary = await requestYeastar('cdr/getaisummary')
+  const transcript = textFromResponse(context, ['transcript', 'transcription', 'text', 'content'])
+  const summaryText = textFromResponse(summary, ['summary', 'call_summary', 'text', 'content'])
+  return { cdrId, transcript, summary: summaryText, raw: { context, summary } }
 }
 
 async function receipt(db: ReturnType<typeof admin>, accountId: string, outcome: 'processed' | 'ignored' | 'rejected' | 'invalid', detail: string, eventType?: string | null, callId?: string | null) {
@@ -184,6 +272,47 @@ export async function POST(request: Request, context: { params: Promise<{ accoun
     const payload = JSON.parse(rawBody) as { type?: unknown; event?: unknown }
     await receipt(db, accountId, 'ignored', 'Evento válido recibido, pero no es 30011 Call State Changed.', payload.type == null ? (payload.event == null ? null : String(payload.event)) : String(payload.type))
     return NextResponse.json({ received: true })
+  }
+
+  if (event.eventType === '30012') {
+    try {
+      const ai = await fetchAiResult(db, accountId, event.callId, event.payload)
+      const customerPhone = firstNestedText(event.payload, ['customer_phone', 'caller_number', 'customerNumber', 'phone', 'number'])
+      const customerName = firstNestedText(event.payload, ['customer_name', 'caller_name', 'contact_name', 'name'])
+      const customerEmail = firstNestedText(event.payload, ['customer_email', 'email'])
+      const agentExtension = firstNestedText(event.payload, ['agent_extension', 'extension_number', 'extension'])
+      const recordingUrl = firstNestedText(event.payload, ['recording_url', 'record_url', 'recordingUrl', 'recording'])
+      const durationValue = firstNestedNumber(event.payload, ['duration', 'duration_seconds', 'talk_duration'])
+      const contact = customerPhone ? await findExistingContact(db, accountId, customerPhone) : null
+      const contactRow = contact ? (await db.from('contacts').select('id, name, email, phone').eq('id', contact.id).maybeSingle()).data : null
+      const agentConfig = agentExtension ? (await db.from('telephony_user_configs').select('user_id').eq('account_id', accountId).eq('provider', 'yeastar').eq('extension', agentExtension).maybeSingle()).data : null
+      const { error } = await db.from('yeastar_call_transcriptions').upsert({
+        account_id: accountId,
+        call_id: event.callId,
+        cdr_id: ai?.cdrId ?? null,
+        customer_phone: customerPhone ?? contactRow?.phone ?? null,
+        customer_name: customerName ?? contactRow?.name ?? null,
+        customer_email: customerEmail ?? contactRow?.email ?? null,
+        contact_id: contactRow?.id ?? null,
+        agent_user_id: agentConfig?.user_id ?? null,
+        agent_extension: agentExtension,
+        duration_seconds: durationValue ? Math.round(durationValue) : null,
+        recording_url: recordingUrl,
+        transcript: ai?.transcript,
+        summary: ai?.summary,
+        transcription_status: ai?.transcript || ai?.summary ? 'completed' : 'unavailable',
+        yeastar_payload: { event: event.payload, ai: ai?.raw ?? null },
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'account_id,call_id' })
+      if (error) throw error
+      await receipt(db, accountId, 'processed', 'CDR 30012 sincronizado con transcripción y resumen IA.', event.eventType, event.callId)
+      return NextResponse.json({ received: true })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Error desconocido'
+      await db.from('yeastar_call_transcriptions').upsert({ account_id: accountId, call_id: event.callId, transcription_status: 'failed', error_message: message.slice(0, 500), yeastar_payload: event.payload, updated_at: new Date().toISOString() }, { onConflict: 'account_id,call_id' })
+      await receipt(db, accountId, 'invalid', `No se pudo sincronizar la IA: ${message}`, event.eventType, event.callId)
+      return NextResponse.json({ error: 'Could not synchronize AI transcription' }, { status: 500 })
+    }
   }
 
   try {
