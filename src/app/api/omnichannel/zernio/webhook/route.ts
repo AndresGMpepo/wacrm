@@ -219,9 +219,9 @@ export async function POST(request: Request) {
         if (reactionConversation.error) throw reactionConversation.error
         if (reactionConversation.data && reaction?.targetMessageId) {
           const target = await db.from('messages')
-            .select('id, message_id')
+            .select('id, message_id, platform_message_id')
             .eq('conversation_id', reactionConversation.data.id)
-            .or(`message_id.eq.zernio:${typed.id}:${reaction.targetMessageId},message_id.eq.zernio:out:${typed.id}:${reaction.targetMessageId}`)
+            .or(`platform_message_id.eq.${reaction.targetMessageId},message_id.eq.zernio:${typed.id}:${reaction.targetMessageId},message_id.eq.zernio:out:${typed.id}:${reaction.targetMessageId}`)
             .maybeSingle()
           if (target.error) throw target.error
           if (target.data) {
@@ -287,6 +287,7 @@ export async function POST(request: Request) {
 
       const now = new Date().toISOString()
       const messageId = `zernio:${typed.id}:${externalMessageId || externalEventId}`
+      const platformMessageId = text(incoming.platformMessageId, incoming.platform_message_id)
       const contentType = attachment && attachment.kind !== 'text' ? attachment.kind : 'text'
       const mediaUrl = attachment?.url ?? null
       const { error: messageError } = await db.from('messages').insert({
@@ -296,6 +297,7 @@ export async function POST(request: Request) {
         content_text: content,
         media_url: mediaUrl,
         message_id: messageId,
+        platform_message_id: platformMessageId,
         status: 'delivered',
         created_at: now,
       })

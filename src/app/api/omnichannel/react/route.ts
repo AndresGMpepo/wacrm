@@ -5,7 +5,7 @@ import { createClient as createAdminClient } from '@supabase/supabase-js';
 import { decrypt } from '@/lib/whatsapp/encryption';
 import { sendReactionMessage } from '@/lib/whatsapp/meta-api';
 import { sanitizePhoneForMeta } from '@/lib/whatsapp/phone-utils';
-import { addZernioReaction, extractZernioPlatformMessageId, removeZernioReaction } from '@/lib/zernio/server';
+import { addZernioReaction, extractZernioPlatformMessageId, removeZernioReaction, resolveZernioPlatformMessageId } from '@/lib/zernio/server';
 
 function admin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -31,7 +31,7 @@ export async function POST(request: Request) {
     const db = admin();
     const { data: targetMessage, error: msgError } = await db
       .from('messages')
-      .select('id, message_id, conversation_id, content_type, media_url')
+      .select('id, message_id, platform_message_id, conversation_id, content_type, media_url')
       .eq('id', messageId)
       .maybeSingle();
 
@@ -121,9 +121,18 @@ export async function POST(request: Request) {
 
     try {
       if (isZernio) {
-        const platformMessageId = extractZernioPlatformMessageId(targetMessage.message_id);
+        let platformMessageId = targetMessage.platform_message_id ?? extractZernioPlatformMessageId(targetMessage.message_id);
         if (!platformMessageId || !conversation.external_session_id) {
           throw new Error('This Zernio message does not have a platform message id available for reactions.');
+        }
+        if (!targetMessage.platform_message_id) {
+          const storedMessageId = targetMessage.message_id?.replace(/^zernio:(?:out:)?[^:]+:/, '') ?? '';
+          const resolvedPlatformId = await resolveZernioPlatformMessageId(
+            conversation.external_session_id,
+            accessToken ?? '',
+            storedMessageId,
+          );
+          if (resolvedPlatformId) platformMessageId = resolvedPlatformId;
         }
         if (emoji === '') {
           await removeZernioReaction(conversation.external_session_id, platformMessageId, accessToken ?? '');

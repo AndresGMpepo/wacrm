@@ -160,6 +160,25 @@ export function zernioAttachmentTypeFrom(kind: string | null | undefined) {
   return 'file'
 }
 
+export async function resolveZernioPlatformMessageId(
+  conversationId: string,
+  zernioAccountId: string,
+  zernioMessageId: string,
+) {
+  const payload = await zernioFetch(`/inbox/conversations/${encodeURIComponent(conversationId)}/messages?${new URLSearchParams({ accountId: zernioAccountId, limit: '100', sortOrder: 'desc' })}`)
+  const messages = Array.isArray(payload.messages)
+    ? payload.messages
+    : Array.isArray((payload.data as Record<string, unknown> | undefined)?.messages)
+      ? ((payload.data as Record<string, unknown>).messages as unknown[])
+      : []
+  const match = messages.find((value) => {
+    const item = value as Record<string, unknown>
+    return item.id === zernioMessageId || item.messageId === zernioMessageId
+  }) as Record<string, unknown> | undefined
+  const platformId = match?.platformMessageId ?? match?.platform_message_id
+  return typeof platformId === 'string' && platformId.trim() ? platformId : null
+}
+
 export async function sendZernioText(conversationId: string, zernioAccountId: string, text: string) {
   const payload = await zernioFetch(`/inbox/conversations/${encodeURIComponent(conversationId)}/messages`, {
     method: 'POST',
