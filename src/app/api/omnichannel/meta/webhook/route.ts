@@ -6,6 +6,7 @@ import { verifyMetaWebhookSignature } from '@/lib/whatsapp/webhook-signature'
 import { resolveAuditUserId } from '@/lib/api/v1/contacts'
 import { isUniqueViolation } from '@/lib/contacts/dedupe'
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
+import { extractMetaAttachment, extractMetaReaction, normalizeMetaText, safeMetaContactName } from '@/lib/omnichannel/webhook-normalizer'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 20
@@ -14,7 +15,13 @@ type MetaMessaging = {
   sender?: { id?: string }
   recipient?: { id?: string }
   timestamp?: number
-  message?: { mid?: string; text?: string; is_echo?: boolean; attachments?: Array<{ type?: string }> }
+  message?: {
+    mid?: string
+    text?: string
+    is_echo?: boolean
+    attachments?: Array<{ type?: string; payload?: Record<string, unknown> }>
+  }
+  reaction?: { message_id?: string; emoji?: string }
 }
 type MetaCommentValue = {
   comment_id?: string; id?: string; parent_id?: string; post_id?: string; media_id?: string
@@ -189,18 +196,18 @@ async function resolveContact(db: ReturnType<typeof admin>, connector: Connector
   if (phoneError) throw phoneError
   let contactId = contactByPhone?.id as string | undefined
   if (!contactId) {
-    const label = connector.provider === 'facebook' ? 'Cliente Facebook' : 'Cliente Instagram'
+    const fallbackName = safeMetaContactName(connector.provider, externalUserId)
     const { data: contact, error: contactError } = await db.from('contacts').insert({
       account_id: connector.account_id,
       user_id: auditUserId,
       phone: placeholderPhone,
-      name: profile?.name || `${label} ${externalUserId.slice(-6)}`,
+      name: profile?.name || fallbackName,
       avatar_url: profile?.avatarUrl || null,
     }).select('id').single()
     if (contactError || !contact) throw contactError ?? new Error('No se pudo crear el contacto de Meta.')
     contactId = contact.id
   } else if (contactByPhone && (profile?.name || profile?.avatarUrl)) {
-    const fallbackName = `${connector.provider === 'facebook' ? 'Cliente Facebook' : 'Cliente Instagram'} ${externalUserId.slice(-6)}`
+    const fallbackName = safeMetaContactName(connector.provider, externalUserId)
     const update: { name?: string; avatar_url?: string } = {}
     if (profile.name && (!contactByPhone.name || contactByPhone.name === fallbackName)) update.name = profile.name
     if (profile.avatarUrl && !contactByPhone.avatar_url) update.avatar_url = profile.avatarUrl
@@ -221,6 +228,44 @@ async function resolveContact(db: ReturnType<typeof admin>, connector: Connector
   return contactId
 }
 
+async function persistMetaReaction(
+  db: ReturnType<typeof admin>,
+  connector: Connector,
+  conversationId: string,
+  targetContactId: string,
+  targetMetaMessageId?: string,
+  emoji = '',
+) {
+  if (!targetMetaMessageId) return
+
+  const targetInternal = await db.from('messages')
+    .select('id')
+    .eq('conversation_id', conversationId)
+    .eq('message_id', `meta:${connector.id}:${targetMetaMessageId}`)
+    .maybeSingle()
+  if (targetInternal.error) throw targetInternal.error
+  if (!targetInternal.data?.id) return
+
+  if (!emoji) {
+    const { error: deleteError } = await db.from('message_reactions')
+      .delete()
+      .eq('message_id', targetInternal.data.id)
+      .eq('actor_type', 'customer')
+      .eq('actor_id', targetContactId)
+    if (deleteError) throw deleteError
+    return
+  }
+
+  const { error: upsertError } = await db.from('message_reactions').upsert({
+    message_id: targetInternal.data.id,
+    conversation_id: conversationId,
+    actor_type: 'customer',
+    actor_id: targetContactId,
+    emoji,
+  }, { onConflict: 'message_id,actor_type,actor_id' })
+  if (upsertError) throw upsertError
+}
+
 async function ingestMessage(db: ReturnType<typeof admin>, connector: Connector, entry: MetaEntry, event: MetaMessaging) {
   const senderId = event.sender?.id?.trim()
   const messageId = event.message?.mid?.trim()
@@ -229,6 +274,7 @@ async function ingestMessage(db: ReturnType<typeof admin>, connector: Connector,
   const auditUserId = await resolveAuditUserId(db, connector.account_id)
   const profile = await resolveMetaProfile(connector, senderId)
   const contactId = await resolveContact(db, connector, senderId, auditUserId, profile)
+  if (!contactId) throw new Error('No se pudo resolver el contacto Meta para la reacción.')
   const { data: rows, error: findError } = await db.from('conversations').select('id, unread_count')
     .eq('account_id', connector.account_id).eq('connector_id', connector.id).eq('external_session_id', senderId).limit(1)
   if (findError) throw findError
@@ -243,14 +289,24 @@ async function ingestMessage(db: ReturnType<typeof admin>, connector: Connector,
     conversation = data
     created = true
   }
-  const attachment = event.message?.attachments?.[0]
-  const contentText = event.message?.text?.trim() || (attachment?.type === 'image' ? '[Imagen enviada desde Meta]' : attachment ? `[Archivo enviado desde ${connector.provider === 'facebook' ? 'Facebook' : 'Instagram'}]` : '[Mensaje sin texto]')
+  const attachment = extractMetaAttachment(event.message ?? {})
+  const contentText = normalizeMetaText(event.message?.text, attachment?.caption)
+  const contentType = attachment && attachment.kind !== 'text' ? attachment.kind : 'text'
+  const mediaUrl = attachment?.url ?? null
   const createdAt = time(event.timestamp)
   const { error: messageError } = await db.from('messages').insert({
-    conversation_id: conversation.id, sender_type: 'customer', content_type: attachment?.type === 'image' ? 'image' : 'text',
-    content_text: contentText, message_id: `meta:${connector.id}:${messageId}`, status: 'delivered', created_at: createdAt,
+    conversation_id: conversation.id, sender_type: 'customer', content_type: contentType,
+    content_text: contentText, media_url: mediaUrl, message_id: `meta:${connector.id}:${messageId}`, status: 'delivered', created_at: createdAt,
   })
   if (messageError) throw messageError
+
+  const reaction = extractMetaReaction(event)
+  const reactionTargetMessageId = reaction?.targetMessageId ?? ''
+  const reactionEmoji = reaction?.emoji ?? ''
+  if (reactionTargetMessageId) {
+    await persistMetaReaction(db, connector, conversation.id, contactId, reactionTargetMessageId, reactionEmoji)
+  }
+
   const now = new Date().toISOString()
   const { error: updateError } = await db.from('conversations').update({
     status: 'open', last_message_text: contentText, last_message_at: createdAt, unread_count: (conversation.unread_count ?? 0) + 1, updated_at: now,
@@ -259,7 +315,7 @@ async function ingestMessage(db: ReturnType<typeof admin>, connector: Connector,
   const { error: assignmentError } = await db.rpc('auto_assign_inbound_conversation', { p_account_id: connector.account_id, p_conversation_id: conversation.id })
   if (assignmentError) console.error('[meta] automatic assignment failed:', assignmentError.message)
   if (created) await dispatchWebhookEvent(db, connector.account_id, 'conversation.created', { conversation_id: conversation.id, contact_id: contactId, channel_type: connector.provider, connector_id: connector.id })
-  await dispatchWebhookEvent(db, connector.account_id, 'message.received', { conversation_id: conversation.id, contact_id: contactId, message_id: `meta:${connector.id}:${messageId}`, channel_type: connector.provider, content_type: attachment?.type === 'image' ? 'image' : 'text', text: contentText })
+  await dispatchWebhookEvent(db, connector.account_id, 'message.received', { conversation_id: conversation.id, contact_id: contactId, message_id: `meta:${connector.id}:${messageId}`, channel_type: connector.provider, content_type: contentType, text: contentText, media_url: mediaUrl })
   await db.from('omnichannel_webhook_receipts').update({ outcome: 'processed', detail: `Mensaje ${connector.provider} agregado.`, processed_at: now })
     .eq('connector_id', connector.id).eq('event_type', eventType(connector.provider)).eq('external_message_id', messageId)
   return { conversationId: conversation.id }

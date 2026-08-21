@@ -2,8 +2,9 @@ import { NextResponse } from 'next/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 
 import { resolveAuditUserId } from '@/lib/api/v1/contacts'
-import { isUniqueViolation } from '@/lib/contacts/dedupe'
+import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe'
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
+import { extractZernioMedia, extractZernioReaction, normalizeMetaText, safeZernioContactName } from '@/lib/omnichannel/webhook-normalizer'
 import { verifyZernioSignature, type ZernioChannel } from '@/lib/zernio/server'
 
 export const dynamic = 'force-dynamic'
@@ -56,6 +57,8 @@ async function resolveContact(
   externalUserId: string,
   auditUserId: string,
   name: string,
+  email?: string,
+  phone?: string,
 ) {
   const { data: mapped, error: mapError } = await db
     .from('omnichannel_contact_identities')
@@ -66,21 +69,44 @@ async function resolveContact(
   if (mapError) throw mapError
   if (mapped?.contact_id) return mapped.contact_id as string
 
-  const fallback = `Cliente ${connector.provider.replace('zernio_', '')} ${externalUserId.slice(-6)}`
-  const phone = `zernio:${connector.provider}:${externalUserId}`
-  const { data: existing, error: existingError } = await db
-    .from('contacts')
-    .select('id')
-    .eq('account_id', connector.account_id)
-    .eq('phone', phone)
-    .maybeSingle()
-  if (existingError) throw existingError
+  const channel = connector.provider.replace('zernio_', '') as ZernioChannel
+  const fallback = safeZernioContactName(channel, externalUserId)
+  const placeholderPhone = `zernio:${connector.provider}:${externalUserId}`
 
-  let contactId = existing?.id as string | undefined
-  if (!contactId) {
+  const phoneMatch = phone ? await findExistingContact(db, connector.account_id, phone) : null
+  let emailMatch: { id: string; name: string | null; email: string | null; phone: string | null } | null = null
+  if (!phoneMatch && email) {
+    const normalizedEmail = email.trim().toLowerCase()
+    const { data, error } = await db
+      .from('contacts')
+      .select('id, name, email, phone')
+      .eq('account_id', connector.account_id)
+      .eq('email_normalized', normalizedEmail)
+      .limit(2)
+    if (error) {
+      console.error('[zernio] could not match contact by email:', error.message)
+    } else if (data?.length === 1) {
+      emailMatch = data[0]
+    }
+  }
+
+  const existing = phoneMatch ?? emailMatch
+  let contactId: string
+  if (existing) {
+    contactId = existing.id
+    const update: Record<string, string> = {}
+    const existingName = typeof existing.name === 'string' ? existing.name.trim() : ''
+    if (name && (!existingName || existingName === fallback)) update.name = name
+    if (email && !existing.email && email.trim()) update.email = email.trim()
+    if (phone && existing.phone === placeholderPhone) update.phone = phone.trim()
+    if (Object.keys(update).length) {
+      const { error } = await db.from('contacts').update(update).eq('id', contactId).eq('account_id', connector.account_id)
+      if (error && !isUniqueViolation(error)) console.error('[zernio] could not enrich existing contact:', error.message)
+    }
+  } else {
     const { data: created, error } = await db
       .from('contacts')
-      .insert({ account_id: connector.account_id, user_id: auditUserId, phone, name: name || fallback })
+      .insert({ account_id: connector.account_id, user_id: auditUserId, phone: phone || placeholderPhone, email: email || null, name: name || fallback })
       .select('id')
       .single()
     if (error || !created) throw error ?? new Error('No se pudo crear el contacto del canal conectado.')
@@ -92,6 +118,7 @@ async function resolveContact(
     connector_id: connector.id,
     external_user_id: externalUserId,
     contact_id: contactId,
+    display_name: name || fallback,
   })
   if (identityError && !isUniqueViolation(identityError)) throw identityError
   if (identityError) {
@@ -180,14 +207,20 @@ export async function POST(request: Request) {
       const typed = connector as Connector
       if (!(await registerReceipt(db, typed, externalEventId, eventType, event))) continue
 
-      const content = text(incoming.text, incoming.content, incoming.body, comment.message, comment.text, event.text) || '[Mensaje sin texto]'
+      const attachment = extractZernioMedia(record(incoming))
+      const content = normalizeMetaText(text(incoming.text, incoming.content, incoming.body, comment.message, comment.text, event.text), attachment?.caption)
       const auditUserId = await resolveAuditUserId(db, typed.account_id)
+      const contactName = text(sender.name, sender.displayName, sender.fullName, comment.author_name, comment.authorName, participant.name)
+      const contactEmail = text(sender.email, participant.email, incoming.email, comment.author_email, comment.authorEmail)
+      const contactPhone = text(sender.phone, participant.phone, incoming.phone, comment.author_phone, comment.authorPhone)
       const contactId = await resolveContact(
         db,
         typed,
         externalUserId,
         auditUserId,
-        text(sender.name, sender.displayName, sender.fullName, comment.author_name, comment.authorName, participant.name),
+        contactName || safeZernioContactName(channel, externalUserId),
+        contactEmail || undefined,
+        contactPhone || undefined,
       )
       const { data: rows, error: findError } = await db
         .from('conversations')
@@ -213,13 +246,54 @@ export async function POST(request: Request) {
 
       const now = new Date().toISOString()
       const messageId = `zernio:${typed.id}:${externalMessageId || externalEventId}`
-      const { error: messageError } = await db.from('messages').insert({ conversation_id: conversationRow.id, sender_type: 'customer', content_type: 'text', content_text: content, message_id: messageId, status: 'delivered', created_at: now })
+      const contentType = attachment && attachment.kind !== 'text' ? attachment.kind : 'text'
+      const mediaUrl = attachment?.url ?? null
+      const { error: messageError } = await db.from('messages').insert({
+        conversation_id: conversationRow.id,
+        sender_type: 'customer',
+        content_type: contentType,
+        content_text: content,
+        media_url: mediaUrl,
+        message_id: messageId,
+        status: 'delivered',
+        created_at: now,
+      })
       if (messageError && !isUniqueViolation(messageError)) throw messageError
+
+      const reaction = extractZernioReaction(record(incoming))
+      if (reaction?.targetMessageId) {
+        const targetInternal = await db.from('messages')
+          .select('id')
+          .eq('conversation_id', conversationRow.id)
+          .eq('message_id', `zernio:${typed.id}:${reaction.targetMessageId}`)
+          .maybeSingle()
+        if (targetInternal.error) throw targetInternal.error
+        if (targetInternal.data?.id) {
+          if (!reaction.emoji) {
+            const { error: deleteError } = await db.from('message_reactions')
+              .delete()
+              .eq('message_id', targetInternal.data.id)
+              .eq('actor_type', 'customer')
+              .eq('actor_id', contactId)
+            if (deleteError) throw deleteError
+          } else {
+            const { error: upsertError } = await db.from('message_reactions').upsert({
+              message_id: targetInternal.data.id,
+              conversation_id: conversationRow.id,
+              actor_type: 'customer',
+              actor_id: contactId,
+              emoji: reaction.emoji,
+            }, { onConflict: 'message_id,actor_type,actor_id' })
+            if (upsertError) throw upsertError
+          }
+        }
+      }
+
       await db.from('conversations').update({ status: 'open', last_message_text: content, last_message_at: now, unread_count: (conversationRow.unread_count ?? 0) + 1, updated_at: now }).eq('id', conversationRow.id)
       await db.rpc('auto_assign_inbound_conversation', { p_account_id: typed.account_id, p_conversation_id: conversationRow.id })
       await db.from('omnichannel_connectors').update({ status: 'active', last_event_at: now, last_error: null, updated_at: now }).eq('id', typed.id)
       if (created) await dispatchWebhookEvent(db, typed.account_id, 'conversation.created', { conversation_id: conversationRow.id, contact_id: contactId, channel_type: typed.provider, connector_id: typed.id })
-      await dispatchWebhookEvent(db, typed.account_id, 'message.received', { conversation_id: conversationRow.id, contact_id: contactId, message_id: messageId, channel_type: typed.provider, content_type: 'text', text: content })
+      await dispatchWebhookEvent(db, typed.account_id, 'message.received', { conversation_id: conversationRow.id, contact_id: contactId, message_id: messageId, channel_type: typed.provider, content_type: contentType, text: content, media_url: mediaUrl })
       await db.from('zernio_webhook_receipts').update({ outcome: 'processed', detail: 'Mensaje del canal conectado agregado.', processed_at: now }).eq('connector_id', typed.id).eq('external_message_id', externalEventId)
     }
     return NextResponse.json({ ok: true })
