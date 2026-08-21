@@ -472,52 +472,32 @@ export function MessageComposer({
     }
     try {
       if (requiresInstagramAudio) {
+        const audioMimeType = "audio/mp4;codecs=mp4a.40.2";
+        const fallbackMimeType = "audio/mp4";
+        const supportedMimeType = typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(audioMimeType)
+          ? audioMimeType
+          : typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(fallbackMimeType)
+            ? fallbackMimeType
+            : null;
+        if (!supportedMimeType) {
+          toast.error("Instagram requiere audio AAC/M4A y este navegador no puede grabarlo.");
+          return;
+        }
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const context = new AudioContext({ sampleRate: 16000 });
-        const source = context.createMediaStreamSource(stream);
-        const processor = context.createScriptProcessor(4096, 1, 1);
-        const samples: Float32Array[] = [];
-        processor.onaudioprocess = (event) => {
-          const input = event.inputBuffer.getChannelData(0);
-          samples.push(new Float32Array(input));
+        const chunks: Blob[] = [];
+        const mediaRecorder = new MediaRecorder(stream, { mimeType: supportedMimeType });
+        mediaRecorder.ondataavailable = (event) => {
+          if (event.data.size) chunks.push(event.data);
         };
-        source.connect(processor);
-        processor.connect(context.destination);
-        mediaRecorderRef.current = {
-          stop: () => {
-            processor.disconnect();
-            source.disconnect();
-            stream.getTracks().forEach((track) => track.stop());
-            void context.close();
-            if (cancelledRef.current) return;
-            const length = samples.reduce((total, chunk) => total + chunk.length, 0);
-            const buffer = new ArrayBuffer(44 + length * 2);
-            const view = new DataView(buffer);
-            const write = (offset: number, value: string) => Array.from(value).forEach((char, index) => view.setUint8(offset + index, char.charCodeAt(0)));
-            write(0, "RIFF");
-            view.setUint32(4, 36 + length * 2, true);
-            write(8, "WAVE");
-            write(12, "fmt ");
-            view.setUint32(16, 16, true);
-            view.setUint16(20, 1, true);
-            view.setUint16(22, 1, true);
-            view.setUint32(24, context.sampleRate, true);
-            view.setUint32(28, context.sampleRate * 2, true);
-            view.setUint16(32, 2, true);
-            view.setUint16(34, 16, true);
-            write(36, "data");
-            view.setUint32(40, length * 2, true);
-            let offset = 44;
-            for (const chunk of samples) {
-              for (const sample of chunk) {
-                const value = Math.max(-1, Math.min(1, sample));
-                view.setInt16(offset, value < 0 ? value * 0x8000 : value * 0x7fff, true);
-                offset += 2;
-              }
-            }
-            void finalizeRecording(new Uint8Array(buffer), "audio/wav", "wav");
-          },
-        } as MediaRecorder;
+        mediaRecorder.onstop = () => {
+          stream.getTracks().forEach((track) => track.stop());
+          if (cancelledRef.current) return;
+          const blob = new Blob(chunks, { type: "audio/mp4" });
+          void blob.arrayBuffer().then((buffer) => finalizeRecording(new Uint8Array(buffer), "audio/mp4", "m4a"));
+        };
+        cancelledRef.current = false;
+        mediaRecorderRef.current = mediaRecorder;
+        mediaRecorder.start();
         setRecording(true);
         setRecordSeconds(0);
         timerRef.current = setInterval(() => setRecordSeconds((s) => s + 1), 1000);
