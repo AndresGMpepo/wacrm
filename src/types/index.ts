@@ -75,6 +75,7 @@ export interface AccountMember {
   email: string | null;
   avatar_url: string | null;
   role: AccountRole;
+  is_active: boolean;
   joined_at: string;
 }
 

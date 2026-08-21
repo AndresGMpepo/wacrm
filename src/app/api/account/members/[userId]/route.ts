@@ -61,8 +61,14 @@ export async function PATCH(
       | { role?: unknown }
       | null;
     const role = body?.role;
+    const fullName = typeof (body as Record<string, unknown> | null)?.full_name === "string" ? (body as Record<string, unknown>).full_name : undefined;
+    const avatarUrl = typeof (body as Record<string, unknown> | null)?.avatar_url === "string" ? (body as Record<string, unknown>).avatar_url : undefined;
+    const isActive = typeof (body as Record<string, unknown> | null)?.is_active === "boolean" ? (body as Record<string, unknown>).is_active : undefined;
+    if (role === undefined && fullName === undefined && avatarUrl === undefined && isActive === undefined) {
+      return NextResponse.json({ error: "No hay cambios para guardar" }, { status: 400 });
+    }
 
-    if (!isAccountRole(role)) {
+    if (role !== undefined && !isAccountRole(role)) {
       return NextResponse.json(
         { error: "'role' must be one of owner, admin, agent, viewer" },
         { status: 400 },
@@ -81,12 +87,19 @@ export async function PATCH(
       );
     }
 
-    const { error } = await ctx.supabase.rpc("set_member_role", {
-      p_user_id: userId,
-      p_new_role: role,
-    });
-
-    if (error) return rpcErrorToResponse(error);
+    if (fullName !== undefined || avatarUrl !== undefined || isActive !== undefined) {
+      const { error } = await ctx.supabase.rpc("update_member_profile", {
+        p_user_id: userId,
+        p_full_name: fullName ?? null,
+        p_avatar_url: avatarUrl ?? null,
+        p_is_active: isActive ?? null,
+      });
+      if (error) return rpcErrorToResponse(error);
+    }
+    if (role !== undefined) {
+      const { error } = await ctx.supabase.rpc("set_member_role", { p_user_id: userId, p_new_role: role });
+      if (error) return rpcErrorToResponse(error);
+    }
 
     return NextResponse.json({ ok: true });
   } catch (err) {

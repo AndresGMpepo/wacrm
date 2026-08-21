@@ -28,6 +28,7 @@ import {
   Loader2,
   Mail,
   MailX,
+  Pencil,
   Trash2,
   UsersRound,
 } from 'lucide-react';
@@ -44,6 +45,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import {
@@ -80,6 +82,7 @@ interface Member {
   email: string | null;
   avatar_url: string | null;
   role: AccountRole;
+  is_active: boolean;
   joined_at: string;
 }
 
@@ -134,6 +137,9 @@ export function MembersTab() {
   const [loading, setLoading] = useState(true);
 
   const [removingMember, setRemovingMember] = useState<Member | null>(null);
+  const [editingMember, setEditingMember] = useState<Member | null>(null);
+  const [editingName, setEditingName] = useState('');
+  const [editingActive, setEditingActive] = useState(true);
   const [pendingMemberAction, setPendingMemberAction] = useState<string | null>(
     null,
   );
@@ -231,6 +237,33 @@ export function MembersTab() {
     } catch (err) {
       console.error('[MembersTab] remove error:', err);
       toast.error('Could not reach the server');
+    } finally {
+      setPendingMemberAction(null);
+    }
+  }
+
+  async function handleProfileSave() {
+    if (!editingMember || !editingName.trim()) return;
+    setPendingMemberAction(editingMember.user_id);
+    try {
+      const res = await fetch(`/api/account/members/${editingMember.user_id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ full_name: editingName.trim(), is_active: editingActive }),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(payload.error || 'No se pudo actualizar el agente');
+        return;
+      }
+      setMembers((previous) => previous.map((member) => member.user_id === editingMember.user_id
+        ? { ...member, full_name: editingName.trim(), is_active: editingActive }
+        : member));
+      toast.success('Datos del agente actualizados');
+      setEditingMember(null);
+    } catch (error) {
+      console.error('[MembersTab] profile update error:', error);
+      toast.error('No se pudo conectar con el servidor');
     } finally {
       setPendingMemberAction(null);
     }
@@ -425,6 +458,22 @@ export function MembersTab() {
                       <Button
                         variant="outline"
                         size="sm"
+                        title="Editar agente"
+                        onClick={() => {
+                          setEditingMember(member);
+                          setEditingName(member.full_name);
+                          setEditingActive(member.is_active);
+                        }}
+                        disabled={isBusy}
+                      >
+                        <Pencil className="size-4" />
+                      </Button>
+                    )}
+
+                    {canManageMembers && !isOwnerRow && !isSelf && (
+                      <Button
+                        variant="outline"
+                        size="sm"
                         onClick={() => setRemovingMember(member)}
                         disabled={isBusy}
                         className="border-red-500/40 bg-red-500/10 text-red-300 hover:bg-red-500/20 hover:border-red-500/60 hover:text-red-200"
@@ -526,6 +575,29 @@ export function MembersTab() {
           )}
         </div>
       </RequireRole>
+
+      <Dialog
+        open={editingMember !== null}
+        onOpenChange={(open) => { if (!open) setEditingMember(null); }}
+      >
+        <DialogContent className="bg-popover border-border sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Editar agente</DialogTitle>
+            <DialogDescription>Actualiza los datos o libera esta plaza para otra persona. El historial de mensajes no cambia.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <Input value={editingName} onChange={(event) => setEditingName(event.target.value)} placeholder="Nombre completo" />
+            <label className="flex items-center gap-2 text-sm text-muted-foreground">
+              <input type="checkbox" checked={editingActive} onChange={(event) => setEditingActive(event.target.checked)} />
+              Plaza activa
+            </label>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingMember(null)}>Cancelar</Button>
+            <Button onClick={() => void handleProfileSave()} disabled={!editingName.trim() || !!pendingMemberAction}>Guardar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={removingMember !== null}

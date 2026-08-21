@@ -39,7 +39,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ acc
     const admin = adminClient()
     const [{ data: subscription, error: subscriptionError }, { count, error: countError }] = await Promise.all([
       admin.from('account_subscriptions').select('seat_limit, status, ends_at').eq('account_id', accountId).maybeSingle(),
-      admin.from('profiles').select('*', { count: 'exact', head: true }).eq('account_id', accountId),
+      admin.from('profiles').select('*', { count: 'exact', head: true }).eq('account_id', accountId).eq('is_active', true),
     ])
     if (subscriptionError || countError) throw subscriptionError ?? countError
     if (!subscription) return NextResponse.json({ error: 'La cuenta no existe o no tiene un plan.' }, { status: 404 })
