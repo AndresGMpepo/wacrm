@@ -225,6 +225,12 @@ export async function POST(request: Request) {
             .maybeSingle()
           if (target.error) throw target.error
           if (target.data) {
+            if (!target.data.platform_message_id && reaction.targetMessageId) {
+              const { error } = await db.from('messages')
+                .update({ platform_message_id: reaction.targetMessageId })
+                .eq('id', target.data.id)
+              if (error) throw error
+            }
             if (reaction.emoji) {
               const { error } = await db.from('message_reactions').upsert({
                 message_id: target.data.id,
@@ -287,7 +293,7 @@ export async function POST(request: Request) {
 
       const now = new Date().toISOString()
       const messageId = `zernio:${typed.id}:${externalMessageId || externalEventId}`
-      const platformMessageId = text(incoming.platformMessageId, incoming.platform_message_id)
+      const platformMessageId = text(incoming.platformMessageId, incoming.platform_message_id, incoming.nativeMessageId, incoming.externalMessageId)
       const contentType = attachment && attachment.kind !== 'text' ? attachment.kind : 'text'
       const mediaUrl = attachment?.url ?? null
       const { error: messageError } = await db.from('messages').insert({

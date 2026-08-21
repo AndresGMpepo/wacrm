@@ -172,16 +172,22 @@ export async function resolveZernioPlatformMessageId(
   zernioMessageId: string,
 ) {
   const payload = await zernioFetch(`/inbox/conversations/${encodeURIComponent(conversationId)}/messages?${new URLSearchParams({ accountId: zernioAccountId, limit: '100', sortOrder: 'desc' })}`)
-  const messages = Array.isArray(payload.messages)
-    ? payload.messages
-    : Array.isArray((payload.data as Record<string, unknown> | undefined)?.messages)
-      ? ((payload.data as Record<string, unknown>).messages as unknown[])
-      : []
-  const match = messages.find((value) => {
+  const matches: Record<string, unknown>[] = []
+  const visit = (value: unknown) => {
+    if (Array.isArray(value)) {
+      value.forEach(visit)
+      return
+    }
+    if (!value || typeof value !== 'object') return
     const item = value as Record<string, unknown>
-    return item.id === zernioMessageId || item.messageId === zernioMessageId
-  }) as Record<string, unknown> | undefined
-  const platformId = match?.platformMessageId ?? match?.platform_message_id
+    if (item.id === zernioMessageId || item.messageId === zernioMessageId) matches.push(item)
+    Object.values(item).forEach((child) => {
+      if (child && typeof child === 'object') visit(child)
+    })
+  }
+  visit(payload)
+  const match = matches[0]
+  const platformId = match?.platformMessageId ?? match?.platform_message_id ?? match?.nativeMessageId ?? match?.externalMessageId
   return typeof platformId === 'string' && platformId.trim() ? platformId : null
 }
 
