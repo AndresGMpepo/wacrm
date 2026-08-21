@@ -170,10 +170,11 @@ export async function POST(request: Request) {
   try {
     for (const event of entries(payload)) {
       const eventType = text(event.event, payload.event)
-      if (eventType !== 'message.received' && eventType !== 'comment.received') continue
+      if (eventType !== 'message.received' && eventType !== 'comment.received' && eventType !== 'reaction.received') continue
 
       const message = record(event.message)
       const comment = record(event.comment)
+      const reactionEvent = record(event.reaction)
       const incoming = eventType === 'comment.received' ? comment : message
       const conversation = record(event.conversation ?? incoming.conversation)
       const account = record(event.account ?? incoming.account)
@@ -193,7 +194,7 @@ export async function POST(request: Request) {
       )
       const channel = channelFrom(account.platform ?? account.channel ?? account.type ?? event.channel ?? event.platform ?? incoming.channel ?? conversation.channel ?? payload.channel)
       const zernioAccountId = text(account.id, account._id, event.accountId, event.account_id, incoming.accountId, conversation.accountId, payload.accountId)
-      if (!externalEventId || !externalConversationId || !externalUserId || !channel || !zernioAccountId) continue
+      if (!externalEventId || !externalConversationId || !channel || !zernioAccountId || (eventType !== 'reaction.received' && !externalUserId)) continue
 
       const { data: connector, error: connectorError } = await db
         .from('omnichannel_connectors')
@@ -206,6 +207,46 @@ export async function POST(request: Request) {
       if (!connector) continue
       const typed = connector as Connector
       if (!(await registerReceipt(db, typed, externalEventId, eventType, event))) continue
+
+      if (eventType === 'reaction.received') {
+        const reaction = extractZernioReaction(reactionEvent)
+        const reactionConversation = await db.from('conversations')
+          .select('id, contact_id')
+          .eq('account_id', typed.account_id)
+          .eq('connector_id', typed.id)
+          .eq('external_session_id', externalConversationId)
+          .maybeSingle()
+        if (reactionConversation.error) throw reactionConversation.error
+        if (reactionConversation.data && reaction?.targetMessageId) {
+          const target = await db.from('messages')
+            .select('id, message_id')
+            .eq('conversation_id', reactionConversation.data.id)
+            .or(`message_id.eq.zernio:${typed.id}:${reaction.targetMessageId},message_id.eq.zernio:out:${typed.id}:${reaction.targetMessageId}`)
+            .maybeSingle()
+          if (target.error) throw target.error
+          if (target.data) {
+            if (reaction.emoji) {
+              const { error } = await db.from('message_reactions').upsert({
+                message_id: target.data.id,
+                conversation_id: reactionConversation.data.id,
+                actor_type: 'customer',
+                actor_id: reactionConversation.data.contact_id,
+                emoji: reaction.emoji,
+              }, { onConflict: 'message_id,actor_type,actor_id' })
+              if (error) throw error
+            } else {
+              const { error } = await db.from('message_reactions').delete()
+                .eq('message_id', target.data.id)
+                .eq('actor_type', 'customer')
+                .eq('actor_id', reactionConversation.data.contact_id)
+              if (error) throw error
+            }
+          }
+        }
+        await db.from('zernio_webhook_receipts').update({ outcome: 'processed', detail: 'Reacción del canal conectado procesada.', processed_at: new Date().toISOString() })
+          .eq('connector_id', typed.id).eq('external_message_id', externalEventId)
+        continue
+      }
 
       const attachment = extractZernioMedia(record(incoming))
       const content = normalizeMetaText(text(incoming.text, incoming.content, incoming.body, comment.message, comment.text, event.text), attachment?.caption)

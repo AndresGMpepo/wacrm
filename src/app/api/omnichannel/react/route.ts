@@ -5,6 +5,7 @@ import { createClient as createAdminClient } from '@supabase/supabase-js';
 import { decrypt } from '@/lib/whatsapp/encryption';
 import { sendReactionMessage } from '@/lib/whatsapp/meta-api';
 import { sanitizePhoneForMeta } from '@/lib/whatsapp/phone-utils';
+import { addZernioReaction, extractZernioPlatformMessageId, removeZernioReaction } from '@/lib/zernio/server';
 
 function admin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -63,12 +64,22 @@ export async function POST(request: Request) {
     const isZernio = conversation.channel_type?.startsWith('zernio_') ?? false;
 
     if (isZernio) {
-      // Zernio supports the same inbox UX, but its reaction API is not yet
-      // implemented in the server layer. Keep the optimistic UI working by
-      // persisting the reaction locally without crashing the thread.
-      accessToken = 'local-only';
-      phoneNumberId = 'local-only';
-      externalRecipient = conversation.external_session_id ?? contact?.phone ?? null;
+      const { data: connector, error: connectorError } = await db
+        .from('omnichannel_connectors')
+        .select('zernio_account_id, status')
+        .eq('id', conversation.connector_id)
+        .eq('account_id', accountId)
+        .maybeSingle();
+
+      if (connectorError || !connector) {
+        return NextResponse.json({ error: 'Zernio channel configuration not found' }, { status: 400 });
+      }
+      if (!connector.zernio_account_id || connector.status === 'paused') {
+        return NextResponse.json({ error: 'Zernio channel is paused or missing an account' }, { status: 409 });
+      }
+      externalRecipient = conversation.external_session_id ?? null;
+      accessToken = connector.zernio_account_id;
+      phoneNumberId = connector.zernio_account_id;
     } else if (conversation.channel_type === 'facebook' || conversation.channel_type === 'instagram') {
       const { data: connector, error: connectorError } = await db
         .from('omnichannel_connectors')
@@ -110,7 +121,18 @@ export async function POST(request: Request) {
 
     try {
       if (isZernio) {
-        // Local-only mirror for Zernio until the backend reaction API is wired up.
+        const platformMessageId = extractZernioPlatformMessageId(targetMessage.message_id);
+        if (!platformMessageId || !conversation.external_session_id) {
+          throw new Error('This Zernio message does not have a platform message id available for reactions.');
+        }
+        if (emoji === '') {
+          await removeZernioReaction(conversation.external_session_id, platformMessageId, accessToken ?? '');
+        } else {
+          const success = await addZernioReaction(conversation.external_session_id, platformMessageId, accessToken ?? '', emoji);
+          if (!success) {
+            throw new Error('Zernio rejected the reaction request.');
+          }
+        }
       } else if (conversation.channel_type === 'facebook' || conversation.channel_type === 'instagram') {
         const response = await fetch(`https://graph.facebook.com/v22.0/${encodeURIComponent(targetMessage.message_id)}/reactions`, {
           method: 'POST',
@@ -130,9 +152,13 @@ export async function POST(request: Request) {
         if (!phoneNumberId || !externalRecipient) {
           return NextResponse.json({ error: 'The WhatsApp channel is not ready to receive reactions.' }, { status: 400 });
         }
+        const resolvedAccessToken = accessToken ?? '';
+        if (!resolvedAccessToken || !phoneNumberId || !externalRecipient) {
+          return NextResponse.json({ error: 'The WhatsApp channel is not ready to receive reactions.' }, { status: 400 });
+        }
         await sendReactionMessage({
           phoneNumberId,
-          accessToken,
+          accessToken: resolvedAccessToken,
           to: externalRecipient,
           targetMessageId: targetMessage.message_id,
           emoji,

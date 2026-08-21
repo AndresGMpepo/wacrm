@@ -545,7 +545,11 @@ export function MessageThread({
 
       try {
         const res = await fetch(
-          conversation.channel_type === "yeastar_live_chat" ? "/api/omnichannel/yeastar/send" : "/api/whatsapp/send",
+          conversation.channel_type === "yeastar_live_chat"
+            ? "/api/omnichannel/yeastar/send"
+            : conversation.channel_type?.startsWith("zernio_")
+              ? "/api/omnichannel/zernio/send"
+              : "/api/whatsapp/send",
           {
           method: "POST",
           headers: { "Content-Type": "application/json" },

@@ -17,13 +17,14 @@ function apiKey() {
 }
 
 export async function zernioFetch(path: string, init?: RequestInit) {
+  const isFormData = typeof FormData !== 'undefined' && init?.body instanceof FormData
   const response = await fetch(`${apiUrl()}${path}`, {
     ...init,
     cache: 'no-store',
     headers: {
       Authorization: `Bearer ${apiKey()}`,
       Accept: 'application/json',
-      ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(!isFormData && init?.body ? { 'Content-Type': 'application/json' } : {}),
       ...init?.headers,
     },
   })
@@ -142,6 +143,23 @@ export function isZernioChannel(value: string): value is ZernioChannel {
   return (ZERNIO_CHANNELS as readonly string[]).includes(value)
 }
 
+export function extractZernioPlatformMessageId(messageId: string | null | undefined) {
+  if (!messageId) return null
+  const raw = messageId.trim()
+  if (!raw) return null
+  const match = raw.match(/^zernio:[^:]+:(.+)$/)
+  return match ? match[1] : raw
+}
+
+export function zernioAttachmentTypeFrom(kind: string | null | undefined) {
+  const normalized = (kind || '').toLowerCase()
+  if (normalized === 'document' || normalized === 'file') return 'file'
+  if (normalized === 'image') return 'image'
+  if (normalized === 'video') return 'video'
+  if (normalized === 'audio') return 'audio'
+  return 'file'
+}
+
 export async function sendZernioText(conversationId: string, zernioAccountId: string, text: string) {
   const payload = await zernioFetch(`/inbox/conversations/${encodeURIComponent(conversationId)}/messages`, {
     method: 'POST',
@@ -153,6 +171,69 @@ export async function sendZernioText(conversationId: string, zernioAccountId: st
   const nestedMessage = data?.message as Record<string, unknown> | undefined
   const id = message?.id ?? message?._id ?? nestedMessage?.id ?? nestedMessage?._id ?? data?.messageId ?? data?.id ?? payload.messageId ?? payload.id
   return typeof id === 'string' && id.trim() ? id : null
+}
+
+export async function uploadZernioMedia(file: Blob, contentType?: string) {
+  const form = new FormData()
+  form.append('file', file, (file as File).name || 'upload')
+  if (contentType) form.append('contentType', contentType)
+
+  const payload = await zernioFetch('/media/upload-direct', {
+    method: 'POST',
+    body: form,
+  })
+
+  const recordPayload = (payload ?? {}) as Record<string, unknown>
+  const data = (recordPayload.data ?? {}) as Record<string, unknown>
+  const url = typeof recordPayload.url === 'string'
+    ? recordPayload.url
+    : typeof data.url === 'string'
+      ? data.url
+      : null
+  if (!url) throw new Error('Zernio no devolvió una URL pública para el archivo adjunto.')
+  return url
+}
+
+export async function sendZernioMedia(
+  conversationId: string,
+  zernioAccountId: string,
+  message: string | undefined,
+  attachmentUrl: string,
+  attachmentType: 'image' | 'video' | 'audio' | 'document' | 'file',
+  attachmentName?: string,
+) {
+  const payload = await zernioFetch(`/inbox/conversations/${encodeURIComponent(conversationId)}/messages`, {
+    method: 'POST',
+    headers: { 'Idempotency-Key': crypto.randomUUID() },
+    body: JSON.stringify({
+      accountId: zernioAccountId,
+      ...(message ? { message } : {}),
+      attachmentUrl,
+      attachmentType,
+      ...(attachmentName ? { attachmentName } : {}),
+    }),
+  })
+  const data = payload.data as Record<string, unknown> | undefined
+  const messagePayload = payload.message as Record<string, unknown> | undefined
+  const nestedMessage = data?.message as Record<string, unknown> | undefined
+  const id = messagePayload?.id ?? messagePayload?._id ?? nestedMessage?.id ?? nestedMessage?._id ?? data?.messageId ?? data?.id ?? payload.messageId ?? payload.id
+  return typeof id === 'string' && id.trim() ? id : null
+}
+
+export async function addZernioReaction(conversationId: string, messageId: string, zernioAccountId: string, emoji: string) {
+  const payload = await zernioFetch(`/inbox/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}/reactions`, {
+    method: 'POST',
+    body: JSON.stringify({ accountId: zernioAccountId, emoji }),
+  })
+  return Boolean(payload.success ?? payload.data ?? payload)
+}
+
+export async function removeZernioReaction(conversationId: string, messageId: string, zernioAccountId: string) {
+  await zernioFetch(`/inbox/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}/reactions`, {
+    method: 'DELETE',
+    body: JSON.stringify({ accountId: zernioAccountId }),
+  })
+  return true
 }
 
 /** Verify only when the installation explicitly configures a webhook secret. */

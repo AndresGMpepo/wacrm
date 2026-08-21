@@ -114,6 +114,7 @@ function flattenZernioRecords(value: unknown): Record<string, unknown>[] {
 
 export function extractZernioMedia(value: Record<string, unknown>): MetaAttachment | undefined {
   const candidates = flattenZernioRecords(value)
+  let textOnly: MetaAttachment | undefined
   for (const recordValue of candidates) {
     const mimeType = asText(recordValue.mime_type ?? recordValue.mimeType ?? recordValue.mime ?? recordValue.content_type)
     const url = safeUrl(recordValue.url ?? recordValue.href ?? recordValue.link ?? recordValue.file_url ?? recordValue.media_url)
@@ -126,7 +127,7 @@ export function extractZernioMedia(value: Record<string, unknown>): MetaAttachme
       : normalizedType.includes('audio') || normalizedType.includes('voice') ? 'audio'
       : normalizedType.includes('document') || normalizedType.includes('file') || normalizedType.includes('pdf') ? 'document'
       : 'document'
-    if (url || mimeType || caption || fileName) {
+    if (url || mimeType || fileName) {
       return {
         kind: knownType,
         url,
@@ -135,7 +136,12 @@ export function extractZernioMedia(value: Record<string, unknown>): MetaAttachme
         fileName,
       }
     }
+    if (caption && !textOnly) {
+      textOnly = { kind: 'text', caption }
+    }
   }
+
+  if (textOnly) return textOnly
 
   const directUrl = safeUrl(value.url ?? value.href ?? value.link)
   if (directUrl || asText(value.caption) || asText(value.mime_type) || asText(value.filename)) {
@@ -155,14 +161,14 @@ export function extractZernioReaction(value: Record<string, unknown>): MetaReact
   const candidates = flattenZernioRecords(value)
   for (const recordValue of candidates) {
     const emoji = asText(recordValue.emoji ?? recordValue.icon ?? recordValue.symbol)
-    const target = asText(recordValue.messageId ?? recordValue.message_id ?? recordValue.targetMessageId ?? recordValue.target_message_id ?? recordValue.message_id ?? recordValue.id)
+    const target = asText(recordValue.platformMessageId ?? recordValue.platform_message_id ?? recordValue.messageId ?? recordValue.message_id ?? recordValue.targetMessageId ?? recordValue.target_message_id ?? recordValue.id)
     if (emoji || target) {
       return { targetMessageId: target, emoji }
     }
   }
 
   const directEmoji = asText(value.emoji ?? value.icon)
-  const directTarget = asText(value.messageId ?? value.message_id ?? value.targetMessageId ?? value.target_message_id)
+  const directTarget = asText(value.platformMessageId ?? value.platform_message_id ?? value.messageId ?? value.message_id ?? value.targetMessageId ?? value.target_message_id)
   if (directEmoji || directTarget) {
     return { targetMessageId: directTarget, emoji: directEmoji }
   }

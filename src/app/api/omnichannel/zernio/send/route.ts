@@ -6,7 +6,7 @@ import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { requireEntitlement } from '@/lib/account/entitlements'
 import { toErrorResponse } from '@/lib/auth/account'
 import { checkRateLimit, RATE_LIMITS, rateLimitResponse } from '@/lib/rate-limit'
-import { sendZernioText } from '@/lib/zernio/server'
+import { sendZernioMedia, sendZernioText, zernioAttachmentTypeFrom } from '@/lib/zernio/server'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 20
@@ -26,8 +26,14 @@ export async function POST(request: Request) {
     const body = await request.json().catch(() => null) as Record<string, unknown> | null
     const conversationId = typeof body?.conversation_id === 'string' ? body.conversation_id.trim() : ''
     const text = typeof body?.content_text === 'string' ? body.content_text.trim() : ''
-    if (!conversationId || !text) return NextResponse.json({ error: 'Indica una conversación y un mensaje.' }, { status: 400 })
-    if (text.length > 2_000) return NextResponse.json({ error: 'El mensaje supera el límite de 2,000 caracteres.' }, { status: 400 })
+    const mediaUrl = typeof body?.media_url === 'string' ? body.media_url.trim() : ''
+    const messageType = typeof body?.message_type === 'string' ? body.message_type.trim().toLowerCase() : ''
+    const filename = typeof body?.filename === 'string' ? body.filename.trim() : undefined
+
+    if (!conversationId) return NextResponse.json({ error: 'Indica una conversación.' }, { status: 400 })
+    const isMediaSend = Boolean(mediaUrl) && Boolean(messageType)
+    if (!isMediaSend && !text) return NextResponse.json({ error: 'Indica un mensaje o un archivo.' }, { status: 400 })
+    if (text && text.length > 2_000) return NextResponse.json({ error: 'El mensaje supera el límite de 2,000 caracteres.' }, { status: 400 })
 
     const db = admin()
     const { data: conversation, error: conversationError } = await db.from('conversations')
@@ -45,11 +51,21 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Este canal está pausado o requiere reconexión.' }, { status: 409 })
     }
 
-    const externalId = await sendZernioText(conversation.external_session_id, connector.zernio_account_id, text)
+    const externalId = isMediaSend
+      ? await sendZernioMedia(
+          conversation.external_session_id,
+          connector.zernio_account_id,
+          text || undefined,
+          mediaUrl,
+          zernioAttachmentTypeFrom(messageType),
+          filename,
+        )
+      : await sendZernioText(conversation.external_session_id, connector.zernio_account_id, text)
     const now = new Date().toISOString()
+    const contentType = isMediaSend ? messageType === 'image' ? 'image' : messageType === 'video' ? 'video' : messageType === 'audio' ? 'audio' : 'document' : 'text'
     const { data: message, error: messageError } = await db.from('messages').insert({
       conversation_id: conversation.id,
-      sender_type: 'agent', sender_id: userId, content_type: 'text', content_text: text,
+      sender_type: 'agent', sender_id: userId, content_type: contentType, content_text: text || (filename || 'Archivo'), media_url: isMediaSend ? mediaUrl : null,
       message_id: `zernio:out:${conversation.connector_id}:${externalId ?? crypto.randomUUID()}`,
       status: 'sent', created_at: now,
     }).select().single()
