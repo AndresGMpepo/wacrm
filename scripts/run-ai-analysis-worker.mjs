@@ -9,14 +9,20 @@ if (!baseUrl || !secret) {
 }
 
 const headers = { 'x-ai-worker-secret': secret, 'x-report-worker-secret': secret }
-const [analysisResponse, reportResponse] = await Promise.all([
+const [analysisResponse, reportResponse, transcriptionResponse] = await Promise.all([
   fetch(`${baseUrl}/api/internal/ai-analysis-worker`, { method: 'POST', headers }),
   fetch(`${baseUrl}/api/internal/report-schedule-worker`, { method: 'POST', headers }),
+  fetch(`${baseUrl}/api/internal/yeastar-transcription-retry`, { method: 'POST', headers }),
 ])
 
 if (!analysisResponse.ok) {
   console.error(`AI worker request failed: ${analysisResponse.status} ${await analysisResponse.text()}`)
   process.exit(1)
+}
+if (!transcriptionResponse.ok) {
+  console.error(`Yeastar transcription retry request failed: ${transcriptionResponse.status} ${await transcriptionResponse.text()}`)
+} else {
+  console.log(JSON.stringify({ yeastarTranscriptions: await transcriptionResponse.json() }))
 }
 const reports = reportResponse.ok
   ? await reportResponse.json()

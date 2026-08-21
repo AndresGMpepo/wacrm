@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { findExistingContact } from '@/lib/contacts/dedupe'
+import { fetchAiResult, findValue, type JsonRecord } from '@/lib/telephony/yeastar-ai'
 
 export const dynamic = 'force-dynamic'
 
@@ -14,33 +15,11 @@ type CallMember = {
 }
 
 type CallParty = { from?: unknown; to?: unknown; channel_id?: string; member_status?: string; call_path?: string }
-type JsonRecord = Record<string, unknown>
-type CachedToken = { value: string; expiresAt: number }
-const tokenCache = new Map<string, CachedToken>()
 type TrackedCall = { extension: string; channelId: string; status: string; callPath: string | null; peerNumber: string | null; direction: 'inbound' | 'outbound' | 'internal' | 'unknown' }
 type EventChannel = { channelId: string; memberType: 'extension' | 'inbound' | 'outbound' | 'internal'; memberNumber: string | null; fromNumber: string | null; toNumber: string | null; status: string }
 
 function admin() {
   return createAdminClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
-}
-
-function apiUrl(pbxUrl: string, endpoint: string, version = 'v1.0') {
-  return new URL(`openapi/${version}/${endpoint}`, `${pbxUrl.replace(/\/+$/, '')}/`)
-}
-
-async function accessToken(accountId: string, pbxUrl: string, clientId: string, clientSecret: string) {
-  const cached = tokenCache.get(accountId)
-  if (cached && cached.expiresAt > Date.now()) return cached.value
-  const response = await fetch(apiUrl(pbxUrl, 'get_token'), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'User-Agent': 'OpenAPI' },
-    body: JSON.stringify({ username: clientId, password: clientSecret }),
-    signal: AbortSignal.timeout(15_000),
-  })
-  const result = await response.json().catch(() => ({})) as { errcode?: number; errmsg?: string; access_token?: string; access_token_expire_time?: number }
-  if (!response.ok || result.errcode !== 0 || !result.access_token) throw new Error(result.errmsg || 'Yeastar no aceptó las credenciales OpenAPI.')
-  tokenCache.set(accountId, { value: result.access_token, expiresAt: Date.now() + Math.max(60, (result.access_token_expire_time ?? 1800) - 60) * 1000 })
-  return result.access_token
 }
 
 function validSignature(rawBody: string, secret: string, received: string | null) {
@@ -75,17 +54,6 @@ function firstText(value: unknown, keys: string[]): string | null {
   return null
 }
 
-function findValue(value: unknown, keys: string[]): unknown {
-  if (!value || typeof value !== 'object') return undefined
-  if (Array.isArray(value)) { for (const item of value) { const found = findValue(item, keys); if (found !== undefined) return found } return undefined }
-  const record = value as JsonRecord
-  for (const key of keys) if (record[key] !== undefined && record[key] !== null) return record[key]
-  for (const child of Object.values(record)) { const found = findValue(child, keys); if (found !== undefined) return found }
-  return undefined
-}
-
-function textFromResponse(value: unknown, keys: string[]) { return firstText(findValue(value, keys), ['text', 'value', 'content', 'summary']) ?? firstText(value, keys) }
-
 function scalarText(value: unknown) { return typeof value === 'string' && value.trim() ? value.trim() : null }
 function firstNestedText(value: unknown, keys: string[]): string | null {
   if (!value || typeof value !== 'object') return null
@@ -104,33 +72,6 @@ function firstNestedNumber(value: unknown, keys: string[]) {
   if (!textValue) return null
   const number = Number(textValue)
   return Number.isFinite(number) ? number : null
-}
-
-async function fetchAiResult(db: ReturnType<typeof admin>, accountId: string, callId: string, payload: JsonRecord) {
-  const [monitoring, telephony] = await Promise.all([
-    db.from('yeastar_monitoring_configs').select('api_client_id, api_client_secret').eq('account_id', accountId).maybeSingle(),
-    db.from('telephony_configs').select('pbx_url').eq('account_id', accountId).eq('provider', 'yeastar').maybeSingle(),
-  ])
-  if (monitoring.error) throw monitoring.error
-  if (telephony.error) throw telephony.error
-  if (!monitoring.data?.api_client_id || !monitoring.data.api_client_secret || !telephony.data?.pbx_url) throw new Error('Faltan las credenciales OpenAPI de Yeastar para consultar la IA.')
-  const token = await accessToken(accountId, telephony.data.pbx_url, decrypt(monitoring.data.api_client_id), decrypt(monitoring.data.api_client_secret))
-  const cdrId = String(findValue(payload, ['cdr_id', 'cdrId', 'id']) ?? callId)
-  const requestYeastar = async (endpoint: string) => {
-    const url = apiUrl(telephony.data!.pbx_url, endpoint, 'v2.0')
-    url.searchParams.set('access_token', token)
-    url.searchParams.set('id', cdrId)
-    url.searchParams.set('call_id', callId)
-    const response = await fetch(url, { headers: { 'User-Agent': 'OpenAPI' }, signal: AbortSignal.timeout(15_000) })
-    const result = await response.json().catch(() => ({}))
-    if (!response.ok || (typeof result === 'object' && result && 'errcode' in result && result.errcode !== 0)) return null
-    return result
-  }
-  const context = await requestYeastar('cdr/getaicontext')
-  const summary = await requestYeastar('cdr/getaisummary')
-  const transcript = textFromResponse(context, ['transcript', 'transcription', 'text', 'content'])
-  const summaryText = textFromResponse(summary, ['summary', 'call_summary', 'text', 'content'])
-  return { cdrId, transcript, summary: summaryText, raw: { context, summary } }
 }
 
 async function receipt(db: ReturnType<typeof admin>, accountId: string, outcome: 'processed' | 'ignored' | 'rejected' | 'invalid', detail: string, eventType?: string | null, callId?: string | null) {
@@ -305,7 +246,10 @@ export async function POST(request: Request, context: { params: Promise<{ accoun
         updated_at: new Date().toISOString(),
       }, { onConflict: 'account_id,call_id' })
       if (error) throw error
-      await receipt(db, accountId, 'processed', 'CDR 30012 sincronizado con transcripción y resumen IA.', event.eventType, event.callId)
+      const detail = ai?.transcript || ai?.summary
+        ? 'CDR 30012 sincronizado con transcripción y resumen IA.'
+        : 'CDR 30012 recibido, pero Yeastar aún no tiene la transcripción/resumen IA lista; se reintentará automáticamente.'
+      await receipt(db, accountId, 'processed', detail, event.eventType, event.callId)
       return NextResponse.json({ received: true })
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Error desconocido'
