@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { displayContactPhone } from '@/lib/contacts/contact-identity';
 import { toast } from 'sonner';
 import type { Contact, Tag, ContactTag } from '@/types';
 import { Button } from '@/components/ui/button';
@@ -587,7 +588,9 @@ export default function ContactsPage() {
                 </TableCell>
               </TableRow>
             ) : (
-              contacts.map((contact) => (
+              contacts.map((contact) => {
+                const contactPhone = displayContactPhone(contact.phone);
+                return (
                 <TableRow
                   key={contact.id}
                   className="border-border hover:bg-muted/50 cursor-pointer"
@@ -597,14 +600,14 @@ export default function ContactsPage() {
                     <Checkbox
                       checked={selected.has(contact.id)}
                       onCheckedChange={() => toggleSelect(contact.id)}
-                      aria-label={`Select ${contact.name || contact.phone}`}
+                      aria-label={`Select ${contact.name || contactPhone || t('unnamed')}`}
                     />
                   </TableCell>
                   <TableCell className="text-foreground font-medium">
                     {contact.name || <span className="text-muted-foreground italic">{t('unnamed')}</span>}
                   </TableCell>
                   <TableCell className="text-muted-foreground font-mono text-xs">
-                    {contact.phone}
+                    {contactPhone || <span className="text-muted-foreground">-</span>}
                   </TableCell>
                   <TableCell className="text-muted-foreground hidden md:table-cell text-sm">
                     {contact.email || <span className="text-muted-foreground">-</span>}
@@ -687,7 +690,8 @@ export default function ContactsPage() {
                     </DropdownMenu>
                   </TableCell>
                 </TableRow>
-              ))
+                );
+              })
             )}
           </TableBody>
         </Table>

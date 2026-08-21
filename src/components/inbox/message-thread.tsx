@@ -7,6 +7,7 @@ import { usePresence } from "@/hooks/use-presence";
 import { PresenceDot } from "@/components/presence/presence-dot";
 import { presenceLabel } from "@/lib/presence";
 import { cn } from "@/lib/utils";
+import { displayContactPhone } from "@/lib/contacts/contact-identity";
 import type {
   Conversation,
   Message,
@@ -872,7 +873,8 @@ export function MessageThread({
     );
   }
 
-  const displayName = contact.name || contact.phone;
+  const contactPhone = displayContactPhone(contact.phone);
+  const displayName = contact.name || contactPhone || "Contacto";
   const messageGroups = groupMessagesByDate(messages);
   const currentStatus = STATUS_OPTIONS.find(
     (s) => s.value === conversation.status
@@ -914,7 +916,9 @@ export function MessageThread({
           </div>
           <div className="min-w-0">
             <h2 className="truncate text-sm font-semibold text-foreground">{displayName}</h2>
-            <p className="truncate text-xs text-muted-foreground">{contact.phone}</p>
+            {contactPhone ? (
+              <p className="truncate text-xs text-muted-foreground">{contactPhone}</p>
+            ) : null}
             {conversation.social_comment_id ? (
               <p className="mt-0.5 truncate text-[10px] font-medium text-primary">
                 Comentario público de {conversation.channel_type === "facebook" ? "Facebook" : "Instagram"}

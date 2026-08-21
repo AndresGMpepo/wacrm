@@ -12,6 +12,7 @@ import {
   isUniqueViolation,
   type ExistingContact,
 } from '@/lib/contacts/dedupe';
+import { displayContactPhone } from '@/lib/contacts/contact-identity';
 import {
   Dialog,
   DialogContent,
@@ -284,7 +285,9 @@ export function ContactForm({
                       onClick={() => onViewExisting(dupMatch.contact.id)}
                       className="font-medium underline underline-offset-2 hover:no-underline"
                     >
-                      {t('viewExisting', { name: dupMatch.contact.name || dupMatch.contact.phone })}
+                      {t('viewExisting', {
+                        name: dupMatch.contact.name || displayContactPhone(dupMatch.contact.phone) || t('unnamed'),
+                      })}
                     </button>
                   )}
                 </div>

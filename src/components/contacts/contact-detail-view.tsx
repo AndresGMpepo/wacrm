@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { addContactTag, deleteContactTag } from '@/lib/contacts/tag-api';
+import { displayContactPhone } from '@/lib/contacts/contact-identity';
 import { useAuth } from '@/hooks/use-auth';
 import { formatCurrency } from '@/lib/currency';
 import { toast } from 'sonner';
@@ -194,8 +195,9 @@ export function ContactDetailView({
   }, [open, contactId, fetchContact, fetchTags, fetchNotes, fetchCustomFields, fetchDeals]);
 
   async function copyPhone() {
-    if (!contact) return;
-    await navigator.clipboard.writeText(contact.phone);
+    const phone = displayContactPhone(contact?.phone);
+    if (!phone) return;
+    await navigator.clipboard.writeText(phone);
     setCopiedPhone(true);
     setTimeout(() => setCopiedPhone(false), 2000);
   }
@@ -379,6 +381,8 @@ export function ContactDetailView({
       .slice(0, 2);
   }
 
+  const contactPhone = contact ? displayContactPhone(contact.phone) : null;
+
   return (
     <>
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -408,19 +412,23 @@ export function ContactDetailView({
                     {t('contactDetailsDesc')}
                   </SheetDescription>
                   <div className="flex flex-wrap items-center gap-3 mt-1.5 text-xs text-muted-foreground">
-                    <button
-                      onClick={copyPhone}
-                      className="flex items-center gap-1 hover:text-primary transition-colors cursor-pointer"
-                    >
-                      <Phone className="size-3" />
-                      {contact.phone}
-                      {copiedPhone ? (
-                        <Check className="size-3 text-primary" />
-                      ) : (
-                        <Copy className="size-3" />
-                      )}
-                    </button>
-                    <button onClick={() => void telephony.call(contact.phone)} disabled={!telephony.connected} className="flex items-center gap-1 text-primary transition-colors hover:text-primary/80 disabled:opacity-50" title="Llamar por softphone"><PhoneCall className="size-3" /> Llamar</button>
+                    {contactPhone ? (
+                      <>
+                        <button
+                          onClick={copyPhone}
+                          className="flex items-center gap-1 hover:text-primary transition-colors cursor-pointer"
+                        >
+                          <Phone className="size-3" />
+                          {contactPhone}
+                          {copiedPhone ? (
+                            <Check className="size-3 text-primary" />
+                          ) : (
+                            <Copy className="size-3" />
+                          )}
+                        </button>
+                        <button onClick={() => void telephony.call(contactPhone)} disabled={!telephony.connected} className="flex items-center gap-1 text-primary transition-colors hover:text-primary/80 disabled:opacity-50" title="Llamar por softphone"><PhoneCall className="size-3" /> Llamar</button>
+                      </>
+                    ) : null}
                     {contact.email && (
                       <span className="flex items-center gap-1">
                         <Mail className="size-3" />

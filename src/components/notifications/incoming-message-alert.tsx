@@ -98,6 +98,17 @@ export function IncomingMessageAlert() {
         return;
       }
 
+      // This notification reached the browser, so it is a dependable
+      // recovery signal when Inbox's independent Realtime subscription
+      // misses a messages/conversations event during a reconnect.
+      if (notification.type === 'incoming_message') {
+        window.dispatchEvent(
+          new CustomEvent('nexoomni:inbox-incoming', {
+            detail: { conversationId: notification.conversation_id ?? null },
+          }),
+        );
+      }
+
       playAlert(notification.type);
       const notify = notification.type === 'negative_sentiment'
         ? toast.error

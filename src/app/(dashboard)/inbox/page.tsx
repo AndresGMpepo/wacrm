@@ -184,6 +184,22 @@ function InboxPageInner() {
     }
   }, []);
 
+  // Notifications have their own Realtime subscription and a polling
+  // safety net. Reuse that confirmed delivery to refresh both an open thread
+  // and a newly-created conversation without requiring the agent to reload.
+  useEffect(() => {
+    const onIncomingNotification = (event: Event) => {
+      const detail = (event as CustomEvent<{ conversationId?: string | null }>).detail;
+      if (detail?.conversationId) {
+        void hydrateConversation(detail.conversationId);
+      }
+      setResyncToken((current) => current + 1);
+    };
+
+    window.addEventListener('nexoomni:inbox-incoming', onIncomingNotification);
+    return () => window.removeEventListener('nexoomni:inbox-incoming', onIncomingNotification);
+  }, [hydrateConversation]);
+
   // Check WhatsApp connection status on mount
   useEffect(() => {
     const checkConnection = async () => {

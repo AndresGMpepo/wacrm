@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { cn } from "@/lib/utils";
+import { displayContactPhone } from "@/lib/contacts/contact-identity";
 import type { Contact, Deal, ContactNote, Tag } from "@/types";
 import {
   Phone,
@@ -108,8 +109,9 @@ export function ContactSidebar({ contact, conversationId, internalNotesOpenSigna
   }, [fetchContactData]);
 
   const handleCopyPhone = useCallback(async () => {
-    if (!contact?.phone) return;
-    await navigator.clipboard.writeText(contact.phone);
+    const phone = displayContactPhone(contact?.phone);
+    if (!phone) return;
+    await navigator.clipboard.writeText(phone);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
     // Dep is the whole `contact` object (not `contact?.phone`) so the
@@ -154,7 +156,8 @@ export function ContactSidebar({ contact, conversationId, internalNotesOpenSigna
     );
   }
 
-  const displayName = contact.name || contact.phone;
+  const contactPhone = displayContactPhone(contact.phone);
+  const displayName = contact.name || contactPhone || "Contacto";
   const initials = displayName.charAt(0).toUpperCase();
   const channelLabel = (conversation: ContactConversation) => {
     if (conversation.channel_type === "yeastar_live_chat") return conversation.channel_source_label ? `Chat web · ${conversation.channel_source_label}` : "Chat web Yeastar";
@@ -192,19 +195,23 @@ export function ContactSidebar({ contact, conversationId, internalNotesOpenSigna
 
           {/* Phone */}
           <div className="mt-4 space-y-2">
-            <button onClick={() => void telephony.call(contact.phone)} disabled={!telephony.connected} className="flex w-full items-center gap-2 rounded-lg bg-primary/10 px-3 py-2 text-sm font-medium text-primary transition-colors hover:bg-primary/20 disabled:opacity-50"><PhoneCall className="h-4 w-4" /><span>Llamar por softphone</span></button>
-            <button
-              onClick={handleCopyPhone}
-              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted"
-            >
-              <Phone className="h-4 w-4 text-muted-foreground" />
-              <span className="flex-1 text-left">{contact.phone}</span>
-              {copied ? (
-                <Check className="h-3 w-3 text-primary" />
-              ) : (
-                <Copy className="h-3 w-3 text-muted-foreground" />
-              )}
-            </button>
+            {contactPhone ? (
+              <>
+                <button onClick={() => void telephony.call(contactPhone)} disabled={!telephony.connected} className="flex w-full items-center gap-2 rounded-lg bg-primary/10 px-3 py-2 text-sm font-medium text-primary transition-colors hover:bg-primary/20 disabled:opacity-50"><PhoneCall className="h-4 w-4" /><span>Llamar por softphone</span></button>
+                <button
+                  onClick={handleCopyPhone}
+                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted"
+                >
+                  <Phone className="h-4 w-4 text-muted-foreground" />
+                  <span className="flex-1 text-left">{contactPhone}</span>
+                  {copied ? (
+                    <Check className="h-3 w-3 text-primary" />
+                  ) : (
+                    <Copy className="h-3 w-3 text-muted-foreground" />
+                  )}
+                </button>
+              </>
+            ) : null}
 
             {contact.email && (
               <div className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground">
