@@ -24,8 +24,8 @@ function admin() {
   return createAdminClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
 }
 
-function apiUrl(pbxUrl: string, endpoint: string) {
-  return new URL(`openapi/v1.0/${endpoint}`, `${pbxUrl.replace(/\/+$/, '')}/`)
+function apiUrl(pbxUrl: string, endpoint: string, version = 'v1.0') {
+  return new URL(`openapi/${version}/${endpoint}`, `${pbxUrl.replace(/\/+$/, '')}/`)
 }
 
 async function accessToken(accountId: string, pbxUrl: string, clientId: string, clientSecret: string) {
@@ -117,7 +117,7 @@ async function fetchAiResult(db: ReturnType<typeof admin>, accountId: string, ca
   const token = await accessToken(accountId, telephony.data.pbx_url, decrypt(monitoring.data.api_client_id), decrypt(monitoring.data.api_client_secret))
   const cdrId = String(findValue(payload, ['cdr_id', 'cdrId', 'id']) ?? callId)
   const requestYeastar = async (endpoint: string) => {
-    const url = apiUrl(telephony.data!.pbx_url, endpoint)
+    const url = apiUrl(telephony.data!.pbx_url, endpoint, 'v2.0')
     url.searchParams.set('access_token', token)
     url.searchParams.set('id', cdrId)
     url.searchParams.set('call_id', callId)
@@ -270,7 +270,7 @@ export async function POST(request: Request, context: { params: Promise<{ accoun
   // subscribed events. Acknowledge those quickly without recording them.
   if (!event) {
     const payload = JSON.parse(rawBody) as { type?: unknown; event?: unknown }
-    await receipt(db, accountId, 'ignored', 'Evento válido recibido, pero no es 30011 Call State Changed.', payload.type == null ? (payload.event == null ? null : String(payload.event)) : String(payload.type))
+    await receipt(db, accountId, 'ignored', 'Evento válido recibido, pero no es 30011 Call State Changed ni 30012 Call End Details Notification.', payload.type == null ? (payload.event == null ? null : String(payload.event)) : String(payload.type))
     return NextResponse.json({ received: true })
   }
 
@@ -300,7 +300,7 @@ export async function POST(request: Request, context: { params: Promise<{ accoun
         recording_url: recordingUrl,
         transcript: ai?.transcript,
         summary: ai?.summary,
-        transcription_status: ai?.transcript || ai?.summary ? 'completed' : 'unavailable',
+        transcription_status: ai?.transcript || ai?.summary ? 'completed' : 'pending',
         yeastar_payload: { event: event.payload, ai: ai?.raw ?? null },
         updated_at: new Date().toISOString(),
       }, { onConflict: 'account_id,call_id' })
