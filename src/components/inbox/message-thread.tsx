@@ -54,6 +54,7 @@ import { ConversationIntelligence } from "./conversation-intelligence";
 import { InternalNoteAttention } from "./internal-note-attention";
 import { buildReplyPreview } from "./reply-quote";
 import { toast } from "sonner";
+import { getReactionEndpoint } from '@/lib/omnichannel/reaction-route';
 
 interface ReplyDraft {
   id: string;
@@ -815,7 +816,8 @@ export function MessageThread({
       });
 
       try {
-        const res = await fetch("/api/whatsapp/react", {
+        const endpoint = getReactionEndpoint(conversation.channel_type ?? null);
+        const res = await fetch(endpoint, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ message_id: messageId, emoji }),
