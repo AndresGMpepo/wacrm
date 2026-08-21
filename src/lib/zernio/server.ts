@@ -109,7 +109,9 @@ export type ZernioConnectedAccount = {
  * a browser-supplied account id.
  */
 export async function listZernioAccounts(profileId: string, channel: ZernioChannel) {
-  const query = new URLSearchParams({ profileId, platform: channel, status: 'connected', limit: '100' })
+  // Zernio requires both pagination parameters together. Supplying only
+  // `limit` causes its accounts endpoint to reject the request before OAuth.
+  const query = new URLSearchParams({ profileId, platform: channel, status: 'connected', page: '1', limit: '100' })
   const payload = await zernioFetch(`/accounts?${query.toString()}`)
   const data = record(payload.data)
   const source = Array.isArray(payload.data)
