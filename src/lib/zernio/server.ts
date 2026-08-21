@@ -30,8 +30,14 @@ export async function zernioFetch(path: string, init?: RequestInit) {
   })
   const body = await response.json().catch(() => null) as Record<string, unknown> | null
   if (!response.ok) {
-    const detail = typeof body?.message === 'string' ? body.message : typeof body?.error === 'string' ? body.error : `HTTP ${response.status}`
-    throw new Error(`Zernio no pudo completar la solicitud: ${detail}`)
+    const error = body?.error && typeof body.error === 'object' ? body.error as Record<string, unknown> : {}
+    const detail = typeof body?.message === 'string' ? body.message
+      : typeof error.message === 'string' ? error.message
+        : typeof body?.error === 'string' ? body.error
+          : typeof error.title === 'string' ? error.title
+            : `HTTP ${response.status}`
+    const code = typeof error.code === 'string' || typeof error.code === 'number' ? ` (${error.code})` : ''
+    throw new Error(`Zernio no pudo completar la solicitud${code}: ${detail}`)
   }
   return body ?? {}
 }

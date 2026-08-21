@@ -67,6 +67,7 @@ export async function POST(request: Request) {
       conversation_id: conversation.id,
       sender_type: 'agent', sender_id: userId, content_type: contentType, content_text: text || (filename || 'Archivo'), media_url: isMediaSend ? mediaUrl : null,
       message_id: `zernio:out:${conversation.connector_id}:${externalId ?? crypto.randomUUID()}`,
+      platform_message_id: externalId,
       status: 'sent', created_at: now,
     }).select().single()
     if (messageError) throw messageError

@@ -133,6 +133,7 @@ export async function POST(request: Request) {
             storedMessageId,
           );
           if (resolvedPlatformId) platformMessageId = resolvedPlatformId;
+          else throw new Error('Zernio no devolvió el platformMessageId de este mensaje. Sin ese ID no es posible reaccionar.');
         }
         if (emoji === '') {
           await removeZernioReaction(conversation.external_session_id, platformMessageId, accessToken ?? '');
