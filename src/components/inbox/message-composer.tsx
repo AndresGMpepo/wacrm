@@ -119,6 +119,7 @@ interface MessageComposerProps {
   onOpenTemplates: () => void;
   /** Undefined means every WhatsApp attachment type is available. */
   supportedMediaKinds?: ComposerMediaKind[];
+  channelType?: string | null;
   replyTo?: ReplyDraft | null;
   onClearReply?: () => void;
 }
@@ -142,6 +143,7 @@ export function MessageComposer({
   onSendInteractive,
   onOpenTemplates,
   supportedMediaKinds,
+  channelType,
   replyTo,
   onClearReply,
 }: MessageComposerProps) {
@@ -150,6 +152,7 @@ export function MessageComposer({
     (kind: ComposerMediaKind) => !supportedMediaKinds || supportedMediaKinds.includes(kind),
     [supportedMediaKinds],
   );
+  const requiresInstagramAudio = channelType === "zernio_instagram";
 
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
@@ -189,6 +192,7 @@ export function MessageComposer({
   const [recording, setRecording] = useState(false);
   const [recordSeconds, setRecordSeconds] = useState(0);
   const recorderRef = useRef<import("opus-recorder").default | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const cancelledRef = useRef(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -437,11 +441,11 @@ export function MessageComposer({
   // The encoded Ogg/Opus file from opus-recorder → upload as an audio
   // draft. WhatsApp renders Ogg/Opus as a playable voice note.
   const finalizeRecording = useCallback(
-    async (bytes: Uint8Array) => {
+    async (bytes: Uint8Array, mimeType = "audio/ogg", extension = "ogg") => {
       // Uint8Array is a valid BlobPart at runtime; the cast sidesteps the
       // lib.dom ArrayBufferLike-vs-ArrayBuffer generic mismatch.
-      const file = new File([bytes as unknown as BlobPart], `voice-${Date.now()}.ogg`, {
-        type: "audio/ogg",
+      const file = new File([bytes as unknown as BlobPart], `voice-${Date.now()}.${extension}`, {
+        type: mimeType,
       });
       if (file.size === 0) return; // cancelled / empty take
       if (file.size > MEDIA_MAX_BYTES_BY_KIND.audio) {
@@ -469,6 +473,31 @@ export function MessageComposer({
       return;
     }
     try {
+      if (requiresInstagramAudio) {
+        if (typeof MediaRecorder === "undefined" || !MediaRecorder.isTypeSupported("audio/mp4")) {
+          toast.error("Instagram requiere audio AAC/M4A y este navegador no puede grabarlo.");
+          return;
+        }
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const chunks: Blob[] = [];
+        const mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/mp4" });
+        mediaRecorder.ondataavailable = (event) => {
+          if (event.data.size) chunks.push(event.data);
+        };
+        mediaRecorder.onstop = () => {
+          stream.getTracks().forEach((track) => track.stop());
+          if (cancelledRef.current) return;
+          const blob = new Blob(chunks, { type: "audio/mp4" });
+          void blob.arrayBuffer().then((buffer) => finalizeRecording(new Uint8Array(buffer), "audio/mp4", "mp4"));
+        };
+        cancelledRef.current = false;
+        mediaRecorderRef.current = mediaRecorder;
+        mediaRecorder.start();
+        setRecording(true);
+        setRecordSeconds(0);
+        timerRef.current = setInterval(() => setRecordSeconds((s) => s + 1), 1000);
+        return;
+      }
       // Lazy-load the encoder (≈400 KB worker) only when the user records,
       // keeping it out of the main bundle.
       const { default: Recorder } = await import("opus-recorder");
@@ -494,11 +523,16 @@ export function MessageComposer({
       recorderRef.current = null;
       toast.error("Microphone access denied or unavailable.");
     }
-  }, [inputsDisabled, busy, recording, finalizeRecording]);
+  }, [inputsDisabled, busy, recording, finalizeRecording, requiresInstagramAudio]);
 
   const stopRecording = useCallback(() => {
     clearTimer();
     setRecording(false);
+    if (mediaRecorderRef.current) {
+      mediaRecorderRef.current.stop();
+      mediaRecorderRef.current = null;
+      return;
+    }
     void recorderRef.current?.stop().catch(() => {});
   }, [clearTimer]);
 
@@ -506,6 +540,11 @@ export function MessageComposer({
     cancelledRef.current = true;
     clearTimer();
     setRecording(false);
+    if (mediaRecorderRef.current) {
+      mediaRecorderRef.current.stop();
+      mediaRecorderRef.current = null;
+      return;
+    }
     void recorderRef.current?.stop().catch(() => {});
   }, [clearTimer]);
 

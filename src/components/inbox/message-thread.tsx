@@ -1185,6 +1185,7 @@ export function MessageThread({
       {/* Composer */}
       <MessageComposer
         conversationId={conversation.id}
+        channelType={conversation.channel_type}
         sessionExpired={conversation.channel_type === "yeastar_live_chat" || conversation.channel_type === "facebook" || conversation.channel_type === "instagram" ? false : sessionInfo.expired}
         onSend={handleSend}
         onSendMedia={handleSendMedia}
