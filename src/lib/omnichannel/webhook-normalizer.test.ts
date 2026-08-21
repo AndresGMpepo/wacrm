@@ -74,6 +74,27 @@ describe('extractZernioMedia', () => {
       fileName: undefined,
     })
   })
+
+  it('reads array-based Zernio attachments so image captions are not lost', () => {
+    const media = extractZernioMedia({
+      attachments: [
+        {
+          type: 'image',
+          url: 'https://cdn.example.com/attachment.png',
+          mime_type: 'image/png',
+          caption: 'Mi foto',
+        },
+      ],
+    })
+
+    expect(media).toStrictEqual({
+      kind: 'image',
+      url: 'https://cdn.example.com/attachment.png',
+      mimeType: 'image/png',
+      caption: 'Mi foto',
+      fileName: undefined,
+    })
+  })
 })
 
 describe('extractZernioReaction', () => {

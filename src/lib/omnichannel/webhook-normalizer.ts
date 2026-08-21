@@ -93,32 +93,46 @@ export function safeZernioContactName(provider: 'whatsapp' | 'facebook' | 'insta
   return `${label} ${suffix}`
 }
 
+function flattenZernioRecords(value: unknown): Record<string, unknown>[] {
+  const records: Record<string, unknown>[] = []
+  const visit = (node: unknown) => {
+    if (node == null) return
+    if (Array.isArray(node)) {
+      for (const item of node) visit(item)
+      return
+    }
+    if (typeof node !== 'object') return
+    const record = node as Record<string, unknown>
+    records.push(record)
+    for (const key of ['data', 'payload', 'media', 'attachment', 'attachments', 'file', 'files', 'document', 'audio', 'image', 'video', 'message', 'reaction', 'reactions', 'incoming', 'event']) {
+      if (key in record) visit(record[key])
+    }
+  }
+  visit(value)
+  return records
+}
+
 export function extractZernioMedia(value: Record<string, unknown>): MetaAttachment | undefined {
-  const candidates = [value.media, value.attachment, value.attachments, value.file, value.files, value.document, value.audio, value.image, value.video]
-  for (const candidate of candidates) {
-    const recordValue = candidate && typeof candidate === 'object' && !Array.isArray(candidate)
-      ? candidate as Record<string, unknown>
-      : undefined
-    if (recordValue) {
-      const mimeType = asText(recordValue.mime_type ?? recordValue.mimeType)
-      const url = safeUrl(recordValue.url ?? recordValue.href ?? recordValue.link)
-      const caption = asText(recordValue.caption ?? recordValue.text ?? recordValue.body)
-      const fileName = asText(recordValue.filename ?? recordValue.name)
-      const type = asText(recordValue.type ?? recordValue.kind ?? recordValue.mediaType) ?? 'document'
-      const normalizedType = type.toLowerCase()
-      const knownType = normalizedType.includes('image') ? 'image'
-        : normalizedType.includes('video') ? 'video'
-        : normalizedType.includes('audio') || normalizedType.includes('voice') ? 'audio'
-        : normalizedType.includes('document') || normalizedType.includes('file') || normalizedType.includes('pdf') ? 'document'
-        : 'document'
-      if (url || mimeType || caption || fileName) {
-        return {
-          kind: knownType,
-          url,
-          mimeType,
-          caption,
-          fileName,
-        }
+  const candidates = flattenZernioRecords(value)
+  for (const recordValue of candidates) {
+    const mimeType = asText(recordValue.mime_type ?? recordValue.mimeType ?? recordValue.mime ?? recordValue.content_type)
+    const url = safeUrl(recordValue.url ?? recordValue.href ?? recordValue.link ?? recordValue.file_url ?? recordValue.media_url)
+    const caption = asText(recordValue.caption ?? recordValue.text ?? recordValue.body ?? recordValue.message ?? recordValue.description)
+    const fileName = asText(recordValue.filename ?? recordValue.name ?? recordValue.file_name)
+    const type = asText(recordValue.type ?? recordValue.kind ?? recordValue.mediaType ?? recordValue.mimeType)
+    const normalizedType = (type ?? 'document').toLowerCase()
+    const knownType = normalizedType.includes('image') ? 'image'
+      : normalizedType.includes('video') ? 'video'
+      : normalizedType.includes('audio') || normalizedType.includes('voice') ? 'audio'
+      : normalizedType.includes('document') || normalizedType.includes('file') || normalizedType.includes('pdf') ? 'document'
+      : 'document'
+    if (url || mimeType || caption || fileName) {
+      return {
+        kind: knownType,
+        url,
+        mimeType,
+        caption,
+        fileName,
       }
     }
   }
@@ -138,14 +152,10 @@ export function extractZernioMedia(value: Record<string, unknown>): MetaAttachme
 }
 
 export function extractZernioReaction(value: Record<string, unknown>): MetaReaction | undefined {
-  const nestedEvent = value.event && typeof value.event === 'object' ? value.event as Record<string, unknown> : {}
-  const nestedIncoming = value.incoming && typeof value.incoming === 'object' ? value.incoming as Record<string, unknown> : {}
-  const candidates = [value.reaction, value.message_reaction, value.reactions, nestedEvent.reaction, nestedIncoming.reaction]
-  for (const candidate of candidates) {
-    if (!candidate || typeof candidate !== 'object') continue
-    const reaction = candidate as Record<string, unknown>
-    const emoji = asText(reaction.emoji ?? reaction.icon ?? reaction.symbol)
-    const target = asText(reaction.messageId ?? reaction.message_id ?? reaction.targetMessageId ?? reaction.target_message_id)
+  const candidates = flattenZernioRecords(value)
+  for (const recordValue of candidates) {
+    const emoji = asText(recordValue.emoji ?? recordValue.icon ?? recordValue.symbol)
+    const target = asText(recordValue.messageId ?? recordValue.message_id ?? recordValue.targetMessageId ?? recordValue.target_message_id ?? recordValue.message_id ?? recordValue.id)
     if (emoji || target) {
       return { targetMessageId: target, emoji }
     }
