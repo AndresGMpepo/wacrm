@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { findExistingContact } from '@/lib/contacts/dedupe'
-import { fetchAiResult, findValue, type JsonRecord } from '@/lib/telephony/yeastar-ai'
+import { fetchAiResult, findValue, type AgentSide, type JsonRecord } from '@/lib/telephony/yeastar-ai'
 
 export const dynamic = 'force-dynamic'
 
@@ -230,7 +230,6 @@ export async function POST(request: Request, context: { params: Promise<{ accoun
       // (call_from/call_to/type/recording/time_start/call_duration/...), not
       // the members[] shape 30011 uses. Confirmed against a real payload —
       // see yeastar_payload.event on any synced row.
-      const ai = await fetchAiResult(db, accountId, event.callId, event.payload)
       const callFrom = firstNestedText(event.payload, ['call_from'])
       const callTo = firstNestedText(event.payload, ['call_to'])
       const callType = firstNestedText(event.payload, ['type'])
@@ -239,6 +238,8 @@ export async function POST(request: Request, context: { params: Promise<{ accoun
       const agentExtension = fromExtension ?? toExtension ?? null
       const customerPhone = fromExtension ? callTo : toExtension ? callFrom : (callTo ?? callFrom)
       const direction = callType && ['inbound', 'outbound', 'internal'].includes(callType.toLowerCase()) ? callType.toLowerCase() : 'unknown'
+      const agentSide: AgentSide = agentExtension ? { extensionNumber: agentExtension, side: fromExtension ? 'src' : 'dst' } : null
+      const ai = await fetchAiResult(db, accountId, event.callId, event.payload, agentSide)
       const recordingUrl = firstNestedText(event.payload, ['recording'])
       const durationValue = firstNestedNumber(event.payload, ['call_duration', 'talk_duration'])
       const startTime = firstNestedText(event.payload, ['time_start'])
