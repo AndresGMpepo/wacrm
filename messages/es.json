@@ -418,7 +418,18 @@
       "toastCustomFieldsSaved": "Campos personalizados guardados",
       "toastCustomFieldsFailed": "Error al guardar los campos personalizados",
       "toastTemplateSent": "Plantilla \"{name}\" enviada",
-      "toastTemplateFailed": "Error al enviar la plantilla: {reason}"
+      "toastTemplateFailed": "Error al enviar la plantilla: {reason}",
+      "mergeBtn": "Fusionar contacto",
+      "mergeDialogTitle": "Fusionar con otro contacto",
+      "mergeDialogDescription": "Busca el contacto duplicado. Se moverán sus conversaciones, tratos, notas y etiquetas a este contacto, y el duplicado se eliminará.",
+      "mergeSearchPlaceholder": "Buscar por nombre, teléfono o correo",
+      "mergeNoResults": "Sin resultados",
+      "mergeConfirmTitle": "¿Fusionar estos contactos?",
+      "mergeConfirmDescription": "\"{loserName}\" se eliminará y todo su historial pasará a \"{survivorName}\". Esta acción no se puede deshacer.",
+      "mergeConfirmBtn": "Sí, fusionar",
+      "mergeCancelBtn": "Cancelar",
+      "toastMergeSuccess": "Contactos fusionados correctamente",
+      "toastMergeFailed": "Error al fusionar: {reason}"
     },
     "importModal": {
       "title": "Importar Contactos",

@@ -418,7 +418,18 @@
       "toastCustomFieldsSaved": "커스텀 필드가 저장되었습니다",
       "toastCustomFieldsFailed": "커스텀 필드를 저장하지 못했습니다",
       "toastTemplateSent": "\"{name}\" 템플릿을 보냈습니다",
-      "toastTemplateFailed": "템플릿을 보내지 못했습니다: {reason}"
+      "toastTemplateFailed": "템플릿을 보내지 못했습니다: {reason}",
+      "mergeBtn": "연락처 병합",
+      "mergeDialogTitle": "다른 연락처와 병합",
+      "mergeDialogDescription": "중복된 연락처를 검색하세요. 대화, 거래, 메모, 태그가 이 연락처로 이동되고 중복 연락처는 삭제됩니다.",
+      "mergeSearchPlaceholder": "이름, 전화번호 또는 이메일로 검색",
+      "mergeNoResults": "결과 없음",
+      "mergeConfirmTitle": "이 연락처들을 병합하시겠습니까?",
+      "mergeConfirmDescription": "\"{loserName}\"이(가) 삭제되고 모든 기록이 \"{survivorName}\"(으)로 이동됩니다. 이 작업은 되돌릴 수 없습니다.",
+      "mergeConfirmBtn": "예, 병합합니다",
+      "mergeCancelBtn": "취소",
+      "toastMergeSuccess": "연락처가 성공적으로 병합되었습니다",
+      "toastMergeFailed": "병합 실패: {reason}"
     },
     "importModal": {
       "title": "연락처 가져오기",

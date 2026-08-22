@@ -418,7 +418,18 @@
       "toastCustomFieldsSaved": "Custom fields saved",
       "toastCustomFieldsFailed": "Failed to save custom fields",
       "toastTemplateSent": "Template \"{name}\" sent",
-      "toastTemplateFailed": "Failed to send template: {reason}"
+      "toastTemplateFailed": "Failed to send template: {reason}",
+      "mergeBtn": "Merge contact",
+      "mergeDialogTitle": "Merge with another contact",
+      "mergeDialogDescription": "Search for the duplicate contact. Its conversations, deals, notes and tags will move to this contact, and the duplicate will be deleted.",
+      "mergeSearchPlaceholder": "Search by name, phone or email",
+      "mergeNoResults": "No results",
+      "mergeConfirmTitle": "Merge these contacts?",
+      "mergeConfirmDescription": "\"{loserName}\" will be deleted and all of its history will move to \"{survivorName}\". This action cannot be undone.",
+      "mergeConfirmBtn": "Yes, merge",
+      "mergeCancelBtn": "Cancel",
+      "toastMergeSuccess": "Contacts merged successfully",
+      "toastMergeFailed": "Failed to merge: {reason}"
     },
     "importModal": {
       "title": "Import Contacts",

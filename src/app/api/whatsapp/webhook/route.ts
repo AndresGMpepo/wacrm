@@ -1105,6 +1105,7 @@ async function findOrCreateConversation(
     .select('*')
     .eq('account_id', accountId)
     .eq('contact_id', contactId)
+    .eq('channel_type', 'whatsapp')
     .order('created_at', { ascending: true })
     .limit(1)
 
@@ -1125,6 +1126,7 @@ async function findOrCreateConversation(
       account_id: accountId,
       user_id: configOwnerUserId,
       contact_id: contactId,
+      channel_type: 'whatsapp',
     })
     .select()
     .single()
@@ -1140,6 +1142,7 @@ async function findOrCreateConversation(
         .select('*')
         .eq('account_id', accountId)
         .eq('contact_id', contactId)
+        .eq('channel_type', 'whatsapp')
         .order('created_at', { ascending: true })
         .limit(1)
       if (raced && raced.length > 0) {

@@ -19,6 +19,14 @@ import {
   SheetTitle,
   SheetDescription,
 } from '@/components/ui/sheet';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -41,6 +49,8 @@ import {
   DollarSign,
   LayoutTemplate,
   PhoneCall,
+  Merge,
+  Search,
 } from 'lucide-react';
 import { useTelephony } from '@/components/telephony/telephony-provider';
 import { useTranslations } from 'next-intl';
@@ -60,12 +70,22 @@ export function ContactDetailView({
 }: ContactDetailViewProps) {
   const t = useTranslations('Contacts.detailView');
   const supabase = createClient();
-  const { accountId, defaultCurrency } = useAuth();
+  const { accountId, accountRole, defaultCurrency } = useAuth();
   const telephony = useTelephony();
 
   const [contact, setContact] = useState<Contact | null>(null);
   const [loading, setLoading] = useState(false);
   const [copiedPhone, setCopiedPhone] = useState(false);
+
+  // Merge duplicate contact — admin only. Folds another contact's
+  // conversations/deals/notes/tags into this one via the merge_contacts
+  // RPC (migration 088) and deletes the duplicate.
+  const [mergeDialogOpen, setMergeDialogOpen] = useState(false);
+  const [mergeQuery, setMergeQuery] = useState('');
+  const [mergeResults, setMergeResults] = useState<Contact[]>([]);
+  const [mergeSearching, setMergeSearching] = useState(false);
+  const [mergeTarget, setMergeTarget] = useState<Contact | null>(null);
+  const [merging, setMerging] = useState(false);
 
   // Send template — lets the business initiate (or re-open) a conversation
   // with this contact by sending an approved template. The send route
@@ -191,6 +211,11 @@ export function ContactDetailView({
       fetchNotes();
       fetchCustomFields();
       fetchDeals();
+    } else {
+      setMergeDialogOpen(false);
+      setMergeQuery('');
+      setMergeResults([]);
+      setMergeTarget(null);
     }
   }, [open, contactId, fetchContact, fetchTags, fetchNotes, fetchCustomFields, fetchDeals]);
 
@@ -329,6 +354,58 @@ export function ContactDetailView({
     setSavingCustom(false);
   }
 
+  async function searchMergeCandidates(query: string) {
+    setMergeQuery(query);
+    const trimmed = query.trim();
+    if (!trimmed || !contactId) {
+      setMergeResults([]);
+      return;
+    }
+    setMergeSearching(true);
+    const like = `%${trimmed}%`;
+    const { data } = await supabase
+      .from('contacts')
+      .select('*')
+      .or(`name.ilike.${like},phone.ilike.${like},email.ilike.${like}`)
+      .neq('id', contactId)
+      .order('created_at', { ascending: false })
+      .limit(10);
+    setMergeResults((data ?? []) as Contact[]);
+    setMergeSearching(false);
+  }
+
+  async function confirmMerge() {
+    if (!contact || !mergeTarget) return;
+    setMerging(true);
+    try {
+      const response = await fetch('/api/contacts/merge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ survivorContactId: contact.id, loserContactId: mergeTarget.id }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        toast.error(t('toastMergeFailed', { reason: payload?.error || `HTTP ${response.status}` }));
+        return;
+      }
+      toast.success(t('toastMergeSuccess'));
+      setMergeTarget(null);
+      setMergeDialogOpen(false);
+      setMergeQuery('');
+      setMergeResults([]);
+      fetchContact();
+      fetchTags();
+      fetchNotes();
+      fetchCustomFields();
+      fetchDeals();
+      onUpdated();
+    } catch (err) {
+      toast.error(t('toastMergeFailed', { reason: err instanceof Error ? err.message : 'network error' }));
+    } finally {
+      setMerging(false);
+    }
+  }
+
   async function handleSendTemplate(
     template: MessageTemplate,
     values: TemplateSendValues,
@@ -444,7 +521,7 @@ export function ContactDetailView({
                   </div>
                 </div>
               </div>
-              <div className="mt-3">
+              <div className="mt-3 flex flex-wrap gap-2">
                 <Button
                   size="sm"
                   onClick={() => setTemplatePickerOpen(true)}
@@ -458,6 +535,12 @@ export function ContactDetailView({
                   )}
                   {t('sendTemplateBtn')}
                 </Button>
+                {accountRole === 'owner' || accountRole === 'admin' ? (
+                  <Button size="sm" variant="outline" onClick={() => setMergeDialogOpen(true)}>
+                    <Merge className="size-4" />
+                    {t('mergeBtn')}
+                  </Button>
+                ) : null}
               </div>
             </SheetHeader>
 
@@ -766,6 +849,63 @@ export function ContactDetailView({
       onOpenChange={setTemplatePickerOpen}
       onSelect={handleSendTemplate}
     />
+    <Dialog open={mergeDialogOpen} onOpenChange={(next) => { setMergeDialogOpen(next); if (!next) { setMergeQuery(''); setMergeResults([]); } }}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{t('mergeDialogTitle')}</DialogTitle>
+          <DialogDescription>{t('mergeDialogDescription')}</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={mergeQuery}
+              onChange={(event) => void searchMergeCandidates(event.target.value)}
+              placeholder={t('mergeSearchPlaceholder')}
+              className="pl-9"
+              autoFocus
+            />
+          </div>
+          <ScrollArea className="max-h-64">
+            <div className="space-y-1">
+              {mergeSearching ? (
+                <div className="flex justify-center py-4"><Loader2 className="size-4 animate-spin text-muted-foreground" /></div>
+              ) : mergeQuery.trim() && mergeResults.length === 0 ? (
+                <p className="py-4 text-center text-sm text-muted-foreground">{t('mergeNoResults')}</p>
+              ) : (
+                mergeResults.map((candidate) => (
+                  <button
+                    key={candidate.id}
+                    onClick={() => setMergeTarget(candidate)}
+                    className="flex w-full flex-col items-start rounded-md border border-border/50 p-2 text-left text-sm hover:bg-muted"
+                  >
+                    <span className="font-medium">{candidate.name || t('unnamed')}</span>
+                    <span className="text-xs text-muted-foreground">{displayContactPhone(candidate.phone)}{candidate.email ? ` · ${candidate.email}` : ''}</span>
+                  </button>
+                ))
+              )}
+            </div>
+          </ScrollArea>
+        </div>
+      </DialogContent>
+    </Dialog>
+    <Dialog open={Boolean(mergeTarget)} onOpenChange={(next) => { if (!next) setMergeTarget(null); }}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{t('mergeConfirmTitle')}</DialogTitle>
+          <DialogDescription>
+            {t('mergeConfirmDescription', { loserName: mergeTarget?.name || mergeTarget?.phone || '', survivorName: contact?.name || contact?.phone || '' })}
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setMergeTarget(null)} disabled={merging}>{t('mergeCancelBtn')}</Button>
+          <Button variant="destructive" onClick={() => void confirmMerge()} disabled={merging}>
+            {merging ? <Loader2 className="size-4 animate-spin" /> : <Merge className="size-4" />}
+            {t('mergeConfirmBtn')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
     </>
   );
 }
