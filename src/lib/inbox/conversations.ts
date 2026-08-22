@@ -7,10 +7,13 @@ import type { Conversation, Contact, Tag } from "@/types";
  * flattens them onto `contact.tags`.
  */
 export const CONVERSATION_SELECT =
-  "*, contact:contacts(*, contact_tags(tags(*)))";
+  "*, contact:contacts(*, contact_tags(tags(*)), omnichannel_contact_identities(connector_id, avatar_url))";
 
 /** Raw shape returned by {@link CONVERSATION_SELECT} before flattening. */
-type RawContact = Contact & { contact_tags?: { tags: Tag | null }[] };
+type RawContact = Contact & {
+  contact_tags?: { tags: Tag | null }[];
+  omnichannel_contact_identities?: { connector_id: string; avatar_url: string | null }[];
+};
 type RawConversation = Omit<Conversation, "contact"> & {
   contact?: RawContact | null;
 };
@@ -24,11 +27,15 @@ export function normalizeConversation(raw: RawConversation): Conversation {
   const rawContact = raw.contact;
   if (!rawContact) return raw as Conversation;
 
-  const { contact_tags, ...contact } = rawContact;
+  const { contact_tags, omnichannel_contact_identities, ...contact } = rawContact;
+  const channelAvatar = raw.connector_id
+    ? omnichannel_contact_identities?.find((identity) => identity.connector_id === raw.connector_id)?.avatar_url
+    : null;
   return {
     ...raw,
     contact: {
       ...contact,
+      avatar_url: channelAvatar || contact.avatar_url,
       tags: (contact_tags ?? [])
         .map((ct) => ct.tags)
         .filter((t): t is Tag => t != null),

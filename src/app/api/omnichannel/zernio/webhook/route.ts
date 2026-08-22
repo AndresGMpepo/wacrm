@@ -73,27 +73,19 @@ async function resolveContact(
 ) {
   const { data: mapped, error: mapError } = await db
     .from('omnichannel_contact_identities')
-    .select('contact_id')
+    .select('contact_id, avatar_url')
     .eq('connector_id', connector.id)
     .eq('external_user_id', externalUserId)
     .maybeSingle()
   if (mapError) throw mapError
   if (mapped?.contact_id) {
     const contactId = mapped.contact_id as string
-    if (avatarUrl) {
-      const { data: contact, error } = await db.from('contacts')
-        .select('avatar_url')
-        .eq('id', contactId)
-        .eq('account_id', connector.account_id)
-        .maybeSingle()
-      if (error) throw error
-      if (!contact?.avatar_url) {
-        const { error: updateError } = await db.from('contacts')
-          .update({ avatar_url: avatarUrl })
-          .eq('id', contactId)
-          .eq('account_id', connector.account_id)
-        if (updateError) throw updateError
-      }
+    if (avatarUrl && avatarUrl !== mapped.avatar_url) {
+      const { error: updateError } = await db.from('omnichannel_contact_identities')
+        .update({ avatar_url: avatarUrl })
+        .eq('connector_id', connector.id)
+        .eq('external_user_id', externalUserId)
+      if (updateError) throw updateError
     }
     return contactId
   }
@@ -128,7 +120,6 @@ async function resolveContact(
     if (name && (!existingName || existingName === fallback)) update.name = name
     if (email && !existing.email && email.trim()) update.email = email.trim()
     if (phone && existing.phone === placeholderPhone) update.phone = phone.trim()
-    if (avatarUrl && !existing.avatar_url) update.avatar_url = avatarUrl
     if (Object.keys(update).length) {
       const { error } = await db.from('contacts').update(update).eq('id', contactId).eq('account_id', connector.account_id)
       if (error && !isUniqueViolation(error)) console.error('[zernio] could not enrich existing contact:', error.message)
@@ -149,6 +140,7 @@ async function resolveContact(
     external_user_id: externalUserId,
     contact_id: contactId,
     display_name: name || fallback,
+    avatar_url: avatarUrl ?? null,
   })
   if (identityError && !isUniqueViolation(identityError)) throw identityError
   if (identityError) {

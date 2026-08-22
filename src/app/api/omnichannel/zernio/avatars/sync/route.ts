@@ -19,7 +19,6 @@ type MissingAvatarConversation = {
   id: string
   contact_id: string
   external_session_id: string | null
-  contacts: { avatar_url: string | null } | { avatar_url: string | null }[] | null
 }
 
 export async function POST(request: Request) {
@@ -45,10 +44,9 @@ export async function POST(request: Request) {
 
     const { data, error } = await db
       .from('conversations')
-      .select('id, contact_id, external_session_id, contacts!inner(avatar_url)')
+      .select('id, contact_id, external_session_id')
       .eq('account_id', accountId)
       .eq('connector_id', connector.id)
-      .is('contacts.avatar_url', null)
       .not('external_session_id', 'is', null)
       .limit(MAX_CONVERSATIONS_PER_SYNC)
     if (error) throw error
@@ -62,11 +60,11 @@ export async function POST(request: Request) {
         unavailable += 1
         continue
       }
-      const { error: updateError } = await db.from('contacts')
+      const { error: updateError } = await db.from('omnichannel_contact_identities')
         .update({ avatar_url: picture })
-        .eq('id', conversation.contact_id)
+        .eq('connector_id', connector.id)
+        .eq('contact_id', conversation.contact_id)
         .eq('account_id', accountId)
-        .is('avatar_url', null)
       if (updateError) throw updateError
       updated += 1
     }
