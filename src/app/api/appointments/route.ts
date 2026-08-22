@@ -32,10 +32,20 @@ export async function POST(request: Request) {
     const startsAt = date(body?.starts_at)
     const endsAt = date(body?.ends_at)
     if (!title || !startsAt || !endsAt || new Date(endsAt) <= new Date(startsAt)) return NextResponse.json({ error: 'Datos de cita inválidos.' }, { status: 400 })
+    const contactId = typeof body?.contact_id === 'string' ? body.contact_id : null
+    const assignedAgentId = typeof body?.assigned_agent_id === 'string' ? body.assigned_agent_id : userId
+    const [contactResult, agentResult] = await Promise.all([
+      contactId ? supabase.from('contacts').select('id').eq('id', contactId).eq('account_id', accountId).maybeSingle() : Promise.resolve({ data: null, error: null }),
+      supabase.from('profiles').select('user_id').eq('user_id', assignedAgentId).eq('account_id', accountId).eq('is_active', true).maybeSingle(),
+    ])
+    if (contactResult.error) throw contactResult.error
+    if (agentResult.error) throw agentResult.error
+    if (contactId && !contactResult.data) return NextResponse.json({ error: 'El contacto no pertenece a esta cuenta.' }, { status: 400 })
+    if (!agentResult.data) return NextResponse.json({ error: 'El responsable no está activo en esta cuenta.' }, { status: 400 })
     const { data, error } = await supabase.from('appointments').insert({
       account_id: accountId, created_by: userId, title, starts_at: startsAt, ends_at: endsAt,
-      contact_id: typeof body?.contact_id === 'string' ? body.contact_id : null,
-      assigned_agent_id: typeof body?.assigned_agent_id === 'string' ? body.assigned_agent_id : userId,
+      contact_id: contactId,
+      assigned_agent_id: assignedAgentId,
       notes: typeof body?.notes === 'string' ? body.notes.trim().slice(0, 2000) || null : null,
       timezone: typeof body?.timezone === 'string' ? body.timezone.slice(0, 80) : 'UTC',
     }).select('id').single()
