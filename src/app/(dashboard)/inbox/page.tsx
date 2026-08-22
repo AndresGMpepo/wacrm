@@ -184,6 +184,40 @@ function InboxPageInner() {
     }
   }, []);
 
+  // Contact history changes only the URL; it does not cause
+  // ConversationList's initial fetch effect to run again. Resolve the target
+  // here so every `?c=` link opens its thread, including closed or older ones.
+  useEffect(() => {
+    if (!deepLinkConvId || activeConversation?.id === deepLinkConvId) return;
+    let cancelled = false;
+
+    void (async () => {
+      const inMemory = conversations.find((item) => item.id === deepLinkConvId);
+      if (inMemory) {
+        if (cancelled) return;
+        setActiveConversation(inMemory);
+        setActiveContact(inMemory.contact ?? null);
+        setMessages([]);
+        return;
+      }
+
+      const supabase = createClient();
+      const { data, error } = await supabase
+        .from("conversations")
+        .select(CONVERSATION_SELECT)
+        .eq("id", deepLinkConvId)
+        .maybeSingle();
+      if (cancelled || error || !data) return;
+      const conversation = normalizeConversation(data);
+      setConversations((previous) => previous.some((item) => item.id === conversation.id) ? previous : [conversation, ...previous]);
+      setActiveConversation(conversation);
+      setActiveContact(conversation.contact ?? null);
+      setMessages([]);
+    })();
+
+    return () => { cancelled = true; };
+  }, [activeConversation?.id, conversations, deepLinkConvId]);
+
   // Notifications have their own Realtime subscription and a polling
   // safety net. Reuse that confirmed delivery to refresh both an open thread
   // and a newly-created conversation without requiring the agent to reload.

@@ -290,7 +290,10 @@ export async function POST(request: Request) {
       const contactName = text(sender.name, sender.displayName, sender.fullName, comment.author_name, comment.authorName, participant.name)
       const contactEmail = text(sender.email, participant.email, incoming.email, comment.author_email, comment.authorEmail)
       const contactPhone = text(sender.phone, participant.phone, incoming.phone, comment.author_phone, comment.authorPhone)
-      const contactAvatarUrl = safeHttpsUrl(sender.avatarUrl ?? sender.avatar_url ?? sender.profilePicture ?? sender.profile_picture ?? sender.picture ?? participant.avatarUrl ?? participant.avatar_url ?? participant.profilePicture ?? participant.profile_picture ?? participant.picture)
+      const contactAvatarUrl = safeHttpsUrl(
+        sender.avatarUrl ?? sender.avatar_url ?? sender.profilePicture ?? sender.profile_picture ?? sender.profileImage ?? sender.profile_image ?? sender.profilePhoto ?? sender.profile_photo ?? sender.picture ?? sender.pictureUrl ?? sender.picture_url ?? sender.imageUrl ?? sender.image_url ?? sender.photoUrl ?? sender.photo_url ??
+        participant.avatarUrl ?? participant.avatar_url ?? participant.profilePicture ?? participant.profile_picture ?? participant.profileImage ?? participant.profile_image ?? participant.profilePhoto ?? participant.profile_photo ?? participant.picture ?? participant.pictureUrl ?? participant.picture_url ?? participant.imageUrl ?? participant.image_url ?? participant.photoUrl ?? participant.photo_url,
+      )
       const contactId = await resolveContact(
         db,
         typed,
