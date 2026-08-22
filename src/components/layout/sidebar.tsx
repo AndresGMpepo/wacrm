@@ -94,6 +94,7 @@ interface NavItem {
   beta?: boolean;
   /** Executive reports aggregate the whole account, so they are for admins. */
   adminOnly?: boolean;
+  module?: 'pipelines' | 'appointments';
 }
 
 const navItems: NavItem[] = [
@@ -102,7 +103,7 @@ const navItems: NavItem[] = [
   { href: "/notifications", labelKey: "notifications", icon: Bell },
   { href: "/call-tasks", labelKey: "callTasks", icon: PhoneCall },
   { href: "/contacts", labelKey: "contacts", icon: Users },
-  { href: "/pipelines", labelKey: "pipelines", icon: GitBranch },
+  { href: "/pipelines", labelKey: "pipelines", icon: GitBranch, module: 'pipelines' },
   { href: "/broadcasts", labelKey: "broadcasts", icon: Radio },
   { href: "/automations", labelKey: "automations", icon: Zap },
   { href: "/reports", labelKey: "reports", icon: ChartNoAxesCombined, adminOnly: true },
@@ -129,6 +130,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
   const pathname = usePathname();
   const { profile, profileLoading, account, accountRole, signOut } = useAuth();
   const [isPlatformOperator, setIsPlatformOperator] = useState(false);
+  const [enabledModules, setEnabledModules] = useState<string[]>(['pipelines']);
   const totalUnread = useTotalUnread();
   const unreadNotifications = useUnreadNotifications();
   const pendingCallTasks = usePendingCallTasks();
@@ -173,6 +175,16 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
       cancelled = true;
     };
   }, [profileLoading, profile?.email]);
+
+  useEffect(() => {
+    if (profileLoading) return;
+    let cancelled = false;
+    void fetch('/api/account/operating-mode', { cache: 'no-store' })
+      .then(async (response) => response.ok ? response.json() as Promise<{ enabled_modules?: string[] }> : null)
+      .then((payload) => { if (!cancelled && payload?.enabled_modules) setEnabledModules(payload.enabled_modules); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [profileLoading]);
 
   // Close the drawer when route changes — users opened it to navigate,
   // so once they pick a destination the drawer should get out of the way.
@@ -252,7 +264,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
         {/* Main navigation */}
         <nav className="flex-1 overflow-y-auto px-3 py-4">
           <ul className="flex flex-col gap-1">
-            {navItems.filter((item) => !item.adminOnly || accountRole === 'owner' || accountRole === 'admin').map((item) => {
+            {navItems.filter((item) => (!item.adminOnly || accountRole === 'owner' || accountRole === 'admin') && (!item.module || enabledModules.includes(item.module))).map((item) => {
               const isActive =
                 pathname === item.href ||
                 (item.href !== "/dashboard" && pathname.startsWith(item.href));

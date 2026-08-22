@@ -57,6 +57,16 @@ export default function PipelinesPage() {
   const [stages, setStages] = useState<PipelineStage[]>([]);
   const [deals, setDeals] = useState<Deal[]>([]);
   const [loading, setLoading] = useState(true);
+  const [pipelinesEnabled, setPipelinesEnabled] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch('/api/account/operating-mode', { cache: 'no-store' })
+      .then(async (response) => response.ok ? response.json() as Promise<{ enabled_modules?: string[] }> : null)
+      .then((payload) => { if (!cancelled) setPipelinesEnabled(payload?.enabled_modules?.includes('pipelines') ?? true); })
+      .catch(() => { if (!cancelled) setPipelinesEnabled(true); });
+    return () => { cancelled = true; };
+  }, []);
 
   // Dialog / sheet state
   const [newPipelineOpen, setNewPipelineOpen] = useState(false);
@@ -142,6 +152,7 @@ export default function PipelinesPage() {
 
   // Initial load + seed-if-empty
   useEffect(() => {
+    if (pipelinesEnabled !== true) return;
     let cancelled = false;
     (async () => {
       setLoading(true);
@@ -167,13 +178,14 @@ export default function PipelinesPage() {
     return () => {
       cancelled = true;
     };
-  }, [loadPipelines, seedDefaultPipeline]);
+  }, [loadPipelines, pipelinesEnabled, seedDefaultPipeline]);
 
   // Load stages + deals whenever selected pipeline changes.
   // Clearing on no-selection is a legitimate sync with URL/prop
   // state; the load completion uses async setters inside promise
   // callbacks (not synchronous in the effect body).
   useEffect(() => {
+    if (pipelinesEnabled !== true) return;
     if (!selectedPipelineId) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setStages([]);
@@ -194,7 +206,7 @@ export default function PipelinesPage() {
     return () => {
       cancelled = true;
     };
-  }, [selectedPipelineId, loadStages, loadDeals]);
+  }, [selectedPipelineId, loadStages, loadDeals, pipelinesEnabled]);
 
   const refreshPipelines = useCallback(async () => {
     const list = await loadPipelines();
@@ -296,6 +308,14 @@ export default function PipelinesPage() {
   }
 
   const selectedPipeline = pipelines.find((p) => p.id === selectedPipelineId);
+
+  if (pipelinesEnabled === false) {
+    return <div className="mx-auto max-w-xl space-y-2 py-16 text-center">
+      <GitBranch className="mx-auto size-8 text-muted-foreground" />
+      <h1 className="text-lg font-semibold">Pipelines deshabilitado</h1>
+      <p className="text-sm text-muted-foreground">Un administrador puede habilitar este módulo desde Configuración → Objetivo operativo.</p>
+    </div>;
+  }
 
   if (loading) {
     return (
