@@ -9,6 +9,31 @@ export function apiUrl(pbxUrl: string, endpoint: string, version = 'v1.0') {
   return new URL(`openapi/${version}/${endpoint}`, `${pbxUrl.replace(/\/+$/, '')}/`)
 }
 
+type LocalParts = { year: number; month: number; day: number; hour: number; minute: number; second: number }
+
+function localPartsFromDate(date: Date, timezone: string): LocalParts {
+  const values = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }).formatToParts(date)
+  const value = (type: string) => Number(values.find((item) => item.type === type)?.value ?? 0)
+  return { year: value('year'), month: value('month'), day: value('day'), hour: value('hour'), minute: value('minute'), second: value('second') }
+}
+
+function partsAsUtcMs(parts: LocalParts) { return Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second) }
+
+// Yeastar's CDR timestamps (e.g. "2026-08-21 18:30:09") are the PBX's LOCAL
+// time, not UTC — the server container runs in UTC, so naively doing
+// `new Date(value)` silently misreads the local time as UTC and every
+// stored/displayed time drifts by the timezone offset (the bug reported as
+// "shows 3:34 PM when it's actually 9:39 PM"). Convert using the PBX's real
+// timezone instead.
+export function parsePbxLocalTime(value: string, timezone = 'America/Mexico_City'): Date | null {
+  const match = /^(\d{4})[-/](\d{2})[-/](\d{2})[ T](\d{2}):(\d{2}):(\d{2})/.exec(value.trim())
+  if (!match) return null
+  const parts: LocalParts = { year: Number(match[1]), month: Number(match[2]), day: Number(match[3]), hour: Number(match[4]), minute: Number(match[5]), second: Number(match[6]) }
+  let guess = partsAsUtcMs(parts)
+  for (let index = 0; index < 3; index += 1) guess += partsAsUtcMs(parts) - partsAsUtcMs(localPartsFromDate(new Date(guess), timezone))
+  return new Date(guess)
+}
+
 export async function accessToken(accountId: string, pbxUrl: string, clientId: string, clientSecret: string) {
   const cached = tokenCache.get(accountId)
   if (cached && cached.expiresAt > Date.now()) return cached.value

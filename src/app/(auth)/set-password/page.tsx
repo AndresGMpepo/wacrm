@@ -12,10 +12,11 @@ import { Label } from '@/components/ui/label'
 const MIN_PASSWORD_LENGTH = 8
 
 /**
- * Landing page for Supabase invite links. Supabase consumes the hash fragment
- * in the browser and establishes a short-lived authenticated session; only
- * then do we expose the password form. This prevents a raw invite link from
- * being mistaken for an ordinary login screen.
+ * Landing page for Supabase invite links. Supabase's invite/magic-link emails
+ * use the implicit flow (`#access_token=...&refresh_token=...`), but the
+ * `@supabase/ssr` browser client only auto-detects the PKCE `?code=` query
+ * param — so the hash tokens are parsed and applied manually here instead of
+ * relying on automatic detection.
  */
 export default function SetPasswordPage() {
   const [ready, setReady] = useState(false)
@@ -29,6 +30,19 @@ export default function SetPasswordPage() {
     let active = true
 
     const resolveSession = async () => {
+      const hash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : ''
+      const hashParams = new URLSearchParams(hash)
+      const accessToken = hashParams.get('access_token')
+      const refreshToken = hashParams.get('refresh_token')
+      if (accessToken && refreshToken) {
+        const { error: sessionError } = await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken })
+        if (!active) return
+        if (!sessionError) {
+          window.history.replaceState(null, '', window.location.pathname)
+          setReady(true)
+          return
+        }
+      }
       const { data: { session } } = await supabase.auth.getSession()
       if (!active) return
       if (session) setReady(true)

@@ -33,7 +33,6 @@ type CallRecord = {
   summary: string | null
   transcription_status: string
   error_message: string | null
-  yeastar_payload: unknown
   contact: { name: string | null; phone: string; email: string | null } | null
   agent: { full_name: string | null; email: string | null } | null
 }
@@ -173,10 +172,6 @@ export default function CallTranscriptionsPage() {
                   <summary className="cursor-pointer text-sm font-semibold">Ver cronología</summary>
                   <div className="mt-2"><Chronology timeline={call.timeline} /></div>
                 </details> : null}
-                <details>
-                  <summary className="cursor-pointer text-xs text-muted-foreground">Datos técnicos (depuración)</summary>
-                  <pre className="mt-2 max-h-64 overflow-auto rounded-md bg-muted/30 p-3 text-xs">{JSON.stringify(call.yeastar_payload, null, 2)}</pre>
-                </details>
               </CardContent>
             </Card>)}
           </div>}
