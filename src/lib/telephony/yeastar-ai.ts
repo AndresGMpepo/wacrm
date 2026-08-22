@@ -84,15 +84,15 @@ export async function fetchAiResult(db: SupabaseClient, accountId: string, callI
   if (telephony.error) throw telephony.error
   if (!monitoring.data?.api_client_id || !monitoring.data.api_client_secret || !telephony.data?.pbx_url) throw new Error('Faltan las credenciales OpenAPI de Yeastar para consultar la IA.')
   const token = await accessToken(accountId, telephony.data.pbx_url, decrypt(monitoring.data.api_client_id), decrypt(monitoring.data.api_client_secret))
-  const cdrId = String(findValue(payload, ['cdr_id', 'cdrId', 'id']) ?? callId)
-  // Keep the raw errcode/errmsg on the result instead of swallowing it, so a
-  // wrong id/call_id pairing or an unexpected response shape is visible in
-  // yeastar_payload.ai instead of silently looking like "not ready yet".
-  const requestYeastar = async (endpoint: string) => {
+  // Confirmed against a real "PARAMETER ERROR" response: getaicontext wants
+  // `cdr_ids` (a JSON-array string) and getaisummary wants `cdr_id`
+  // (singular). Neither uses the webhook's call_id. `uid` is the CDR's own
+  // identifier in the 30012 payload — prefer it over the older guessed keys.
+  const cdrId = String(findValue(payload, ['uid', 'cdr_id', 'cdrId', 'id']) ?? callId)
+  const requestYeastar = async (endpoint: string, paramName: 'cdr_id' | 'cdr_ids') => {
     const url = apiUrl(telephony.data!.pbx_url, endpoint, 'v2.0')
     url.searchParams.set('access_token', token)
-    url.searchParams.set('id', cdrId)
-    url.searchParams.set('call_id', callId)
+    url.searchParams.set(paramName, paramName === 'cdr_ids' ? JSON.stringify([cdrId]) : cdrId)
     const response = await fetch(url, { headers: { 'User-Agent': 'OpenAPI' }, signal: AbortSignal.timeout(15_000) })
     const result = await response.json().catch(() => ({})) as JsonRecord
     const errcode = typeof result === 'object' && result && 'errcode' in result ? result.errcode : undefined
@@ -100,8 +100,8 @@ export async function fetchAiResult(db: SupabaseClient, accountId: string, callI
     const error = ok ? null : (typeof result.errmsg === 'string' && result.errmsg) || `HTTP ${response.status}${errcode !== undefined ? `, errcode ${errcode}` : ''}`
     return { ok, result, error }
   }
-  const context = await requestYeastar('cdr/getaicontext')
-  const summary = await requestYeastar('cdr/getaisummary')
+  const context = await requestYeastar('cdr/getaicontext', 'cdr_ids')
+  const summary = await requestYeastar('cdr/getaisummary', 'cdr_id')
   const transcript = context.ok ? textFromResponse(context.result, ['transcript', 'transcription', 'text', 'content']) : null
   const summaryText = summary.ok ? textFromResponse(summary.result, ['summary', 'call_summary', 'text', 'content']) : null
   return {

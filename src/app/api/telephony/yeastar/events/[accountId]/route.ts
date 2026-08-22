@@ -226,19 +226,23 @@ export async function POST(request: Request, context: { params: Promise<{ accoun
 
   if (event.eventType === '30012') {
     try {
+      // The 30012 "Call End Details Notification" body is a flat CDR record
+      // (call_from/call_to/type/recording/time_start/call_duration/...), not
+      // the members[] shape 30011 uses. Confirmed against a real payload —
+      // see yeastar_payload.event on any synced row.
       const ai = await fetchAiResult(db, accountId, event.callId, event.payload)
-      // The customer's number/extension live inside `members`, not under a
-      // flat "customer_phone"-style key — reuse the same resolution the 30011
-      // handler uses so this data actually matches what Yeastar sent.
-      const calls = event.members.flatMap((member) => trackedCalls(member, knownExtensions, peer))
-      const primaryCall = calls[0] ?? null
-      const customerPhone = peer ?? firstNestedText(event.payload, ['customer_phone', 'caller_number', 'customerNumber', 'phone', 'number'])
-      const customerName = firstNestedText(event.payload, ['customer_name', 'caller_name', 'contact_name', 'name'])
-      const customerEmail = firstNestedText(event.payload, ['customer_email', 'email'])
-      const agentExtension = primaryCall?.extension ?? firstNestedText(event.payload, ['agent_extension', 'extension_number', 'extension'])
-      const direction = primaryCall?.direction ?? 'unknown'
-      const recordingUrl = firstNestedText(event.payload, ['recording_url', 'record_url', 'recordingUrl', 'recording'])
-      const durationValue = firstNestedNumber(event.payload, ['duration', 'duration_seconds', 'talk_duration'])
+      const callFrom = firstNestedText(event.payload, ['call_from'])
+      const callTo = firstNestedText(event.payload, ['call_to'])
+      const callType = firstNestedText(event.payload, ['type'])
+      const fromExtension = resolveExtension(callFrom, knownExtensions)
+      const toExtension = resolveExtension(callTo, knownExtensions)
+      const agentExtension = fromExtension ?? toExtension ?? null
+      const customerPhone = fromExtension ? callTo : toExtension ? callFrom : (callTo ?? callFrom)
+      const direction = callType && ['inbound', 'outbound', 'internal'].includes(callType.toLowerCase()) ? callType.toLowerCase() : 'unknown'
+      const recordingUrl = firstNestedText(event.payload, ['recording'])
+      const durationValue = firstNestedNumber(event.payload, ['call_duration', 'talk_duration'])
+      const startTime = firstNestedText(event.payload, ['time_start'])
+      const startedAt = startTime ? new Date(startTime.replace(' ', 'T')) : null
       const contact = customerPhone ? await findExistingContact(db, accountId, customerPhone) : null
       const contactRow = contact ? (await db.from('contacts').select('id, name, email, phone').eq('id', contact.id).maybeSingle()).data : null
       const agentConfig = agentExtension ? (await db.from('telephony_user_configs').select('user_id').eq('account_id', accountId).eq('provider', 'yeastar').eq('extension', agentExtension).maybeSingle()).data : null
@@ -247,14 +251,15 @@ export async function POST(request: Request, context: { params: Promise<{ accoun
         call_id: event.callId,
         cdr_id: ai?.cdrId ?? null,
         customer_phone: customerPhone ?? contactRow?.phone ?? null,
-        customer_name: customerName ?? contactRow?.name ?? null,
-        customer_email: customerEmail ?? contactRow?.email ?? null,
+        customer_name: contactRow?.name ?? null,
+        customer_email: contactRow?.email ?? null,
         contact_id: contactRow?.id ?? null,
         agent_user_id: agentConfig?.user_id ?? null,
         agent_extension: agentExtension,
         direction,
+        started_at: startedAt && !Number.isNaN(startedAt.getTime()) ? startedAt.toISOString() : null,
         duration_seconds: durationValue ? Math.round(durationValue) : null,
-        recording_url: recordingUrl,
+        recording_url: recordingUrl || null,
         transcript: ai?.transcript,
         summary: ai?.summary,
         transcription_status: ai?.transcript || ai?.summary ? 'completed' : 'pending',
