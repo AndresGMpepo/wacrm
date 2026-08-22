@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/ai/admin-client'
-import { fetchAiResult, type AgentSide, type JsonRecord } from '@/lib/telephony/yeastar-ai'
+import { fetchAiResult, type JsonRecord } from '@/lib/telephony/yeastar-ai'
+import { generateCallSummary } from '@/lib/telephony/call-summary'
 
 export const dynamic = 'force-dynamic'
 
@@ -9,7 +10,7 @@ export const dynamic = 'force-dynamic'
 // Re-attempt pending rows for a bounded window before giving up.
 const RETRY_WINDOW_MS = 3 * 60 * 60 * 1000
 
-type PendingRow = { id: string; account_id: string; call_id: string; created_at: string; yeastar_payload: JsonRecord | null; agent_extension: string | null; direction: string | null }
+type PendingRow = { id: string; account_id: string; call_id: string; created_at: string; yeastar_payload: JsonRecord | null }
 
 export async function POST(request: Request) {
   const secret = process.env.AI_ANALYSIS_WORKER_SECRET
@@ -18,7 +19,7 @@ export async function POST(request: Request) {
   }
   const db = supabaseAdmin()
   const { data: rows, error } = await db.from('yeastar_call_transcriptions')
-    .select('id, account_id, call_id, created_at, yeastar_payload, agent_extension, direction')
+    .select('id, account_id, call_id, created_at, yeastar_payload')
     .eq('transcription_status', 'pending')
     .order('created_at', { ascending: true })
     .limit(20)
@@ -28,14 +29,14 @@ export async function POST(request: Request) {
   for (const row of (rows ?? []) as PendingRow[]) {
     const eventPayload = (row.yeastar_payload?.event ?? {}) as JsonRecord
     const expiredRow = Date.now() - new Date(row.created_at).getTime() > RETRY_WINDOW_MS
-    const agentSide: AgentSide = row.agent_extension ? { extensionNumber: row.agent_extension, side: row.direction === 'outbound' ? 'src' : 'dst' } : null
     try {
-      const ai = await fetchAiResult(db, row.account_id, row.call_id, eventPayload, agentSide)
-      const apiError = [ai.contextError, ai.summaryError].filter(Boolean).join(' | ') || null
-      if (ai.transcript || ai.summary) {
+      const ai = await fetchAiResult(db, row.account_id, row.call_id, eventPayload)
+      const apiError = ai.contextError
+      if (ai.transcript) {
+        const summary = await generateCallSummary(db, row.account_id, ai.transcript).catch(() => null)
         const { error: updateError } = await db.from('yeastar_call_transcriptions').update({
           transcript: ai.transcript,
-          summary: ai.summary,
+          summary,
           transcription_status: 'completed',
           error_message: null,
           yeastar_payload: { event: eventPayload, ai: ai.raw },
@@ -46,7 +47,7 @@ export async function POST(request: Request) {
       } else if (expiredRow) {
         await db.from('yeastar_call_transcriptions').update({
           transcription_status: 'unavailable',
-          error_message: (apiError || 'Yeastar no publicó una transcripción ni resumen dentro de la ventana de reintento.').slice(0, 500),
+          error_message: (apiError || 'Yeastar no publicó una transcripción dentro de la ventana de reintento.').slice(0, 500),
           yeastar_payload: { event: eventPayload, ai: ai.raw },
           updated_at: new Date().toISOString(),
         }).eq('id', row.id)

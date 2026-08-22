@@ -3,7 +3,8 @@ import { NextResponse } from 'next/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { findExistingContact } from '@/lib/contacts/dedupe'
-import { fetchAiResult, findValue, type AgentSide, type JsonRecord } from '@/lib/telephony/yeastar-ai'
+import { fetchAiResult, fetchCdrDetail, findValue, type JsonRecord } from '@/lib/telephony/yeastar-ai'
+import { generateCallSummary } from '@/lib/telephony/call-summary'
 
 export const dynamic = 'force-dynamic'
 
@@ -238,10 +239,12 @@ export async function POST(request: Request, context: { params: Promise<{ accoun
       const agentExtension = fromExtension ?? toExtension ?? null
       const customerPhone = fromExtension ? callTo : toExtension ? callFrom : (callTo ?? callFrom)
       const direction = callType && ['inbound', 'outbound', 'internal'].includes(callType.toLowerCase()) ? callType.toLowerCase() : 'unknown'
-      const agentSide: AgentSide = agentExtension ? { extensionNumber: agentExtension, side: fromExtension ? 'src' : 'dst' } : null
-      const ai = await fetchAiResult(db, accountId, event.callId, event.payload, agentSide)
+      const ai = await fetchAiResult(db, accountId, event.callId, event.payload)
+      const summary = ai.transcript ? await generateCallSummary(db, accountId, ai.transcript).catch(() => null) : null
+      const uid = firstNestedText(event.payload, ['uid'])
+      const cdrDetail = uid ? await fetchCdrDetail(db, accountId, uid).catch(() => null) : null
       const recordingUrl = firstNestedText(event.payload, ['recording'])
-      const durationValue = firstNestedNumber(event.payload, ['call_duration', 'talk_duration'])
+      const durationValue = cdrDetail?.callDurationSeconds ?? firstNestedNumber(event.payload, ['call_duration', 'talk_duration'])
       const startTime = firstNestedText(event.payload, ['time_start'])
       const startedAt = startTime ? new Date(startTime.replace(' ', 'T')) : null
       const contact = customerPhone ? await findExistingContact(db, accountId, customerPhone) : null
@@ -260,18 +263,25 @@ export async function POST(request: Request, context: { params: Promise<{ accoun
         direction,
         started_at: startedAt && !Number.isNaN(startedAt.getTime()) ? startedAt.toISOString() : null,
         duration_seconds: durationValue ? Math.round(durationValue) : null,
+        routing_duration_seconds: cdrDetail?.routingDurationSeconds ?? null,
+        handling_duration_seconds: cdrDetail?.handlingDurationSeconds ?? null,
+        ring_duration_seconds: cdrDetail?.ringDurationSeconds ?? null,
+        hold_duration_seconds: cdrDetail?.holdDurationSeconds ?? null,
+        talk_duration_seconds: cdrDetail?.talkDurationSeconds ?? null,
+        disconnected_by: cdrDetail?.disconnectedBy ?? null,
+        timeline: cdrDetail?.timeline ?? [],
         recording_url: recordingUrl || null,
         transcript: ai?.transcript,
-        summary: ai?.summary,
-        transcription_status: ai?.transcript || ai?.summary ? 'completed' : 'pending',
-        error_message: ai?.contextError || ai?.summaryError ? [ai?.contextError, ai?.summaryError].filter(Boolean).join(' | ').slice(0, 500) : null,
+        summary,
+        transcription_status: ai?.transcript ? 'completed' : 'pending',
+        error_message: ai?.contextError ?? null,
         yeastar_payload: { event: event.payload, ai: ai?.raw ?? null },
         updated_at: new Date().toISOString(),
       }, { onConflict: 'account_id,call_id' })
       if (error) throw error
-      const detail = ai?.transcript || ai?.summary
-        ? 'CDR 30012 sincronizado con transcripción y resumen IA.'
-        : `CDR 30012 recibido, pero Yeastar aún no tiene la transcripción/resumen IA lista; se reintentará automáticamente.${ai?.contextError || ai?.summaryError ? ` (${[ai?.contextError, ai?.summaryError].filter(Boolean).join(' | ')})` : ''}`
+      const detail = ai?.transcript
+        ? 'CDR 30012 sincronizado con transcripción y resumen generado por NexoOmni.'
+        : `CDR 30012 recibido, pero Yeastar aún no tiene la transcripción lista; se reintentará automáticamente.${ai?.contextError ? ` (${ai.contextError})` : ''}`
       await receipt(db, accountId, 'processed', detail, event.eventType, event.callId)
       return NextResponse.json({ received: true })
     } catch (error) {

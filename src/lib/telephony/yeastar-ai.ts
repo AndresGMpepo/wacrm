@@ -4,9 +4,6 @@ import { decrypt } from '@/lib/whatsapp/encryption'
 export type JsonRecord = Record<string, unknown>
 type CachedToken = { value: string; expiresAt: number }
 const tokenCache = new Map<string, CachedToken>()
-// extension number -> Yeastar's internal numeric extension ID (needed by
-// getaisummary's src_ext_id/dst_ext_id). Rarely changes, safe to cache.
-const extensionIdCache = new Map<string, number>()
 
 export function apiUrl(pbxUrl: string, endpoint: string, version = 'v1.0') {
   return new URL(`openapi/${version}/${endpoint}`, `${pbxUrl.replace(/\/+$/, '')}/`)
@@ -100,35 +97,11 @@ function buildTranscriptFromContext(result: unknown): string | null {
 export type AiResult = {
   cdrId: string
   transcript: string | null
-  summary: string | null
   contextError: string | null
-  summaryError: string | null
-  raw: { context: unknown; summary: unknown }
+  raw: { context: unknown }
 }
 
-// Resolve the numeric extension ID Yeastar's getaisummary requires
-// (src_ext_id/dst_ext_id), distinct from the extension *number* (e.g. "1000").
-async function resolveExtensionId(pbxUrl: string, token: string, accountId: string, extensionNumber: string): Promise<number | null> {
-  const cacheKey = `${accountId}:${extensionNumber}`
-  const cached = extensionIdCache.get(cacheKey)
-  if (cached !== undefined) return cached
-  const url = apiUrl(pbxUrl, 'extension/search', 'v1.0')
-  url.searchParams.set('access_token', token)
-  url.searchParams.set('search_value', extensionNumber)
-  const response = await fetch(url, { headers: { 'User-Agent': 'OpenAPI' }, signal: AbortSignal.timeout(15_000) })
-  const result = await response.json().catch(() => ({})) as { errcode?: number; data?: Array<{ id?: number; number?: string }> }
-  if (!response.ok || result.errcode !== 0 || !Array.isArray(result.data)) return null
-  const match = result.data.find((ext) => ext.number === extensionNumber)
-  if (match?.id == null) return null
-  extensionIdCache.set(cacheKey, match.id)
-  return match.id
-}
-
-// Which side of the call the agent's extension is on, so getaisummary's
-// required src_ext_id/dst_ext_id can be set correctly.
-export type AgentSide = { extensionNumber: string; side: 'src' | 'dst' } | null
-
-export async function fetchAiResult(db: SupabaseClient, accountId: string, callId: string, payload: JsonRecord, agent: AgentSide = null): Promise<AiResult> {
+export async function fetchAiResult(db: SupabaseClient, accountId: string, callId: string, payload: JsonRecord): Promise<AiResult> {
   const [monitoring, telephony] = await Promise.all([
     db.from('yeastar_monitoring_configs').select('api_client_id, api_client_secret').eq('account_id', accountId).maybeSingle(),
     db.from('telephony_configs').select('pbx_url').eq('account_id', accountId).eq('provider', 'yeastar').maybeSingle(),
@@ -138,9 +111,9 @@ export async function fetchAiResult(db: SupabaseClient, accountId: string, callI
   if (!monitoring.data?.api_client_id || !monitoring.data.api_client_secret || !telephony.data?.pbx_url) throw new Error('Faltan las credenciales OpenAPI de Yeastar para consultar la IA.')
   const pbxUrl = telephony.data.pbx_url
   const token = await accessToken(accountId, pbxUrl, decrypt(monitoring.data.api_client_id), decrypt(monitoring.data.api_client_secret))
-  // Confirmed against Yeastar's official docs (Get AI Call Transcript/Summary
-  // v2.0): cdr_ids/cdr_id is the call LEG id, which matches the webhook's
-  // `call_note_id` format (yyyyMMddHHmmss-XXXXX) — NOT `uid` or `call_id`.
+  // Confirmed against Yeastar's official docs (Get AI Call Transcript v2.0):
+  // cdr_ids is the call LEG id, which matches the webhook's `call_note_id`
+  // format (yyyyMMddHHmmss-XXXXX) — NOT `uid` or `call_id`.
   const cdrId = String(findValue(payload, ['call_note_id', 'leg_id', 'uid', 'cdr_id', 'cdrId', 'id']) ?? callId)
   const requestYeastar = async (endpoint: string, params: Record<string, string>) => {
     const url = apiUrl(pbxUrl, endpoint, 'v2.0')
@@ -154,20 +127,68 @@ export async function fetchAiResult(db: SupabaseClient, accountId: string, callI
     return { ok, result, error }
   }
   const context = await requestYeastar('cdr/getaicontext', { cdr_ids: cdrId })
-  // getaisummary requires either src_ext_id or dst_ext_id (the agent's
-  // numeric extension ID) in addition to cdr_id.
-  const extensionId = agent ? await resolveExtensionId(pbxUrl, token, accountId, agent.extensionNumber).catch(() => null) : null
-  const summaryParams: Record<string, string> = { cdr_id: cdrId }
-  if (extensionId != null && agent) summaryParams[agent.side === 'src' ? 'src_ext_id' : 'dst_ext_id'] = String(extensionId)
-  const summary = await requestYeastar('cdr/getaisummary', summaryParams)
   const transcript = context.ok ? (buildTranscriptFromContext(context.result) ?? textFromResponse(context.result, ['transcript', 'transcription', 'text', 'content'])) : null
-  const summaryText = summary.ok ? textFromResponse(summary.result, ['summary', 'call_summary', 'text', 'content']) : null
   return {
     cdrId,
     transcript,
-    summary: summaryText,
     contextError: context.ok ? null : context.error,
-    summaryError: summary.ok ? null : summary.error,
-    raw: { context: context.result, summary: summary.result },
+    raw: { context: context.result },
   }
 }
+
+export type CdrDetail = {
+  callDurationSeconds: number | null
+  routingDurationSeconds: number | null
+  handlingDurationSeconds: number | null
+  ringDurationSeconds: number | null
+  holdDurationSeconds: number | null
+  talkDurationSeconds: number | null
+  disconnectedBy: string | null
+  timeline: Array<{ leg: number; events: Array<{ name: string; timeSeconds: number; at: string | null; content: unknown }> }>
+}
+
+// GET /openapi/v2.0/cdr/detail?uid=<uid> — the duration breakdown and call
+// flow chronology shown in Yeastar's "Detalles del CDR" screen.
+export async function fetchCdrDetail(db: SupabaseClient, accountId: string, uid: string): Promise<CdrDetail | null> {
+  const [monitoring, telephony] = await Promise.all([
+    db.from('yeastar_monitoring_configs').select('api_client_id, api_client_secret').eq('account_id', accountId).maybeSingle(),
+    db.from('telephony_configs').select('pbx_url').eq('account_id', accountId).eq('provider', 'yeastar').maybeSingle(),
+  ])
+  if (monitoring.error) throw monitoring.error
+  if (telephony.error) throw telephony.error
+  if (!monitoring.data?.api_client_id || !monitoring.data.api_client_secret || !telephony.data?.pbx_url) throw new Error('Faltan las credenciales OpenAPI de Yeastar para consultar la IA.')
+  const pbxUrl = telephony.data.pbx_url
+  const token = await accessToken(accountId, pbxUrl, decrypt(monitoring.data.api_client_id), decrypt(monitoring.data.api_client_secret))
+  const url = apiUrl(pbxUrl, 'cdr/detail', 'v2.0')
+  url.searchParams.set('access_token', token)
+  url.searchParams.set('uid', uid)
+  const response = await fetch(url, { headers: { 'User-Agent': 'OpenAPI' }, signal: AbortSignal.timeout(15_000) })
+  const result = await response.json().catch(() => ({})) as JsonRecord
+  const errcode = typeof result.errcode === 'number' ? result.errcode : undefined
+  if (!response.ok || (errcode !== undefined && errcode !== 0)) return null
+  const data = result.data as JsonRecord | undefined
+  const basic = data?.basic as JsonRecord | undefined
+  if (!basic) return null
+  const num = (value: unknown) => (typeof value === 'number' ? value : null)
+  const timelineRaw = Array.isArray(data?.timeline) ? data.timeline as JsonRecord[] : []
+  const timeline = timelineRaw.map((leg) => ({
+    leg: typeof leg.leg === 'number' ? leg.leg : 0,
+    events: (Array.isArray(leg.event_list) ? leg.event_list as JsonRecord[] : []).map((event) => ({
+      name: typeof event.event_name === 'string' ? event.event_name : 'event',
+      timeSeconds: typeof event.event_time === 'number' ? event.event_time : 0,
+      at: typeof event.event_ts === 'string' ? event.event_ts : null,
+      content: event.event_content ?? null,
+    })),
+  }))
+  return {
+    callDurationSeconds: num(basic.call_duration),
+    routingDurationSeconds: num(basic.routing_duration),
+    handlingDurationSeconds: num(basic.handling_duration),
+    ringDurationSeconds: num(basic.ring_duration),
+    holdDurationSeconds: num(basic.hold_duration),
+    talkDurationSeconds: num(basic.talk_duration),
+    disconnectedBy: typeof basic.disconnected_by === 'string' ? basic.disconnected_by : null,
+    timeline,
+  }
+}
+
