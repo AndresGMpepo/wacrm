@@ -30,11 +30,13 @@ export async function POST(request: Request) {
     const expiredRow = Date.now() - new Date(row.created_at).getTime() > RETRY_WINDOW_MS
     try {
       const ai = await fetchAiResult(db, row.account_id, row.call_id, eventPayload)
+      const apiError = [ai.contextError, ai.summaryError].filter(Boolean).join(' | ') || null
       if (ai.transcript || ai.summary) {
         const { error: updateError } = await db.from('yeastar_call_transcriptions').update({
           transcript: ai.transcript,
           summary: ai.summary,
           transcription_status: 'completed',
+          error_message: null,
           yeastar_payload: { event: eventPayload, ai: ai.raw },
           updated_at: new Date().toISOString(),
         }).eq('id', row.id)
@@ -43,12 +45,19 @@ export async function POST(request: Request) {
       } else if (expiredRow) {
         await db.from('yeastar_call_transcriptions').update({
           transcription_status: 'unavailable',
-          error_message: 'Yeastar no publicó una transcripción ni resumen dentro de la ventana de reintento.',
+          error_message: (apiError || 'Yeastar no publicó una transcripción ni resumen dentro de la ventana de reintento.').slice(0, 500),
           yeastar_payload: { event: eventPayload, ai: ai.raw },
           updated_at: new Date().toISOString(),
         }).eq('id', row.id)
         expired++
       } else {
+        if (apiError) {
+          await db.from('yeastar_call_transcriptions').update({
+            error_message: apiError.slice(0, 500),
+            yeastar_payload: { event: eventPayload, ai: ai.raw },
+            updated_at: new Date().toISOString(),
+          }).eq('id', row.id)
+        }
         stillPending++
       }
     } catch (fetchError) {

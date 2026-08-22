@@ -66,7 +66,14 @@ export function textFromResponse(value: unknown, keys: string[]): string | null 
   return joinSegments(found) ?? joinSegments(value)
 }
 
-export type AiResult = { cdrId: string; transcript: string | null; summary: string | null; raw: { context: unknown; summary: unknown } }
+export type AiResult = {
+  cdrId: string
+  transcript: string | null
+  summary: string | null
+  contextError: string | null
+  summaryError: string | null
+  raw: { context: unknown; summary: unknown }
+}
 
 export async function fetchAiResult(db: SupabaseClient, accountId: string, callId: string, payload: JsonRecord): Promise<AiResult> {
   const [monitoring, telephony] = await Promise.all([
@@ -78,19 +85,31 @@ export async function fetchAiResult(db: SupabaseClient, accountId: string, callI
   if (!monitoring.data?.api_client_id || !monitoring.data.api_client_secret || !telephony.data?.pbx_url) throw new Error('Faltan las credenciales OpenAPI de Yeastar para consultar la IA.')
   const token = await accessToken(accountId, telephony.data.pbx_url, decrypt(monitoring.data.api_client_id), decrypt(monitoring.data.api_client_secret))
   const cdrId = String(findValue(payload, ['cdr_id', 'cdrId', 'id']) ?? callId)
+  // Keep the raw errcode/errmsg on the result instead of swallowing it, so a
+  // wrong id/call_id pairing or an unexpected response shape is visible in
+  // yeastar_payload.ai instead of silently looking like "not ready yet".
   const requestYeastar = async (endpoint: string) => {
     const url = apiUrl(telephony.data!.pbx_url, endpoint, 'v2.0')
     url.searchParams.set('access_token', token)
     url.searchParams.set('id', cdrId)
     url.searchParams.set('call_id', callId)
     const response = await fetch(url, { headers: { 'User-Agent': 'OpenAPI' }, signal: AbortSignal.timeout(15_000) })
-    const result = await response.json().catch(() => ({}))
-    if (!response.ok || (typeof result === 'object' && result && 'errcode' in result && result.errcode !== 0)) return null
-    return result
+    const result = await response.json().catch(() => ({})) as JsonRecord
+    const errcode = typeof result === 'object' && result && 'errcode' in result ? result.errcode : undefined
+    const ok = response.ok && (errcode === undefined || errcode === 0)
+    const error = ok ? null : (typeof result.errmsg === 'string' && result.errmsg) || `HTTP ${response.status}${errcode !== undefined ? `, errcode ${errcode}` : ''}`
+    return { ok, result, error }
   }
   const context = await requestYeastar('cdr/getaicontext')
   const summary = await requestYeastar('cdr/getaisummary')
-  const transcript = textFromResponse(context, ['transcript', 'transcription', 'text', 'content'])
-  const summaryText = textFromResponse(summary, ['summary', 'call_summary', 'text', 'content'])
-  return { cdrId, transcript, summary: summaryText, raw: { context, summary } }
+  const transcript = context.ok ? textFromResponse(context.result, ['transcript', 'transcription', 'text', 'content']) : null
+  const summaryText = summary.ok ? textFromResponse(summary.result, ['summary', 'call_summary', 'text', 'content']) : null
+  return {
+    cdrId,
+    transcript,
+    summary: summaryText,
+    contextError: context.ok ? null : context.error,
+    summaryError: summary.ok ? null : summary.error,
+    raw: { context: context.result, summary: summary.result },
+  }
 }

@@ -215,13 +215,28 @@ export async function POST(request: Request, context: { params: Promise<{ accoun
     return NextResponse.json({ received: true })
   }
 
+  const { data: configuredExtensions, error: extensionError } = await db.from('telephony_user_configs')
+    .select('extension').eq('account_id', accountId).eq('provider', 'yeastar')
+  if (extensionError) {
+    await receipt(db, accountId, 'invalid', `No se pudieron consultar las extensiones NexoOmni: ${extensionError.message}`, event.eventType, event.callId)
+    return NextResponse.json({ error: 'Could not load extensions' }, { status: 500 })
+  }
+  const knownExtensions = new Set((configuredExtensions ?? []).map((row) => row.extension))
+  const peer = callPeer(event.members, knownExtensions)
+
   if (event.eventType === '30012') {
     try {
       const ai = await fetchAiResult(db, accountId, event.callId, event.payload)
-      const customerPhone = firstNestedText(event.payload, ['customer_phone', 'caller_number', 'customerNumber', 'phone', 'number'])
+      // The customer's number/extension live inside `members`, not under a
+      // flat "customer_phone"-style key — reuse the same resolution the 30011
+      // handler uses so this data actually matches what Yeastar sent.
+      const calls = event.members.flatMap((member) => trackedCalls(member, knownExtensions, peer))
+      const primaryCall = calls[0] ?? null
+      const customerPhone = peer ?? firstNestedText(event.payload, ['customer_phone', 'caller_number', 'customerNumber', 'phone', 'number'])
       const customerName = firstNestedText(event.payload, ['customer_name', 'caller_name', 'contact_name', 'name'])
       const customerEmail = firstNestedText(event.payload, ['customer_email', 'email'])
-      const agentExtension = firstNestedText(event.payload, ['agent_extension', 'extension_number', 'extension'])
+      const agentExtension = primaryCall?.extension ?? firstNestedText(event.payload, ['agent_extension', 'extension_number', 'extension'])
+      const direction = primaryCall?.direction ?? 'unknown'
       const recordingUrl = firstNestedText(event.payload, ['recording_url', 'record_url', 'recordingUrl', 'recording'])
       const durationValue = firstNestedNumber(event.payload, ['duration', 'duration_seconds', 'talk_duration'])
       const contact = customerPhone ? await findExistingContact(db, accountId, customerPhone) : null
@@ -237,18 +252,20 @@ export async function POST(request: Request, context: { params: Promise<{ accoun
         contact_id: contactRow?.id ?? null,
         agent_user_id: agentConfig?.user_id ?? null,
         agent_extension: agentExtension,
+        direction,
         duration_seconds: durationValue ? Math.round(durationValue) : null,
         recording_url: recordingUrl,
         transcript: ai?.transcript,
         summary: ai?.summary,
         transcription_status: ai?.transcript || ai?.summary ? 'completed' : 'pending',
+        error_message: ai?.contextError || ai?.summaryError ? [ai?.contextError, ai?.summaryError].filter(Boolean).join(' | ').slice(0, 500) : null,
         yeastar_payload: { event: event.payload, ai: ai?.raw ?? null },
         updated_at: new Date().toISOString(),
       }, { onConflict: 'account_id,call_id' })
       if (error) throw error
       const detail = ai?.transcript || ai?.summary
         ? 'CDR 30012 sincronizado con transcripción y resumen IA.'
-        : 'CDR 30012 recibido, pero Yeastar aún no tiene la transcripción/resumen IA lista; se reintentará automáticamente.'
+        : `CDR 30012 recibido, pero Yeastar aún no tiene la transcripción/resumen IA lista; se reintentará automáticamente.${ai?.contextError || ai?.summaryError ? ` (${[ai?.contextError, ai?.summaryError].filter(Boolean).join(' | ')})` : ''}`
       await receipt(db, accountId, 'processed', detail, event.eventType, event.callId)
       return NextResponse.json({ received: true })
     } catch (error) {
@@ -267,14 +284,6 @@ export async function POST(request: Request, context: { params: Promise<{ accoun
     return NextResponse.json({ error: 'Could not persist channels' }, { status: 500 })
   }
 
-  const { data: configuredExtensions, error: extensionError } = await db.from('telephony_user_configs')
-    .select('extension').eq('account_id', accountId).eq('provider', 'yeastar')
-  if (extensionError) {
-    await receipt(db, accountId, 'invalid', `No se pudieron consultar las extensiones NexoOmni: ${extensionError.message}`, event.eventType, event.callId)
-    return NextResponse.json({ error: 'Could not load extensions' }, { status: 500 })
-  }
-  const knownExtensions = new Set((configuredExtensions ?? []).map((row) => row.extension))
-  const peer = callPeer(event.members, knownExtensions)
   const transitions: string[] = []
   for (const member of event.members) {
     const calls = trackedCalls(member, knownExtensions, peer)
