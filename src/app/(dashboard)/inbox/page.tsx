@@ -438,8 +438,7 @@ function InboxPageInner() {
       // user back to the deep-linked thread after they've navigated.
       if (
         deepLinkConvId &&
-        autoSelectedForDeepLinkRef.current !== deepLinkConvId &&
-        loaded.length > 0
+        autoSelectedForDeepLinkRef.current !== deepLinkConvId
       ) {
         autoSelectedForDeepLinkRef.current = deepLinkConvId;
         // If the deep-linked conversation is already the active one
@@ -468,6 +467,21 @@ function InboxPageInner() {
               ),
             );
           }
+        } else {
+          void (async () => {
+            const supabase = createClient();
+            const { data, error } = await supabase
+              .from("conversations")
+              .select(CONVERSATION_SELECT)
+              .eq("id", deepLinkConvId)
+              .maybeSingle();
+            if (error || !data) return;
+            const conversation = normalizeConversation(data);
+            setConversations((previous) => previous.some((item) => item.id === conversation.id) ? previous : [conversation, ...previous]);
+            setActiveConversation(conversation);
+            setActiveContact(conversation.contact ?? null);
+            setMessages([]);
+          })();
         }
       }
     },

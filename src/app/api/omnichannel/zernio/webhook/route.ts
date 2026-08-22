@@ -33,6 +33,16 @@ function text(...values: unknown[]) {
   return ''
 }
 
+function safeHttpsUrl(value: unknown) {
+  if (typeof value !== 'string' || !value.trim()) return undefined
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:' ? url.toString() : undefined
+  } catch {
+    return undefined
+  }
+}
+
 function record(value: unknown): Json {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Json) : {}
 }
@@ -59,6 +69,7 @@ async function resolveContact(
   name: string,
   email?: string,
   phone?: string,
+  avatarUrl?: string,
 ) {
   const { data: mapped, error: mapError } = await db
     .from('omnichannel_contact_identities')
@@ -67,7 +78,25 @@ async function resolveContact(
     .eq('external_user_id', externalUserId)
     .maybeSingle()
   if (mapError) throw mapError
-  if (mapped?.contact_id) return mapped.contact_id as string
+  if (mapped?.contact_id) {
+    const contactId = mapped.contact_id as string
+    if (avatarUrl) {
+      const { data: contact, error } = await db.from('contacts')
+        .select('avatar_url')
+        .eq('id', contactId)
+        .eq('account_id', connector.account_id)
+        .maybeSingle()
+      if (error) throw error
+      if (!contact?.avatar_url) {
+        const { error: updateError } = await db.from('contacts')
+          .update({ avatar_url: avatarUrl })
+          .eq('id', contactId)
+          .eq('account_id', connector.account_id)
+        if (updateError) throw updateError
+      }
+    }
+    return contactId
+  }
 
   const channel = connector.provider.replace('zernio_', '') as ZernioChannel
   const fallback = safeZernioContactName(channel, externalUserId)
@@ -79,7 +108,7 @@ async function resolveContact(
     const normalizedEmail = email.trim().toLowerCase()
     const { data, error } = await db
       .from('contacts')
-      .select('id, name, email, phone')
+      .select('id, name, email, phone, avatar_url')
       .eq('account_id', connector.account_id)
       .eq('email_normalized', normalizedEmail)
       .limit(2)
@@ -99,6 +128,7 @@ async function resolveContact(
     if (name && (!existingName || existingName === fallback)) update.name = name
     if (email && !existing.email && email.trim()) update.email = email.trim()
     if (phone && existing.phone === placeholderPhone) update.phone = phone.trim()
+    if (avatarUrl && !existing.avatar_url) update.avatar_url = avatarUrl
     if (Object.keys(update).length) {
       const { error } = await db.from('contacts').update(update).eq('id', contactId).eq('account_id', connector.account_id)
       if (error && !isUniqueViolation(error)) console.error('[zernio] could not enrich existing contact:', error.message)
@@ -106,7 +136,7 @@ async function resolveContact(
   } else {
     const { data: created, error } = await db
       .from('contacts')
-      .insert({ account_id: connector.account_id, user_id: auditUserId, phone: phone || placeholderPhone, email: email || null, name: name || fallback })
+      .insert({ account_id: connector.account_id, user_id: auditUserId, phone: phone || placeholderPhone, email: email || null, name: name || fallback, avatar_url: avatarUrl || null })
       .select('id')
       .single()
     if (error || !created) throw error ?? new Error('No se pudo crear el contacto del canal conectado.')
@@ -260,6 +290,7 @@ export async function POST(request: Request) {
       const contactName = text(sender.name, sender.displayName, sender.fullName, comment.author_name, comment.authorName, participant.name)
       const contactEmail = text(sender.email, participant.email, incoming.email, comment.author_email, comment.authorEmail)
       const contactPhone = text(sender.phone, participant.phone, incoming.phone, comment.author_phone, comment.authorPhone)
+      const contactAvatarUrl = safeHttpsUrl(sender.avatarUrl ?? sender.avatar_url ?? sender.profilePicture ?? sender.profile_picture ?? sender.picture ?? participant.avatarUrl ?? participant.avatar_url ?? participant.profilePicture ?? participant.profile_picture ?? participant.picture)
       const contactId = await resolveContact(
         db,
         typed,
@@ -268,6 +299,7 @@ export async function POST(request: Request) {
         contactName || safeZernioContactName(channel, externalUserId),
         contactEmail || undefined,
         contactPhone || undefined,
+        contactAvatarUrl,
       )
       const { data: rows, error: findError } = await db
         .from('conversations')
