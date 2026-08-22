@@ -36,6 +36,19 @@ type ContactConversation = {
   channel_source_label: string | null;
 };
 
+type ContactCall = {
+  id: string;
+  summary: string | null;
+  started_at: string | null;
+  ended_at: string | null;
+  direction: "inbound" | "outbound" | "internal" | "unknown" | null;
+  duration_seconds: number | null;
+};
+
+type ContactHistoryItem =
+  | { kind: "conversation"; id: string; channel: string; status: ContactConversation["status"]; summary: string; occurredAt: string | null }
+  | { kind: "call"; id: string; direction: ContactCall["direction"]; summary: string; occurredAt: string | null; durationSeconds: number | null };
+
 interface ContactSidebarProps {
   contact: Contact | null;
   conversationId?: string | null;
@@ -52,7 +65,7 @@ export function ContactSidebar({ contact, conversationId, internalNotesOpenSigna
   const [deals, setDeals] = useState<Deal[]>([]);
   const [notes, setNotes] = useState<ContactNote[]>([]);
   const [tags, setTags] = useState<(Tag & { contact_tag_id: string })[]>([]);
-  const [conversationHistory, setConversationHistory] = useState<ContactConversation[]>([]);
+  const [history, setHistory] = useState<ContactHistoryItem[]>([]);
   const [newNote, setNewNote] = useState("");
   const [addingNote, setAddingNote] = useState(false);
 
@@ -64,7 +77,7 @@ export function ContactSidebar({ contact, conversationId, internalNotesOpenSigna
     // The contact, not a provider-specific visitor label, is the stable
     // identity. This lets a known customer see their WhatsApp and Live Chat
     // threads together without ever merging conversations automatically.
-    const [dealsRes, notesRes, tagsRes, conversationsRes] = await Promise.all([
+    const [dealsRes, notesRes, tagsRes, conversationsRes, callsRes] = await Promise.all([
       supabase
         .from("deals")
         .select("*, stage:pipeline_stages(*)")
@@ -84,7 +97,13 @@ export function ContactSidebar({ contact, conversationId, internalNotesOpenSigna
         .select("id, status, last_message_text, last_message_at, channel_type, channel_source_label")
         .eq("contact_id", contact.id)
         .order("last_message_at", { ascending: false, nullsFirst: false })
-        .limit(5),
+        .limit(8),
+      supabase
+        .from("yeastar_call_transcriptions")
+        .select("id, summary, started_at, ended_at, direction, duration_seconds")
+        .eq("contact_id", contact.id)
+        .order("ended_at", { ascending: false, nullsFirst: false })
+        .limit(8),
     ]);
 
     if (dealsRes.data) setDeals(dealsRes.data);
@@ -98,7 +117,34 @@ export function ContactSidebar({ contact, conversationId, internalNotesOpenSigna
         }));
       setTags(mapped);
     }
-    if (conversationsRes.data) setConversationHistory(conversationsRes.data as ContactConversation[]);
+    const conversations = (conversationsRes.data ?? []) as ContactConversation[];
+    const calls = (callsRes.data ?? []) as ContactCall[];
+    const analyses = conversations.length
+      ? await supabase
+        .from("ai_conversation_analyses")
+        .select("conversation_id, summary")
+        .in("conversation_id", conversations.map((conversation) => conversation.id))
+        .eq("status", "completed")
+      : { data: [] as { conversation_id: string; summary: string | null }[] };
+    const summaries = new Map((analyses.data ?? []).map((analysis) => [analysis.conversation_id, analysis.summary]));
+    setHistory([
+      ...conversations.map((conversation): ContactHistoryItem => ({
+        kind: "conversation",
+        id: conversation.id,
+        channel: channelLabel(conversation),
+        status: conversation.status,
+        summary: summaries.get(conversation.id) || conversation.last_message_text || "Sin mensajes",
+        occurredAt: conversation.last_message_at,
+      })),
+      ...calls.map((call): ContactHistoryItem => ({
+        kind: "call",
+        id: call.id,
+        direction: call.direction,
+        summary: call.summary || "Sin resumen de llamada disponible.",
+        occurredAt: call.ended_at || call.started_at,
+        durationSeconds: call.duration_seconds,
+      })),
+    ].sort((left, right) => (right.occurredAt ?? "").localeCompare(left.occurredAt ?? "")).slice(0, 10));
   }, [contact]);
 
   // Load on contact change. setContactData/setTags run inside async
@@ -159,14 +205,16 @@ export function ContactSidebar({ contact, conversationId, internalNotesOpenSigna
   const contactPhone = displayContactPhone(contact.phone);
   const displayName = contact.name || contactPhone || "Contacto";
   const initials = displayName.charAt(0).toUpperCase();
-  const channelLabel = (conversation: ContactConversation) => {
+  function channelLabel(conversation: ContactConversation) {
     if (conversation.channel_type === "yeastar_live_chat") return conversation.channel_source_label ? `Chat web · ${conversation.channel_source_label}` : "Chat web Yeastar";
     if (conversation.channel_type === "facebook" || conversation.channel_type === "zernio_facebook") return "Facebook";
     if (conversation.channel_type === "instagram" || conversation.channel_type === "zernio_instagram") return "Instagram";
     if (conversation.channel_type === "zernio_whatsapp") return "WhatsApp";
     if (conversation.channel_type === "tiktok") return "TikTok";
     return "WhatsApp";
-  };
+  }
+
+  const callDuration = (seconds: number | null) => seconds == null ? "" : ` · ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 
   return (
     <div className="flex h-full w-70 flex-col border-l border-border bg-card">
@@ -231,26 +279,27 @@ export function ContactSidebar({ contact, conversationId, internalNotesOpenSigna
               Historial omnicanal
             </div>
             <div className="mt-2 space-y-2">
-              {conversationHistory.length === 0 ? (
-                <p className="px-1 text-xs text-muted-foreground">Sin otras conversaciones registradas.</p>
+              {history.length === 0 ? (
+                <p className="px-1 text-xs text-muted-foreground">Sin interacciones registradas.</p>
               ) : (
-                conversationHistory.map((conversation) => (
+                history.map((item) => (
                   <Link
-                    key={conversation.id}
-                    href={`/inbox?c=${encodeURIComponent(conversation.id)}`}
+                    key={`${item.kind}-${item.id}`}
+                    href={item.kind === "conversation" ? `/inbox?c=${encodeURIComponent(item.id)}` : `/call-transcriptions?call=${encodeURIComponent(item.id)}`}
                     className={cn(
                       "block rounded-lg border border-border px-3 py-2 transition-colors hover:bg-muted",
-                      conversation.id === conversationId && "border-primary/50 bg-primary/5"
+                      item.kind === "conversation" && item.id === conversationId && "border-primary/50 bg-primary/5"
                     )}
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <span className="truncate text-xs font-medium text-foreground">{channelLabel(conversation)}</span>
+                      <span className="truncate text-xs font-medium text-foreground">{item.kind === "call" ? `Llamada ${item.direction === "outbound" ? "saliente" : item.direction === "inbound" ? "entrante" : ""}` : item.channel}</span>
                       <ArrowUpRight className="h-3 w-3 shrink-0 text-muted-foreground" />
                     </div>
-                    <p className="mt-1 truncate text-[11px] text-muted-foreground">{conversation.last_message_text || "Sin mensajes"}</p>
+                    <p className="mt-1 line-clamp-2 text-[11px] text-muted-foreground">{item.summary}</p>
                     <p className="mt-1 text-[10px] text-muted-foreground">
-                      {conversation.status === "open" ? "Abierta" : conversation.status === "pending" ? "Pendiente" : "Cerrada"}
-                      {conversation.last_message_at ? ` · ${format(new Date(conversation.last_message_at), "MMM d, HH:mm")}` : ""}
+                      {item.kind === "conversation" ? item.status === "open" ? "Abierta" : item.status === "pending" ? "Pendiente" : "Cerrada" : "Llamada"}
+                      {item.kind === "call" ? callDuration(item.durationSeconds) : ""}
+                      {item.occurredAt ? ` · ${format(new Date(item.occurredAt), "MMM d, HH:mm")}` : ""}
                     </p>
                   </Link>
                 ))

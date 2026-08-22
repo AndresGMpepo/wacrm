@@ -104,13 +104,17 @@ export default function CallTranscriptionsPage() {
   const allowed = accountRole === 'owner' || accountRole === 'admin'
   const [calls, setCalls] = useState<CallRecord[]>([])
   const [query, setQuery] = useState('')
+  const [requestedCallId] = useState(() => typeof window === 'undefined' ? '' : new URLSearchParams(window.location.search).get('call') ?? '')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   const load = async () => {
     setLoading(true); setError(null)
     try {
-      const response = await fetch(`/api/telephony/yeastar/transcriptions${query ? `?q=${encodeURIComponent(query)}` : ''}`, { cache: 'no-store' })
+      const params = new URLSearchParams()
+      if (query) params.set('q', query)
+      if (requestedCallId) params.set('call', requestedCallId)
+      const response = await fetch(`/api/telephony/yeastar/transcriptions${params.size ? `?${params.toString()}` : ''}`, { cache: 'no-store' })
       const payload = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(payload.error || 'No se pudieron cargar las transcripciones.')
       setCalls(payload.calls ?? [])
