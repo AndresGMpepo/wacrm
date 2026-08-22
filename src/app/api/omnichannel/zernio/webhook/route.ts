@@ -303,7 +303,7 @@ export async function POST(request: Request) {
         contactName || safeZernioContactName(channel, externalUserId),
         contactEmail || undefined,
         contactPhone || undefined,
-        contactAvatarUrl,
+        contactAvatarUrl ?? undefined,
       )
       const { data: rows, error: findError } = await db
         .from('conversations')
