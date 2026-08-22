@@ -1,0 +1,24 @@
+import { NextResponse } from 'next/server'
+import { createClient as createAdminClient } from '@supabase/supabase-js'
+import { encrypt } from '@/lib/whatsapp/encryption'
+import { exchangeGoogleCode } from '@/lib/appointments/google-calendar'
+
+function admin() { return createAdminClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false } }) }
+function redirect(request: Request, status: string) { const url = new URL('/appointments', process.env.NEXT_PUBLIC_SITE_URL?.trim() || process.env.APP_URL?.trim() || request.url); url.searchParams.set('google', status); return NextResponse.redirect(url) }
+
+export async function GET(request: Request) {
+  try {
+    const url = new URL(request.url)
+    const code = url.searchParams.get('code')
+    const state = url.searchParams.get('state')
+    if (!code || !state) return redirect(request, 'error')
+    const db = admin()
+    const { data: attempt, error } = await db.from('google_calendar_oauth_attempts').select('*').eq('state', state).maybeSingle()
+    if (error || !attempt || attempt.completed_at || new Date(attempt.expires_at).getTime() < Date.now()) return redirect(request, 'expired')
+    const tokens = await exchangeGoogleCode(code, attempt.redirect_uri)
+    const { error: connectionError } = await db.from('google_calendar_connections').upsert({ account_id: attempt.account_id, calendar_id: 'primary', encrypted_access_token: encrypt(tokens.accessToken), encrypted_refresh_token: encrypt(tokens.refreshToken), access_token_expires_at: tokens.expiresAt, connected_by: attempt.user_id, connected_at: new Date().toISOString() }, { onConflict: 'account_id' })
+    if (connectionError) throw connectionError
+    await db.from('google_calendar_oauth_attempts').update({ completed_at: new Date().toISOString() }).eq('state', state)
+    return redirect(request, 'connected')
+  } catch (error) { console.error('[google-calendar] callback failed', error); return redirect(request, 'error') }
+}
