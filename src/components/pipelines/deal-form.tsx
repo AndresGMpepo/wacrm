@@ -63,13 +63,17 @@ const DEAL_CHANNEL_OPTIONS: Array<{ value: DealSourceChannel; label: string }> =
 ];
 
 function relatedConversationChannel(conversation: Conversation | null): DealSourceChannel | null {
-  switch (conversation?.channel_type) {
+  // Zernio-connected channels are stored as `zernio_whatsapp`/`zernio_facebook`/
+  // `zernio_instagram` on the conversation but the deal's source_channel
+  // column only accepts the base channel names.
+  const channelType = conversation?.channel_type?.replace(/^zernio_/, "")
+  switch (channelType) {
     case "whatsapp":
     case "yeastar_live_chat":
     case "facebook":
     case "instagram":
     case "tiktok":
-      return conversation.channel_type;
+      return channelType;
     default:
       return null;
   }

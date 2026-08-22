@@ -13,7 +13,6 @@ import { SecurityPanel } from '@/components/settings/security-panel';
 import { AppearancePanel } from '@/components/settings/appearance-panel';
 import { OperatingModeSettings } from '@/components/settings/operating-mode-settings';
 import { WhatsAppConfig } from '@/components/settings/whatsapp-config';
-import { MetaMessagingConfig } from '@/components/settings/meta-messaging-config';
 import { ZernioConnectConfig } from '@/components/settings/zernio-connect-config';
 import { YeastarLiveChatConfig } from '@/components/settings/yeastar-live-chat-config';
 import { ConversationAssignmentConfig } from '@/components/settings/conversation-assignment-config';
@@ -82,7 +81,7 @@ function SettingsPageInner() {
     appearance: <AppearancePanel />,
     'operating-mode': <OperatingModeSettings />,
     whatsapp: <div className="space-y-6"><ZernioConnectConfig channels={['whatsapp']} /><WhatsAppConfig /></div>,
-    'social-messaging': <div className="space-y-6"><ZernioConnectConfig channels={['facebook', 'instagram']} /><MetaMessagingConfig /></div>,
+    'social-messaging': <div className="space-y-6"><ZernioConnectConfig channels={['facebook', 'instagram']} /></div>,
     'live-chat': <YeastarLiveChatConfig />,
     assignment: <ConversationAssignmentConfig />,
     telephony: <TelephonyConfig />,

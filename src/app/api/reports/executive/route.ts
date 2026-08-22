@@ -55,6 +55,20 @@ function dealChannelLabel(channel: DealChannel | null) {
                 : 'Sin canal confirmado'
 }
 
+// Zernio-connected channels are stored as `zernio_whatsapp`/`zernio_facebook`/
+// `zernio_instagram` on conversations, but must never surface that internal
+// provider name commercially — always display the base channel instead.
+function channelTypeLabel(channelType: string | null) {
+  const normalized = channelType?.replace(/^zernio_/, '') || null
+  return normalized === 'yeastar_live_chat' ? 'Chat web Yeastar'
+    : normalized === 'yeastar_voice' ? 'Llamada Yeastar'
+      : normalized === 'facebook' ? 'Facebook'
+        : normalized === 'instagram' ? 'Instagram'
+          : normalized === 'tiktok' ? 'TikTok'
+            : normalized === 'whatsapp' || !normalized ? 'WhatsApp'
+              : normalized
+}
+
 function parseRange(url: URL) {
   const today = new Date()
   const defaultEnd = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()))
@@ -144,7 +158,7 @@ export async function GET(request: Request) {
 
     const channelMap = new Map<string, { conversations: number; closed: number; responseTotal: number; responseCount: number }>()
     for (const conversation of conversations) {
-      const channel = conversation.channel_type === 'yeastar_live_chat' ? 'Chat web Yeastar' : conversation.channel_type === 'whatsapp' || !conversation.channel_type ? 'WhatsApp' : conversation.channel_type
+      const channel = channelTypeLabel(conversation.channel_type)
       const current = channelMap.get(channel) ?? { conversations: 0, closed: 0, responseTotal: 0, responseCount: 0 }
       current.conversations += 1
       const response = responseMinutesByConversation.get(conversation.id)
@@ -152,7 +166,7 @@ export async function GET(request: Request) {
       channelMap.set(channel, current)
     }
     for (const conversation of (resolvedResult.data ?? []) as ConversationRow[]) {
-      const channel = conversation.channel_type === 'yeastar_live_chat' ? 'Chat web Yeastar' : conversation.channel_type === 'whatsapp' || !conversation.channel_type ? 'WhatsApp' : conversation.channel_type
+      const channel = channelTypeLabel(conversation.channel_type)
       const current = channelMap.get(channel) ?? { conversations: 0, closed: 0, responseTotal: 0, responseCount: 0 }
       current.closed += 1
       channelMap.set(channel, current)
