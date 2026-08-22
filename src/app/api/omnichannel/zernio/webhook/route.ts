@@ -103,7 +103,7 @@ async function resolveContact(
   const placeholderPhone = `zernio:${connector.provider}:${externalUserId}`
 
   const phoneMatch = phone ? await findExistingContact(db, connector.account_id, phone) : null
-  let emailMatch: { id: string; name: string | null; email: string | null; phone: string | null } | null = null
+  let emailMatch: { id: string; name: string | null; email: string | null; phone: string | null; avatar_url: string | null } | null = null
   if (!phoneMatch && email) {
     const normalizedEmail = email.trim().toLowerCase()
     const { data, error } = await db
