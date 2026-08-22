@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { Camera, CheckCircle2, Link2, Loader2, MessageCircle, MessagesSquare, Pause, Play, Trash2 } from 'lucide-react'
+import { Camera, CheckCircle2, ImageDown, Link2, Loader2, MessageCircle, MessagesSquare, Pause, Play, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
@@ -92,6 +92,24 @@ export function ZernioConnectConfig({ channels }: { channels: Channel[] }) {
     }
   }
 
+  const syncAvatars = async (connector: Connector) => {
+    setPending(`avatars:${connector.id}`)
+    try {
+      const response = await fetch('/api/omnichannel/zernio/avatars/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ connectorId: connector.id }),
+      })
+      const body = await response.json().catch(() => null) as { updated?: number; unavailable?: number; error?: string } | null
+      if (!response.ok) throw new Error(body?.error ?? 'No se pudieron sincronizar las fotos.')
+      toast.success(body?.updated ? `${body.updated} fotos de perfil sincronizadas.` : 'No hay fotos nuevas disponibles en este canal.')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'No se pudieron sincronizar las fotos.')
+    } finally {
+      setPending(null)
+    }
+  }
+
   const relevant = connectors.filter((connector) => {
     const channel = connectorChannel(connector.provider)
     return channel !== null && channels.includes(channel)
@@ -144,6 +162,10 @@ export function ZernioConnectConfig({ channels }: { channels: Channel[] }) {
                     <p className="text-xs text-muted-foreground">{label} · {connector.status === 'paused' ? 'Pausado' : 'Conectado'}</p>
                   </div>
                   <div className="flex gap-2">
+                    <Button variant="outline" size="sm" disabled={!!busy} onClick={() => void syncAvatars(connector)}>
+                      {pending === `avatars:${connector.id}` ? <Loader2 className="mr-1 size-3.5 animate-spin" /> : <ImageDown className="mr-1 size-3.5" />}
+                      Sincronizar fotos
+                    </Button>
                     <Button variant="outline" size="sm" disabled={!!busy} onClick={() => manage(connector, connector.status === 'paused' ? 'resume' : 'pause')}>
                       {connector.status === 'paused' ? <Play className="mr-1 size-3.5" /> : <Pause className="mr-1 size-3.5" />}
                       {connector.status === 'paused' ? 'Reactivar' : 'Pausar'}

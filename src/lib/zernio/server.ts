@@ -191,6 +191,26 @@ export async function resolveZernioPlatformMessageId(
   return typeof platformId === 'string' && platformId.trim() ? platformId : null
 }
 
+function secureUrl(value: unknown) {
+  if (typeof value !== 'string' || !value.trim()) return null
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:' ? url.toString() : null
+  } catch {
+    return null
+  }
+}
+
+/** Read the customer avatar maintained by Zernio's unified inbox. */
+export async function getZernioParticipantPicture(conversationId: string, zernioAccountId: string) {
+  const query = new URLSearchParams({ accountId: zernioAccountId })
+  const payload = await zernioFetch(`/inbox/conversations/${encodeURIComponent(conversationId)}?${query.toString()}`, {
+    signal: AbortSignal.timeout(3_000),
+  })
+  const data = payload.data && typeof payload.data === 'object' ? payload.data as Record<string, unknown> : payload
+  return secureUrl(data.participantPicture ?? data.participant_picture)
+}
+
 export async function sendZernioText(conversationId: string, zernioAccountId: string, text: string) {
   const payload = await zernioFetch(`/inbox/conversations/${encodeURIComponent(conversationId)}/messages`, {
     method: 'POST',
