@@ -19,6 +19,21 @@ function date(value: unknown) {
     return toErrorResponse(error)
   }
 
+  type AppointmentRow = { assigned_agent_id: string | null; [key: string]: unknown }
+
+  async function withAgents(
+    supabase: Awaited<ReturnType<typeof requireAccountModule>>['supabase'],
+    accountId: string,
+    appointments: AppointmentRow[],
+  ) {
+    const agentIds = [...new Set(appointments.map((appointment) => appointment.assigned_agent_id).filter((id): id is string => Boolean(id)))]
+    if (!agentIds.length) return appointments.map((appointment) => ({ ...appointment, agent: null }))
+    const { data, error } = await supabase.from('profiles').select('user_id, full_name').eq('account_id', accountId).in('user_id', agentIds)
+    if (error) throw error
+    const agents = new Map((data ?? []).map((agent) => [agent.user_id, { full_name: agent.full_name }]))
+    return appointments.map((appointment) => ({ ...appointment, agent: appointment.assigned_agent_id ? agents.get(appointment.assigned_agent_id) ?? null : null }))
+  }
+
 export async function GET(request: Request) {
   try {
     const { supabase, accountId } = await requireAccountModule('appointments')
@@ -26,10 +41,10 @@ export async function GET(request: Request) {
     const from = date(url.searchParams.get('from')) ?? new Date(Date.now() - 7 * 86_400_000).toISOString()
     const to = date(url.searchParams.get('to')) ?? new Date(Date.now() + 30 * 86_400_000).toISOString()
     const { data, error } = await supabase.from('appointments')
-      .select('id, contact_id, assigned_agent_id, title, notes, starts_at, ends_at, timezone, status, google_sync_status, google_sync_error, created_at, contact:contacts(name, phone), agent:profiles!appointments_assigned_agent_id_fkey(full_name)')
+      .select('id, contact_id, assigned_agent_id, title, notes, starts_at, ends_at, timezone, status, google_sync_status, google_sync_error, created_at, contact:contacts(name, phone)')
       .eq('account_id', accountId).gte('starts_at', from).lt('starts_at', to).order('starts_at')
     if (error) throw error
-    return NextResponse.json({ appointments: data ?? [] })
+    return NextResponse.json({ appointments: await withAgents(supabase, accountId, (data ?? []) as AppointmentRow[]) })
   } catch (error) { return appointmentErrorResponse(error) }
 }
 
@@ -57,13 +72,14 @@ export async function POST(request: Request) {
       assigned_agent_id: assignedAgentId,
       notes: typeof body?.notes === 'string' ? body.notes.trim().slice(0, 2000) || null : null,
       timezone: typeof body?.timezone === 'string' ? body.timezone.slice(0, 80) : 'UTC',
-    }).select('id, title, notes, starts_at, ends_at, timezone, status, google_calendar_event_id, google_sync_status, google_sync_error, assigned_agent_id, contact:contacts(name, phone), agent:profiles!appointments_assigned_agent_id_fkey(full_name)').single()
+    }).select('id, title, notes, starts_at, ends_at, timezone, status, google_calendar_event_id, google_sync_status, google_sync_error, assigned_agent_id, contact:contacts(name, phone)').single()
     if (error) throw error
     await syncGoogleAppointment(accountId, data).catch(async (syncError) => {
       console.error('[appointments] Google Calendar sync failed:', syncError)
       await supabase.from('appointments').update({ google_sync_status: 'failed', google_sync_error: syncError instanceof Error ? syncError.message.slice(0, 500) : 'Error desconocido de Google Calendar.' }).eq('id', data.id).eq('account_id', accountId)
     })
-    return NextResponse.json({ appointment: data }, { status: 201 })
+    const [appointment] = await withAgents(supabase, accountId, [data as AppointmentRow])
+    return NextResponse.json({ appointment }, { status: 201 })
   } catch (error) { return appointmentErrorResponse(error) }
 }
 
