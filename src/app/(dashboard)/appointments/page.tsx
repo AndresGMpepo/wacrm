@@ -36,6 +36,8 @@ export default function AppointmentsPage() {
   const [connectingGoogle, setConnectingGoogle] = useState(false)
   const [syncingId, setSyncingId] = useState<string | null>(null)
 
+  const googleResult = typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('google')
+
   const load = useCallback(async () => {
     setLoading(true)
     try {
@@ -48,12 +50,30 @@ export default function AppointmentsPage() {
   }, [])
   useEffect(() => { void load() }, [load])
 
-  useEffect(() => {
-    void fetch('/api/appointments/google', { cache: 'no-store' })
-      .then(async (response) => response.ok ? response.json() as Promise<{ configured?: boolean; connections?: unknown[] }> : null)
-      .then((payload) => { setGoogleAvailable(payload?.configured === true); setGoogleConnectionCount(payload?.connections?.length ?? 0); })
-      .catch(() => {})
+  const loadGoogleConnection = useCallback(async () => {
+    try {
+      const response = await fetch('/api/appointments/google', { cache: 'no-store' })
+      const payload = response.ok ? await response.json() as { configured?: boolean; connections?: unknown[] } : null
+      setGoogleAvailable(payload?.configured === true)
+      setGoogleConnectionCount(payload?.connections?.length ?? 0)
+    } catch { setGoogleAvailable(false); setGoogleConnectionCount(0) }
   }, [])
+
+  useEffect(() => {
+    void loadGoogleConnection()
+  }, [loadGoogleConnection])
+
+  useEffect(() => {
+    if (!googleResult) return
+    if (googleResult === 'connected') {
+      toast.success('Google Calendar quedó conectado.')
+      void loadGoogleConnection()
+    } else if (googleResult === 'expired') {
+      toast.error('La autorización de Google venció. Inicia la conexión nuevamente.')
+    } else if (googleResult === 'error') {
+      toast.error('Google no pudo completar la conexión. Revisa la configuración OAuth y vuelve a intentarlo.')
+    }
+  }, [googleResult, loadGoogleConnection])
 
   useEffect(() => {
     let cancelled = false
@@ -73,14 +93,14 @@ export default function AppointmentsPage() {
   function updateStart(value: string) {
     setStartsAt(value)
     const start = new Date(value)
-    if (!Number.isNaN(start.getTime())) setEndsAt(new Date(start.getTime() + duration * 60_000).toISOString().slice(0, 16))
+    if (!Number.isNaN(start.getTime())) setEndsAt(localDateTime(new Date(start.getTime() + duration * 60_000)))
   }
 
   function updateDuration(value: number) {
     setDuration(value)
     if (startsAt) {
       const start = new Date(startsAt)
-      if (!Number.isNaN(start.getTime())) setEndsAt(new Date(start.getTime() + value * 60_000).toISOString().slice(0, 16))
+      if (!Number.isNaN(start.getTime())) setEndsAt(localDateTime(new Date(start.getTime() + value * 60_000)))
     }
   }
 
@@ -108,7 +128,12 @@ export default function AppointmentsPage() {
 
   if (loading) return <div className="flex justify-center py-16 text-muted-foreground"><Loader2 className="size-5 animate-spin" /></div>
   if (enabled === false) return <div className="mx-auto max-w-xl py-16 text-center"><CalendarDays className="mx-auto size-8 text-muted-foreground" /><h1 className="mt-3 text-lg font-semibold">Agenda deshabilitada</h1><p className="mt-1 text-sm text-muted-foreground">Un administrador puede habilitar Agenda de citas desde Configuración → Objetivo operativo.</p></div>
-  return <div className="mx-auto max-w-5xl space-y-6 p-5 sm:p-7"><div className="flex flex-wrap items-center justify-between gap-3"><div><h1 className="flex items-center gap-2 text-2xl font-bold"><CalendarDays className="size-6 text-primary" />Agenda de citas</h1><p className="mt-1 text-sm text-muted-foreground">NexoOmni conserva las citas y las refleja en el calendario conectado.</p></div><div className="flex flex-wrap gap-2">{googleAvailable ? <><select value={googleAssigneeId} onChange={(event) => setGoogleAssigneeId(event.target.value)} className="h-8 rounded-lg border border-input bg-transparent px-2 text-sm"><option value="">Calendario general</option>{members.map((member) => <option key={member.user_id} value={member.user_id}>{member.full_name || 'Responsable sin nombre'}</option>)}</select><Button variant="outline" onClick={() => void connectGoogle()} disabled={connectingGoogle}>{connectingGoogle ? <Loader2 className="animate-spin" /> : <Link2 />}{googleConnectionCount ? `${googleConnectionCount} calendario(s) Google` : 'Conectar Google Calendar'}</Button></> : null}<Button onClick={() => setCreating((value) => !value)}><Plus />Nueva cita</Button></div></div>
+  return <div className="mx-auto max-w-5xl space-y-6 p-5 sm:p-7"><div className="flex flex-wrap items-center justify-between gap-3"><div><h1 className="flex items-center gap-2 text-2xl font-bold"><CalendarDays className="size-6 text-primary" />Agenda de citas</h1><p className="mt-1 text-sm text-muted-foreground">NexoOmni conserva las citas y las refleja en el calendario conectado.</p>{googleAvailable ? <p className={googleConnectionCount ? 'mt-1 text-xs text-emerald-600' : 'mt-1 text-xs text-amber-600'}>{googleConnectionCount ? `${googleConnectionCount} calendario(s) Google conectado(s).` : 'Aún no hay un calendario Google conectado.'}</p> : <p className="mt-1 text-xs text-muted-foreground">Google Calendar no está configurado en el servidor.</p>}</div><div className="flex flex-wrap gap-2">{googleAvailable ? <><select value={googleAssigneeId} onChange={(event) => setGoogleAssigneeId(event.target.value)} className="h-8 rounded-lg border border-input bg-transparent px-2 text-sm"><option value="">Calendario general</option>{members.map((member) => <option key={member.user_id} value={member.user_id}>{member.full_name || 'Responsable sin nombre'}</option>)}</select><Button variant="outline" onClick={() => void connectGoogle()} disabled={connectingGoogle}>{connectingGoogle ? <Loader2 className="animate-spin" /> : <Link2 />}{googleConnectionCount ? 'Agregar o reconectar Google' : 'Conectar Google Calendar'}</Button></> : null}<Button onClick={() => setCreating((value) => !value)}><Plus />Nueva cita</Button></div></div>
     {creating ? <Card><CardContent className="pt-6"><form className="grid gap-3 sm:grid-cols-2" onSubmit={create}><Input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Motivo de la cita" required /><select value={contactId} onChange={(event) => setContactId(event.target.value)} className="h-8 rounded-lg border border-input bg-transparent px-2 text-sm"><option value="">Sin contacto asociado</option>{contacts.map((contact) => <option key={contact.id} value={contact.id}>{contact.name || contact.phone || 'Contacto sin nombre'}</option>)}</select><select value={assignedAgentId} onChange={(event) => setAssignedAgentId(event.target.value)} className="h-8 rounded-lg border border-input bg-transparent px-2 text-sm"><option value="">Responsable: yo</option>{members.map((member) => <option key={member.user_id} value={member.user_id}>{member.full_name || 'Miembro sin nombre'}</option>)}</select><Input type="datetime-local" value={startsAt} onChange={(event) => updateStart(event.target.value)} required /><div className="flex flex-wrap gap-1 sm:col-span-2">{DURATIONS.map((value) => <Button key={value} type="button" variant={duration === value ? 'default' : 'outline'} size="sm" onClick={() => updateDuration(value)}>{value} min</Button>)}</div><Input type="datetime-local" value={endsAt} onChange={(event) => setEndsAt(event.target.value)} required /><textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Notas internas" rows={2} className="resize-none rounded-lg border border-input bg-transparent px-3 py-2 text-sm" /><Button type="submit" className="sm:col-span-2">Crear cita</Button></form></CardContent></Card> : null}
     <div className="space-y-3">{appointments.length === 0 ? <Card><CardContent className="pt-6 text-sm text-muted-foreground">No hay citas en los próximos 30 días.</CardContent></Card> : appointments.map((appointment) => <Card key={appointment.id}><CardHeader><div className="flex items-start justify-between gap-3"><div><CardTitle className="text-base">{appointment.title}</CardTitle><CardDescription>{appointment.contact?.name || 'Sin contacto'}{appointment.agent?.full_name ? ` · ${appointment.agent.full_name}` : ''}</CardDescription></div><span className="text-xs text-muted-foreground">{STATUS[appointment.status]}</span></div></CardHeader><CardContent className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground"><div><span>{new Intl.DateTimeFormat('es-MX', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(appointment.starts_at))}</span>{appointment.notes ? <p className="mt-1 text-xs">{appointment.notes}</p> : null}<p className={appointment.google_sync_status === 'failed' ? 'mt-1 text-xs text-destructive' : 'mt-1 text-xs text-muted-foreground'}>{appointment.google_sync_status === 'synced' ? 'Google Calendar sincronizado' : appointment.google_sync_status === 'pending' ? 'Google Calendar pendiente' : appointment.google_sync_status === 'failed' ? `Google Calendar: ${appointment.google_sync_error || 'Falló la sincronización.'}` : 'Sin calendario Google conectado para este responsable'}</p></div><div className="flex flex-wrap gap-2">{appointment.google_sync_status !== 'synced' ? <Button variant="outline" size="sm" onClick={() => void retryGoogleSync(appointment.id)} disabled={syncingId === appointment.id}>{syncingId === appointment.id ? <Loader2 className="animate-spin" /> : <RefreshCw />}Reintentar Google</Button> : null}{['scheduled', 'confirmed'].includes(appointment.status) ? <>{appointment.status === 'scheduled' ? <Button variant="outline" size="sm" onClick={() => void updateStatus(appointment.id, 'confirmed')}><CheckCircle2 />Confirmar</Button> : null}<Button variant="outline" size="sm" onClick={() => void updateStatus(appointment.id, 'completed')}><ClipboardCheck />Completar</Button><Button variant="outline" size="sm" onClick={() => void updateStatus(appointment.id, 'no_show')}><UserRoundX />No asistió</Button><Button variant="outline" size="sm" className="text-destructive" onClick={() => void updateStatus(appointment.id, 'cancelled')}><CircleX />Cancelar</Button></> : null}</div></CardContent></Card>)}</div></div>
+}
+
+function localDateTime(value: Date) {
+  const offset = value.getTimezoneOffset() * 60_000
+  return new Date(value.getTime() - offset).toISOString().slice(0, 16)
 }
