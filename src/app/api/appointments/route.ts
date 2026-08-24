@@ -89,8 +89,34 @@ export async function PATCH(request: Request) {
     const body = await request.json().catch(() => null) as Record<string, unknown> | null
     const id = typeof body?.id === 'string' ? body.id : ''
     const status = typeof body?.status === 'string' && (STATUSES as readonly string[]).includes(body.status) ? body.status : null
-    if (!id || !status) return NextResponse.json({ error: 'Actualización inválida.' }, { status: 400 })
-    const { data, error } = await supabase.from('appointments').update({ status }).eq('id', id).eq('account_id', accountId).select('id, title, notes, starts_at, ends_at, timezone, status, google_calendar_event_id, assigned_agent_id, contact:contacts(name, phone)').maybeSingle()
+    if (!id) return NextResponse.json({ error: 'Actualización inválida.' }, { status: 400 })
+    const startsAt = body?.starts_at === undefined ? undefined : date(body.starts_at)
+    const endsAt = body?.ends_at === undefined ? undefined : date(body.ends_at)
+    if ((body?.starts_at !== undefined && !startsAt) || (body?.ends_at !== undefined && !endsAt)) return NextResponse.json({ error: 'Fecha u hora inválida.' }, { status: 400 })
+    if (startsAt && endsAt && new Date(endsAt) <= new Date(startsAt)) return NextResponse.json({ error: 'La hora final debe ser posterior a la inicial.' }, { status: 400 })
+    const update: Record<string, unknown> = {}
+    if (status) update.status = status
+    if (typeof body?.title === 'string' && body.title.trim()) update.title = body.title.trim().slice(0, 160)
+    if (typeof body?.notes === 'string') update.notes = body.notes.trim().slice(0, 2000) || null
+    if (startsAt) update.starts_at = startsAt
+    if (endsAt) update.ends_at = endsAt
+    if (typeof body?.timezone === 'string') update.timezone = body.timezone.slice(0, 80)
+    if (typeof body?.contact_id === 'string' || body?.contact_id === null) {
+      if (typeof body.contact_id === 'string') {
+        const { data: contact, error } = await supabase.from('contacts').select('id').eq('id', body.contact_id).eq('account_id', accountId).maybeSingle()
+        if (error) throw error
+        if (!contact) return NextResponse.json({ error: 'El contacto no pertenece a esta cuenta.' }, { status: 400 })
+      }
+      update.contact_id = body.contact_id
+    }
+    if (typeof body?.assigned_agent_id === 'string') {
+      const { data: member, error } = await supabase.from('profiles').select('user_id').eq('user_id', body.assigned_agent_id).eq('account_id', accountId).eq('is_active', true).maybeSingle()
+      if (error) throw error
+      if (!member) return NextResponse.json({ error: 'El responsable no está activo en esta cuenta.' }, { status: 400 })
+      update.assigned_agent_id = body.assigned_agent_id
+    }
+    if (!Object.keys(update).length) return NextResponse.json({ error: 'No hay cambios para guardar.' }, { status: 400 })
+    const { data, error } = await supabase.from('appointments').update(update).eq('id', id).eq('account_id', accountId).select('id, title, notes, starts_at, ends_at, timezone, status, google_calendar_event_id, assigned_agent_id, contact:contacts(name, phone)').maybeSingle()
     if (error) throw error
     if (!data) return NextResponse.json({ error: 'La cita no existe.' }, { status: 404 })
     await syncGoogleAppointment(accountId, data).catch(async (syncError) => {
