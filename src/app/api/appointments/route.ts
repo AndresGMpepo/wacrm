@@ -11,6 +11,14 @@ function date(value: unknown) {
   return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString()
 }
 
+  function appointmentErrorResponse(error: unknown) {
+    const databaseError = error as { code?: string; message?: string } | null
+    if (databaseError?.code === '42P01' || databaseError?.code === '42703') {
+      return NextResponse.json({ error: 'La base de datos aún no tiene la actualización de Agenda. Aplica las migraciones 091 a 094 y vuelve a intentar.' }, { status: 503 })
+    }
+    return toErrorResponse(error)
+  }
+
 export async function GET(request: Request) {
   try {
     const { supabase, accountId } = await requireAccountModule('appointments')
@@ -22,7 +30,7 @@ export async function GET(request: Request) {
       .eq('account_id', accountId).gte('starts_at', from).lt('starts_at', to).order('starts_at')
     if (error) throw error
     return NextResponse.json({ appointments: data ?? [] })
-  } catch (error) { return toErrorResponse(error) }
+  } catch (error) { return appointmentErrorResponse(error) }
 }
 
 export async function POST(request: Request) {
@@ -56,7 +64,7 @@ export async function POST(request: Request) {
       await supabase.from('appointments').update({ google_sync_status: 'failed', google_sync_error: syncError instanceof Error ? syncError.message.slice(0, 500) : 'Error desconocido de Google Calendar.' }).eq('id', data.id).eq('account_id', accountId)
     })
     return NextResponse.json({ appointment: data }, { status: 201 })
-  } catch (error) { return toErrorResponse(error) }
+  } catch (error) { return appointmentErrorResponse(error) }
 }
 
 export async function PATCH(request: Request) {
@@ -74,5 +82,5 @@ export async function PATCH(request: Request) {
       await supabase.from('appointments').update({ google_sync_status: 'failed', google_sync_error: syncError instanceof Error ? syncError.message.slice(0, 500) : 'Error desconocido de Google Calendar.' }).eq('id', data.id).eq('account_id', accountId)
     })
     return NextResponse.json({ success: true })
-  } catch (error) { return toErrorResponse(error) }
+  } catch (error) { return appointmentErrorResponse(error) }
 }
