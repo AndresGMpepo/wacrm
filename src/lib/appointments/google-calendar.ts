@@ -1,7 +1,7 @@
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { decrypt, encrypt } from '@/lib/whatsapp/encryption'
 
-type AppointmentForGoogle = { id: string; title: string; notes: string | null; starts_at: string; ends_at: string; timezone: string; status: string; google_calendar_event_id: string | null; contact?: { name: string | null; phone: string | null } | { name: string | null; phone: string | null }[] | null }
+type AppointmentForGoogle = { id: string; title: string; notes: string | null; starts_at: string; ends_at: string; timezone: string; status: string; google_calendar_event_id: string | null; assigned_agent_id: string | null; contact?: { name: string | null; phone: string | null } | { name: string | null; phone: string | null }[] | null }
 
 function admin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -35,9 +35,14 @@ export async function exchangeGoogleCode(code: string, redirectUri: string) {
   return { accessToken: data.access_token, refreshToken: data.refresh_token, expiresAt: new Date(Date.now() + (data.expires_in ?? 3600) * 1000).toISOString() }
 }
 
-async function accessToken(accountId: string) {
+async function accessToken(accountId: string, assignedAgentId: string | null) {
   const db = admin()
-  const { data, error } = await db.from('google_calendar_connections').select('calendar_id, encrypted_access_token, encrypted_refresh_token, access_token_expires_at').eq('account_id', accountId).maybeSingle()
+  const exact = assignedAgentId
+    ? await db.from('google_calendar_connections').select('calendar_id, encrypted_access_token, encrypted_refresh_token, access_token_expires_at').eq('account_id', accountId).eq('assigned_agent_id', assignedAgentId).maybeSingle()
+    : { data: null, error: null }
+  if (exact.error) throw exact.error
+  const fallback = exact.data ? { data: null, error: null } : await db.from('google_calendar_connections').select('calendar_id, encrypted_access_token, encrypted_refresh_token, access_token_expires_at').eq('account_id', accountId).is('assigned_agent_id', null).maybeSingle()
+  const { data, error } = exact.data ? exact : fallback
   if (error) throw error
   if (!data) return null
   if (!data.access_token_expires_at || new Date(data.access_token_expires_at).getTime() > Date.now() + 60_000) return { db, calendarId: data.calendar_id, token: decrypt(data.encrypted_access_token) }
@@ -57,7 +62,7 @@ function eventBody(appointment: AppointmentForGoogle) {
 }
 
 export async function syncGoogleAppointment(accountId: string, appointment: AppointmentForGoogle) {
-  const connection = await accessToken(accountId)
+  const connection = await accessToken(accountId, appointment.assigned_agent_id)
   if (!connection) return
   const base = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(connection.calendarId)}/events`
   if (appointment.status === 'cancelled' && appointment.google_calendar_event_id) {
