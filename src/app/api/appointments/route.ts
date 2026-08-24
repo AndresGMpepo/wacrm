@@ -18,7 +18,7 @@ export async function GET(request: Request) {
     const from = date(url.searchParams.get('from')) ?? new Date(Date.now() - 7 * 86_400_000).toISOString()
     const to = date(url.searchParams.get('to')) ?? new Date(Date.now() + 30 * 86_400_000).toISOString()
     const { data, error } = await supabase.from('appointments')
-      .select('id, contact_id, assigned_agent_id, title, notes, starts_at, ends_at, timezone, status, created_at, contact:contacts(name, phone), agent:profiles!appointments_assigned_agent_id_fkey(full_name)')
+      .select('id, contact_id, assigned_agent_id, title, notes, starts_at, ends_at, timezone, status, google_sync_status, google_sync_error, created_at, contact:contacts(name, phone), agent:profiles!appointments_assigned_agent_id_fkey(full_name)')
       .eq('account_id', accountId).gte('starts_at', from).lt('starts_at', to).order('starts_at')
     if (error) throw error
     return NextResponse.json({ appointments: data ?? [] })
@@ -51,7 +51,10 @@ export async function POST(request: Request) {
       timezone: typeof body?.timezone === 'string' ? body.timezone.slice(0, 80) : 'UTC',
     }).select('id, title, notes, starts_at, ends_at, timezone, status, google_calendar_event_id, assigned_agent_id, contact:contacts(name, phone)').single()
     if (error) throw error
-    await syncGoogleAppointment(accountId, data).catch((syncError) => console.error('[appointments] Google Calendar sync failed:', syncError))
+    await syncGoogleAppointment(accountId, data).catch(async (syncError) => {
+      console.error('[appointments] Google Calendar sync failed:', syncError)
+      await supabase.from('appointments').update({ google_sync_status: 'failed', google_sync_error: syncError instanceof Error ? syncError.message.slice(0, 500) : 'Error desconocido de Google Calendar.' }).eq('id', data.id).eq('account_id', accountId)
+    })
     return NextResponse.json({ appointment: data }, { status: 201 })
   } catch (error) { return toErrorResponse(error) }
 }
@@ -66,7 +69,10 @@ export async function PATCH(request: Request) {
     const { data, error } = await supabase.from('appointments').update({ status }).eq('id', id).eq('account_id', accountId).select('id, title, notes, starts_at, ends_at, timezone, status, google_calendar_event_id, assigned_agent_id, contact:contacts(name, phone)').maybeSingle()
     if (error) throw error
     if (!data) return NextResponse.json({ error: 'La cita no existe.' }, { status: 404 })
-    await syncGoogleAppointment(accountId, data).catch((syncError) => console.error('[appointments] Google Calendar sync failed:', syncError))
+    await syncGoogleAppointment(accountId, data).catch(async (syncError) => {
+      console.error('[appointments] Google Calendar sync failed:', syncError)
+      await supabase.from('appointments').update({ google_sync_status: 'failed', google_sync_error: syncError instanceof Error ? syncError.message.slice(0, 500) : 'Error desconocido de Google Calendar.' }).eq('id', data.id).eq('account_id', accountId)
+    })
     return NextResponse.json({ success: true })
   } catch (error) { return toErrorResponse(error) }
 }

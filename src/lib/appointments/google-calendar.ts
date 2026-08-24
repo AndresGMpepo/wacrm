@@ -63,17 +63,21 @@ function eventBody(appointment: AppointmentForGoogle) {
 
 export async function syncGoogleAppointment(accountId: string, appointment: AppointmentForGoogle) {
   const connection = await accessToken(accountId, appointment.assigned_agent_id)
-  if (!connection) return
+  if (!connection) {
+    await admin().from('appointments').update({ google_sync_status: 'not_connected', google_sync_error: null }).eq('id', appointment.id).eq('account_id', accountId)
+    return
+  }
+  await connection.db.from('appointments').update({ google_sync_status: 'pending', google_sync_error: null }).eq('id', appointment.id).eq('account_id', accountId)
   const base = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(connection.calendarId)}/events`
   if (appointment.status === 'cancelled' && appointment.google_calendar_event_id) {
     const response = await fetch(`${base}/${encodeURIComponent(appointment.google_calendar_event_id)}`, { method: 'DELETE', headers: { Authorization: `Bearer ${connection.token}` }, signal: AbortSignal.timeout(10_000) })
     if (!response.ok && response.status !== 404) throw new Error('No se pudo cancelar el evento en Google Calendar.')
-    await connection.db.from('appointments').update({ google_calendar_event_id: null }).eq('id', appointment.id).eq('account_id', accountId)
+    await connection.db.from('appointments').update({ google_calendar_event_id: null, google_sync_status: 'synced', google_sync_error: null }).eq('id', appointment.id).eq('account_id', accountId)
     return
   }
   if (appointment.status === 'cancelled') return
   const response = await fetch(appointment.google_calendar_event_id ? `${base}/${encodeURIComponent(appointment.google_calendar_event_id)}` : base, { method: appointment.google_calendar_event_id ? 'PATCH' : 'POST', headers: { Authorization: `Bearer ${connection.token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(eventBody(appointment)), signal: AbortSignal.timeout(10_000) })
   const event = await response.json().catch(() => ({})) as { id?: string }
   if (!response.ok || !event.id) throw new Error('No se pudo sincronizar la cita en Google Calendar.')
-  if (!appointment.google_calendar_event_id) await connection.db.from('appointments').update({ google_calendar_event_id: event.id }).eq('id', appointment.id).eq('account_id', accountId)
+  await connection.db.from('appointments').update({ google_calendar_event_id: appointment.google_calendar_event_id ?? event.id, google_sync_status: 'synced', google_sync_error: null }).eq('id', appointment.id).eq('account_id', accountId)
 }
