@@ -49,7 +49,7 @@ export async function POST(request: Request) {
       assigned_agent_id: assignedAgentId,
       notes: typeof body?.notes === 'string' ? body.notes.trim().slice(0, 2000) || null : null,
       timezone: typeof body?.timezone === 'string' ? body.timezone.slice(0, 80) : 'UTC',
-    }).select('id, title, notes, starts_at, ends_at, timezone, status, google_calendar_event_id, assigned_agent_id, contact:contacts(name, phone)').single()
+    }).select('id, title, notes, starts_at, ends_at, timezone, status, google_calendar_event_id, google_sync_status, google_sync_error, assigned_agent_id, contact:contacts(name, phone), agent:profiles!appointments_assigned_agent_id_fkey(full_name)').single()
     if (error) throw error
     await syncGoogleAppointment(accountId, data).catch(async (syncError) => {
       console.error('[appointments] Google Calendar sync failed:', syncError)
