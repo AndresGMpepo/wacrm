@@ -25,8 +25,27 @@ export async function GET(request: Request) {
     if (error) throw error
     if (!attempt || attempt.completed_at || new Date(attempt.expires_at).getTime() < Date.now()) return redirect(request, 'expired')
     const tokens = await exchangeGoogleCode(code, attempt.redirect_uri)
-    if (attempt.assigned_agent_id) await db.from('google_calendar_connections').delete().eq('account_id', attempt.account_id).eq('assigned_agent_id', attempt.assigned_agent_id)
-    const { error: connectionError } = await db.from('google_calendar_connections').insert({ account_id: attempt.account_id, assigned_agent_id: attempt.assigned_agent_id ?? null, calendar_id: 'primary', encrypted_access_token: encrypt(tokens.accessToken), encrypted_refresh_token: encrypt(tokens.refreshToken), access_token_expires_at: tokens.expiresAt, connected_by: attempt.user_id, connected_at: new Date().toISOString() })
+    // One OAuth grant can serve several calendars in the same scope.
+    let tokenScope = db.from('google_calendar_connections').update({
+      encrypted_access_token: encrypt(tokens.accessToken),
+      encrypted_refresh_token: encrypt(tokens.refreshToken),
+      access_token_expires_at: tokens.expiresAt,
+      sync_token: null,
+      last_error: null,
+    }).eq('account_id', attempt.account_id)
+    tokenScope = attempt.assigned_agent_id
+      ? tokenScope.eq('assigned_agent_id', attempt.assigned_agent_id)
+      : tokenScope.is('assigned_agent_id', null)
+    const { error: tokenScopeError } = await tokenScope
+    if (tokenScopeError) throw tokenScopeError
+    const scope = db.from('google_calendar_connections').select('id').eq('account_id', attempt.account_id).eq('calendar_id', 'primary')
+    const scoped = attempt.assigned_agent_id ? scope.eq('assigned_agent_id', attempt.assigned_agent_id) : scope.is('assigned_agent_id', null)
+    const { data: existing, error: existingError } = await scoped.maybeSingle()
+    if (existingError) throw existingError
+    const values = { calendar_id: 'primary', display_name: 'Calendario principal', is_default: true, encrypted_access_token: encrypt(tokens.accessToken), encrypted_refresh_token: encrypt(tokens.refreshToken), access_token_expires_at: tokens.expiresAt, sync_token: null, last_error: null, connected_by: attempt.user_id, connected_at: new Date().toISOString() }
+    const { error: connectionError } = existing
+      ? await db.from('google_calendar_connections').update(values).eq('id', existing.id)
+      : await db.from('google_calendar_connections').insert({ account_id: attempt.account_id, assigned_agent_id: attempt.assigned_agent_id ?? null, ...values })
     if (connectionError) throw connectionError
     await db.from('google_calendar_oauth_attempts').update({ completed_at: new Date().toISOString() }).eq('state', state)
     return redirect(request, 'connected')

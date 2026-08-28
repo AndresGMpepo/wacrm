@@ -1,7 +1,9 @@
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { decrypt, encrypt } from '@/lib/whatsapp/encryption'
 
-type AppointmentForGoogle = { id: string; title: string; notes: string | null; starts_at: string; ends_at: string; timezone: string; status: string; google_calendar_event_id: string | null; assigned_agent_id: string | null; contact?: { name: string | null; phone: string | null } | { name: string | null; phone: string | null }[] | null }
+type AppointmentForGoogle = { id: string; title: string; notes: string | null; starts_at: string; ends_at: string; timezone: string; status: string; google_calendar_event_id: string | null; google_calendar_connection_id?: string | null; assigned_agent_id: string | null; contact?: { name: string | null; phone: string | null } | { name: string | null; phone: string | null }[] | null }
+type GoogleConnection = { id: string; account_id: string; assigned_agent_id: string | null; calendar_id: string; encrypted_access_token: string; encrypted_refresh_token: string; access_token_expires_at: string | null; sync_token: string | null }
+type GoogleCalendarListItem = { id: string; summary: string; primary?: boolean }
 
 function admin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -23,7 +25,7 @@ export function googleCalendarConfigured() {
 
 export function googleAuthorizeUrl(redirectUri: string, state: string) {
   const { clientId } = credentials()
-  const params = new URLSearchParams({ client_id: clientId, redirect_uri: redirectUri, response_type: 'code', access_type: 'offline', prompt: 'consent', scope: 'https://www.googleapis.com/auth/calendar.events', state })
+  const params = new URLSearchParams({ client_id: clientId, redirect_uri: redirectUri, response_type: 'code', access_type: 'offline', prompt: 'consent', scope: 'https://www.googleapis.com/auth/calendar', state })
   return `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`
 }
 
@@ -35,24 +37,25 @@ export async function exchangeGoogleCode(code: string, redirectUri: string) {
   return { accessToken: data.access_token, refreshToken: data.refresh_token, expiresAt: new Date(Date.now() + (data.expires_in ?? 3600) * 1000).toISOString() }
 }
 
-async function accessToken(accountId: string, assignedAgentId: string | null) {
+async function accessToken(accountId: string, assignedAgentId: string | null, connectionId?: string | null) {
   const db = admin()
-  const exact = assignedAgentId
-    ? await db.from('google_calendar_connections').select('calendar_id, encrypted_access_token, encrypted_refresh_token, access_token_expires_at').eq('account_id', accountId).eq('assigned_agent_id', assignedAgentId).maybeSingle()
+  const chosen = connectionId ? await db.from('google_calendar_connections').select('id, calendar_id, encrypted_access_token, encrypted_refresh_token, access_token_expires_at').eq('id', connectionId).eq('account_id', accountId).maybeSingle() : null
+  const exact = chosen?.data ? chosen : assignedAgentId
+    ? await db.from('google_calendar_connections').select('id, calendar_id, encrypted_access_token, encrypted_refresh_token, access_token_expires_at').eq('account_id', accountId).eq('assigned_agent_id', assignedAgentId).eq('is_default', true).maybeSingle()
     : { data: null, error: null }
   if (exact.error) throw exact.error
-  const fallback = exact.data ? { data: null, error: null } : await db.from('google_calendar_connections').select('calendar_id, encrypted_access_token, encrypted_refresh_token, access_token_expires_at').eq('account_id', accountId).is('assigned_agent_id', null).maybeSingle()
+  const fallback = exact.data ? { data: null, error: null } : await db.from('google_calendar_connections').select('id, calendar_id, encrypted_access_token, encrypted_refresh_token, access_token_expires_at').eq('account_id', accountId).is('assigned_agent_id', null).eq('is_default', true).maybeSingle()
   const { data, error } = exact.data ? exact : fallback
   if (error) throw error
   if (!data) return null
-  if (!data.access_token_expires_at || new Date(data.access_token_expires_at).getTime() > Date.now() + 60_000) return { db, calendarId: data.calendar_id, token: decrypt(data.encrypted_access_token) }
+  if (!data.access_token_expires_at || new Date(data.access_token_expires_at).getTime() > Date.now() + 60_000) return { db, calendarId: data.calendar_id, token: decrypt(data.encrypted_access_token), connectionId: data.id }
   const { clientId, clientSecret } = credentials()
   const response = await fetch('https://oauth2.googleapis.com/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ client_id: clientId, client_secret: clientSecret, refresh_token: decrypt(data.encrypted_refresh_token), grant_type: 'refresh_token' }), signal: AbortSignal.timeout(10_000) })
   const refreshed = await response.json().catch(() => ({})) as { access_token?: string; expires_in?: number }
   if (!response.ok || !refreshed.access_token) throw new Error('No se pudo renovar la conexión de Google Calendar.')
   const expiresAt = new Date(Date.now() + (refreshed.expires_in ?? 3600) * 1000).toISOString()
-  await db.from('google_calendar_connections').update({ encrypted_access_token: encrypt(refreshed.access_token), access_token_expires_at: expiresAt }).eq('account_id', accountId)
-  return { db, calendarId: data.calendar_id, token: refreshed.access_token }
+  await db.from('google_calendar_connections').update({ encrypted_access_token: encrypt(refreshed.access_token), access_token_expires_at: expiresAt }).eq('id', data.id)
+  return { db, calendarId: data.calendar_id, token: refreshed.access_token, connectionId: data.id }
 }
 
 function eventBody(appointment: AppointmentForGoogle) {
@@ -62,12 +65,12 @@ function eventBody(appointment: AppointmentForGoogle) {
 }
 
 export async function syncGoogleAppointment(accountId: string, appointment: AppointmentForGoogle) {
-  const connection = await accessToken(accountId, appointment.assigned_agent_id)
+  const connection = await accessToken(accountId, appointment.assigned_agent_id, appointment.google_calendar_connection_id)
   if (!connection) {
     await admin().from('appointments').update({ google_sync_status: 'not_connected', google_sync_error: null }).eq('id', appointment.id).eq('account_id', accountId)
     return
   }
-  await connection.db.from('appointments').update({ google_sync_status: 'pending', google_sync_error: null }).eq('id', appointment.id).eq('account_id', accountId)
+  await connection.db.from('appointments').update({ google_sync_status: 'pending', google_sync_error: null, google_calendar_connection_id: connection.connectionId }).eq('id', appointment.id).eq('account_id', accountId)
   const base = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(connection.calendarId)}/events`
   if (appointment.status === 'cancelled' && appointment.google_calendar_event_id) {
     const response = await fetch(`${base}/${encodeURIComponent(appointment.google_calendar_event_id)}`, { method: 'DELETE', headers: { Authorization: `Bearer ${connection.token}` }, signal: AbortSignal.timeout(10_000) })
@@ -80,4 +83,111 @@ export async function syncGoogleAppointment(accountId: string, appointment: Appo
   const event = await response.json().catch(() => ({})) as { id?: string }
   if (!response.ok || !event.id) throw new Error('No se pudo sincronizar la cita en Google Calendar.')
   await connection.db.from('appointments').update({ google_calendar_event_id: appointment.google_calendar_event_id ?? event.id, google_sync_status: 'synced', google_sync_error: null }).eq('id', appointment.id).eq('account_id', accountId)
+}
+
+async function googleRequest(token: string, path: string) {
+  const response = await fetch(`https://www.googleapis.com/calendar/v3/${path}`, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15_000) })
+  const data = await response.json().catch(() => ({})) as Record<string, unknown>
+  if (!response.ok) throw new Error(typeof data.error === 'object' && data.error ? String((data.error as { message?: string }).message ?? 'Google Calendar rechazó la solicitud.') : 'Google Calendar rechazó la solicitud.')
+  return data
+}
+
+function auditGoogleChange(db: ReturnType<typeof admin>, accountId: string, appointmentId: string, action: string, beforeData: Record<string, unknown>, afterData: Record<string, unknown>) {
+  return db.from('appointment_audit_log').insert({ account_id: accountId, appointment_id: appointmentId, actor_user_id: null, source: 'google_calendar', action, before_data: beforeData, after_data: afterData })
+}
+
+type GoogleEvent = { id?: string; status?: string; summary?: string; start?: { dateTime?: string; timeZone?: string }; end?: { dateTime?: string; timeZone?: string }; updated?: string; creator?: { email?: string }; organizer?: { email?: string } }
+
+/** Only imports updates to events already created by NexoOmni. */
+export async function syncGoogleCalendarChanges() {
+  const db = admin()
+  const { data: connections, error } = await db.from('google_calendar_connections').select('id, account_id, calendar_id, sync_token')
+  if (error) throw error
+  const summary = { checked: 0, updated: 0, cancelled: 0, failed: 0 }
+  for (const connectionRow of connections ?? []) {
+    summary.checked += 1
+    try {
+      const connection = await accessToken(connectionRow.account_id, null, connectionRow.id)
+      if (!connection) continue
+      let pageToken: string | undefined
+      let nextSyncToken: string | null = null
+      do {
+        const params = new URLSearchParams({ singleEvents: 'true', showDeleted: 'true', maxResults: '250' })
+        if (connectionRow.sync_token) params.set('syncToken', connectionRow.sync_token)
+        else params.set('timeMin', new Date(Date.now() - 90 * 86_400_000).toISOString())
+        if (pageToken) params.set('pageToken', pageToken)
+        const result = await googleRequest(connection.token, `calendars/${encodeURIComponent(connection.calendarId)}/events?${params.toString()}`) as { items?: GoogleEvent[]; nextPageToken?: string; nextSyncToken?: string }
+        pageToken = result.nextPageToken
+        if (result.nextSyncToken) nextSyncToken = result.nextSyncToken
+        for (const event of result.items ?? []) {
+          if (!event.id) continue
+          const { data: appointment, error: appointmentError } = await db.from('appointments').select('id, title, starts_at, ends_at, timezone, status, google_calendar_event_id').eq('account_id', connectionRow.account_id).eq('google_calendar_connection_id', connectionRow.id).eq('google_calendar_event_id', event.id).maybeSingle()
+          if (appointmentError) throw appointmentError
+          if (!appointment) continue
+          const before = { title: appointment.title, starts_at: appointment.starts_at, ends_at: appointment.ends_at, timezone: appointment.timezone, status: appointment.status }
+          const metadata = { updated_at: event.updated ?? null, creator: event.creator?.email ?? null, organizer: event.organizer?.email ?? null }
+          if (event.status === 'cancelled') {
+            if (appointment.status !== 'cancelled') {
+              const { error: updateError } = await db.from('appointments').update({ status: 'cancelled', google_sync_status: 'synced', google_sync_error: null }).eq('id', appointment.id).eq('account_id', connectionRow.account_id)
+              if (updateError) throw updateError
+              await auditGoogleChange(db, connectionRow.account_id, appointment.id, 'cancelled_from_google', before, { ...before, status: 'cancelled', google: metadata })
+              summary.cancelled += 1
+            }
+            continue
+          }
+          const update = { title: event.summary?.trim().slice(0, 160) || appointment.title, starts_at: event.start?.dateTime ? new Date(event.start.dateTime).toISOString() : appointment.starts_at, ends_at: event.end?.dateTime ? new Date(event.end.dateTime).toISOString() : appointment.ends_at, timezone: event.start?.timeZone || appointment.timezone, google_sync_status: 'synced', google_sync_error: null }
+          if (JSON.stringify(before) !== JSON.stringify({ title: update.title, starts_at: update.starts_at, ends_at: update.ends_at, timezone: update.timezone, status: appointment.status })) {
+            const { error: updateError } = await db.from('appointments').update(update).eq('id', appointment.id).eq('account_id', connectionRow.account_id)
+            if (updateError) throw updateError
+            await auditGoogleChange(db, connectionRow.account_id, appointment.id, 'updated_from_google', before, { ...before, ...update, google: metadata })
+            summary.updated += 1
+          }
+        }
+      } while (pageToken)
+      await db.from('google_calendar_connections').update({ sync_token: nextSyncToken ?? connectionRow.sync_token, last_synced_at: new Date().toISOString(), last_error: null }).eq('id', connectionRow.id)
+    } catch (error) {
+      summary.failed += 1
+      const message = error instanceof Error ? error.message.slice(0, 500) : 'Error desconocido al sincronizar Google Calendar.'
+      const expiredToken = /(?:sync token|410|gone)/i.test(message)
+      await db.from('google_calendar_connections').update({ last_error: message, ...(expiredToken ? { sync_token: null } : {}) }).eq('id', connectionRow.id)
+      console.error('[appointments] Google Calendar inbound sync failed:', error)
+    }
+  }
+  return summary
+}
+
+export async function listGoogleCalendars(accountId: string, connectionId: string) {
+  const connection = await accessToken(accountId, null, connectionId)
+  if (!connection) throw new Error('No se encontró la conexión de Google Calendar.')
+  const result = await googleRequest(connection.token, 'users/me/calendarList?maxResults=250') as { items?: GoogleCalendarListItem[] }
+  return (result.items ?? []).map((calendar) => ({ id: calendar.id, summary: calendar.summary || calendar.id, primary: calendar.primary === true }))
+}
+
+export async function addGoogleCalendarConnection(accountId: string, sourceConnectionId: string, calendarId: string) {
+  const db = admin()
+  const { data: source, error } = await db.from('google_calendar_connections').select('id, account_id, assigned_agent_id, calendar_id, encrypted_access_token, encrypted_refresh_token, access_token_expires_at, sync_token').eq('id', sourceConnectionId).eq('account_id', accountId).maybeSingle<GoogleConnection>()
+  if (error) throw error
+  if (!source) throw new Error('No se encontró la conexión de Google Calendar.')
+  const calendars = await listGoogleCalendars(accountId, sourceConnectionId)
+  const calendar = calendars.find((item) => item.id === calendarId)
+  if (!calendar) throw new Error('Ese calendario no pertenece a la cuenta Google conectada.')
+  const { data: existing, error: existingError } = await db.from('google_calendar_connections').select('id').eq('account_id', accountId).eq('calendar_id', calendarId).eq('assigned_agent_id', source.assigned_agent_id).maybeSingle()
+  if (existingError) throw existingError
+  if (existing) return existing
+  const { data, error: insertError } = await db.from('google_calendar_connections').insert({ account_id: accountId, assigned_agent_id: source.assigned_agent_id, calendar_id: calendar.id, display_name: calendar.summary, is_default: false, encrypted_access_token: source.encrypted_access_token, encrypted_refresh_token: source.encrypted_refresh_token, access_token_expires_at: source.access_token_expires_at, connected_by: null, connected_at: new Date().toISOString() }).select('id').single()
+  if (insertError) throw insertError
+  return data
+}
+
+export async function setDefaultGoogleCalendarConnection(accountId: string, connectionId: string) {
+  const db = admin()
+  const { data: connection, error } = await db.from('google_calendar_connections').select('id, assigned_agent_id').eq('id', connectionId).eq('account_id', accountId).maybeSingle()
+  if (error) throw error
+  if (!connection) throw new Error('No se encontró el calendario.')
+  let scope = db.from('google_calendar_connections').update({ is_default: false }).eq('account_id', accountId)
+  scope = connection.assigned_agent_id ? scope.eq('assigned_agent_id', connection.assigned_agent_id) : scope.is('assigned_agent_id', null)
+  const { error: clearError } = await scope
+  if (clearError) throw clearError
+  const { error: setError } = await db.from('google_calendar_connections').update({ is_default: true }).eq('id', connectionId).eq('account_id', accountId)
+  if (setError) throw setError
 }

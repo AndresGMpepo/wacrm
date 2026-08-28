@@ -9,6 +9,7 @@ import { downloadMedia, getMediaUrl } from '@/lib/whatsapp/meta-api'
 import { describeImageWithOpenAi, transcribeAudioWithOpenAi } from '@/lib/ai/media-analysis'
 import { aiRequestTimeoutMs } from '@/lib/ai/defaults'
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
+import { syncGoogleCalendarChanges } from '@/lib/appointments/google-calendar'
 
 export const maxDuration = 60
 
@@ -128,7 +129,13 @@ export async function POST(request: Request) {
   }
   const mediaResult = await processMediaJobs(db)
   const followUps = await processCallFollowUps(db)
-  return NextResponse.json({ completed, skipped, failed, media: mediaResult, follow_ups: followUps })
+  let googleCalendar: Awaited<ReturnType<typeof syncGoogleCalendarChanges>> | null = null
+  try {
+    googleCalendar = await syncGoogleCalendarChanges()
+  } catch (error) {
+    console.error('[appointments] Google Calendar inbound sync could not start:', error)
+  }
+  return NextResponse.json({ completed, skipped, failed, media: mediaResult, follow_ups: followUps, google_calendar: googleCalendar })
 }
 
 async function processCallFollowUps(db: ReturnType<typeof supabaseAdmin>) {
