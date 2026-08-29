@@ -1,4 +1,5 @@
 import { supabaseAdmin } from '@/lib/ai/admin-client'
+import { alertRiskEscalatedToHigh } from '@/lib/notifications/nexo-memory-alerts'
 
 type Db = ReturnType<typeof supabaseAdmin>
 
@@ -104,6 +105,7 @@ export async function applyContactMemory(
   memory: MemoryExtraction,
 ) {
   const { accountId, contactId, source } = args
+  const { data: previous } = await db.from('contact_memory').select('risk_level').eq('contact_id', contactId).maybeSingle()
   await db.from('contact_memory').upsert({
     contact_id: contactId,
     account_id: accountId,
@@ -118,6 +120,11 @@ export async function applyContactMemory(
     last_source_call_id: source.type === 'call' ? source.id : null,
     updated_at: new Date().toISOString(),
   }, { onConflict: 'contact_id' })
+  if (memory.risk_level === 'high' && previous?.risk_level !== 'high') {
+    await alertRiskEscalatedToHigh(db, accountId, contactId).catch((error) => {
+      console.error('[nexo-memory] Failed to send high-risk alert:', error)
+    })
+  }
 
   for (const fact of memory.important_facts) {
     await db.from('contact_memory_events').insert({

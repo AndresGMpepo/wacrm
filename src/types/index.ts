@@ -211,7 +211,8 @@ export type NotificationType =
   | 'conversation_assigned'
   | 'incoming_message'
   | 'negative_sentiment'
-  | 'call_follow_up';
+  | 'call_follow_up'
+  | 'nexo_memory_alert';
 
 export interface Notification {
   id: string;

@@ -7,6 +7,7 @@ import { useAuth } from '@/hooks/use-auth';
 import type { Notification } from '@/types';
 import {
   Bell,
+  Brain,
   CheckCheck,
   Loader2,
   MessageSquare,
@@ -26,6 +27,7 @@ const TYPE_ICON: Record<Notification['type'], typeof Bell> = {
   incoming_message: MessageSquare,
   negative_sentiment: Siren,
   call_follow_up: PhoneCall,
+  nexo_memory_alert: Brain,
 };
 
 export default function NotificationsPage() {
@@ -128,6 +130,8 @@ export default function NotificationsPage() {
       if (!n.read_at) markRead(n.id);
       if (n.conversation_id) {
         router.push(`/inbox?c=${n.conversation_id}`);
+      } else if (n.type === 'nexo_memory_alert') {
+        router.push('/reports');
       }
     },
     [markRead, router]

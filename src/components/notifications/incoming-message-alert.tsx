@@ -93,7 +93,8 @@ export function IncomingMessageAlert() {
       if (
         notification.type !== 'incoming_message' &&
         notification.type !== 'negative_sentiment' &&
-        notification.type !== 'call_follow_up'
+        notification.type !== 'call_follow_up' &&
+        notification.type !== 'nexo_memory_alert'
       ) {
         return;
       }
@@ -112,7 +113,7 @@ export function IncomingMessageAlert() {
       playAlert(notification.type);
       const notify = notification.type === 'negative_sentiment'
         ? toast.error
-        : notification.type === 'call_follow_up'
+        : notification.type === 'call_follow_up' || notification.type === 'nexo_memory_alert'
           ? toast.warning
           : toast;
       notify(notification.title, {
@@ -122,7 +123,9 @@ export function IncomingMessageAlert() {
               label: 'Abrir chat',
               onClick: () => router.push(`/inbox?c=${notification.conversation_id}`),
             }
-          : undefined,
+          : notification.type === 'nexo_memory_alert'
+            ? { label: 'Ver reportes', onClick: () => router.push('/reports') }
+            : undefined,
       });
 
       if (

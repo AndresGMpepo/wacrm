@@ -11,6 +11,7 @@ import { aiRequestTimeoutMs } from '@/lib/ai/defaults'
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
 import { syncGoogleCalendarChanges } from '@/lib/appointments/google-calendar'
 import { applyContactMemory, parseMemoryExtraction } from '@/lib/ai/memory'
+import { alertCommitmentOverdue, alertStaleProspect, sendDailyNexoMemoryDigest } from '@/lib/notifications/nexo-memory-alerts'
 
 export const maxDuration = 60
 
@@ -138,13 +139,17 @@ export async function POST(request: Request) {
   const mediaResult = await processMediaJobs(db)
   const followUps = await processCallFollowUps(db)
   const overdueCommitments = await markOverdueCommitments(db)
+  const staleProspects = await alertStaleProspects(db)
+  await sendNexoMemoryDigests(db).catch((error) => {
+    console.error('[nexo-memory] Failed to send daily digests:', error)
+  })
   let googleCalendar: Awaited<ReturnType<typeof syncGoogleCalendarChanges>> | null = null
   try {
     googleCalendar = await syncGoogleCalendarChanges()
   } catch (error) {
     console.error('[appointments] Google Calendar inbound sync could not start:', error)
   }
-  return NextResponse.json({ completed, skipped, failed, media: mediaResult, follow_ups: followUps, overdue_commitments: overdueCommitments, google_calendar: googleCalendar })
+  return NextResponse.json({ completed, skipped, failed, media: mediaResult, follow_ups: followUps, overdue_commitments: overdueCommitments, stale_prospects: staleProspects, google_calendar: googleCalendar })
 }
 
 /** A commitment ("enviar cotización el viernes") that's still 'pending' past its
@@ -156,12 +161,63 @@ async function markOverdueCommitments(db: ReturnType<typeof supabaseAdmin>) {
     .update({ status: 'overdue', updated_at: new Date().toISOString() })
     .eq('status', 'pending')
     .lt('due_date', today)
-    .select('id')
+    .select('id, account_id, contact_id, description')
   if (error) {
     console.error('[nexo-memory] Failed to mark overdue commitments:', error)
     return { marked: 0 }
   }
+  for (const commitment of data ?? []) {
+    await alertCommitmentOverdue(db, commitment.account_id, commitment.contact_id, commitment.description).catch((alertError) => {
+      console.error('[nexo-memory] Failed to send overdue-commitment alert:', alertError)
+    })
+  }
   return { marked: data?.length ?? 0 }
+}
+
+/** A prospect (medium/high risk, i.e. still an open relationship) whose
+ *  memory hasn't been touched in 48h gets flagged — and re-flagged every 48h
+ *  while it stays stale, via stale_alerted_at. */
+async function alertStaleProspects(db: ReturnType<typeof supabaseAdmin>) {
+  const cutoff = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()
+  const { data, error } = await db.from('contact_memory')
+    .select('account_id, contact_id')
+    .in('risk_level', ['medium', 'high'])
+    .lt('updated_at', cutoff)
+    .or(`stale_alerted_at.is.null,stale_alerted_at.lt.${cutoff}`)
+    .limit(50)
+  if (error) {
+    console.error('[nexo-memory] Failed to load stale prospects:', error)
+    return { alerted: 0 }
+  }
+  for (const row of data ?? []) {
+    await alertStaleProspect(db, row.account_id, row.contact_id).catch((alertError) => {
+      console.error('[nexo-memory] Failed to send stale-prospect alert:', alertError)
+    })
+    await db.from('contact_memory').update({ stale_alerted_at: new Date().toISOString() }).eq('contact_id', row.contact_id)
+  }
+  return { alerted: data?.length ?? 0 }
+}
+
+/** One aggregate "Resumen diario de Nexo Memory" notification per account —
+ *  cheap enough to check every tick since it's a handful of head-count
+ *  queries per account, and sendDailyNexoMemoryDigest itself dedupes to once
+ *  per calendar day. */
+async function sendNexoMemoryDigests(db: ReturnType<typeof supabaseAdmin>) {
+  const { data: accounts, error } = await db.from('contact_memory').select('account_id')
+  if (error) throw error
+  const accountIds = [...new Set((accounts ?? []).map((row) => row.account_id))]
+  for (const accountId of accountIds) {
+    const [overdue, highRisk, stale] = await Promise.all([
+      db.from('contact_commitments').select('id', { count: 'exact', head: true }).eq('account_id', accountId).eq('status', 'overdue'),
+      db.from('contact_memory').select('contact_id', { count: 'exact', head: true }).eq('account_id', accountId).eq('risk_level', 'high'),
+      db.from('contact_memory').select('contact_id', { count: 'exact', head: true }).eq('account_id', accountId).in('risk_level', ['medium', 'high']).lt('updated_at', new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()),
+    ])
+    await sendDailyNexoMemoryDigest(db, accountId, {
+      overdueCommitments: overdue.count ?? 0,
+      highRisk: highRisk.count ?? 0,
+      staleProspects: stale.count ?? 0,
+    })
+  }
 }
 
 async function processCallFollowUps(db: ReturnType<typeof supabaseAdmin>) {

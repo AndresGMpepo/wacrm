@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { requireAccountModule } from '@/lib/account/modules'
 import { toErrorResponse } from '@/lib/auth/account'
 import { deleteGoogleEvent, syncGoogleAppointment } from '@/lib/appointments/google-calendar'
+import { recordAppointmentMemoryEvent, upsertAppointmentFollowUp } from '@/lib/appointments/memory'
 
 const STATUSES = ['scheduled', 'confirmed', 'completed', 'cancelled', 'no_show'] as const
 
@@ -9,6 +10,10 @@ function date(value: unknown) {
   if (typeof value !== 'string') return null
   const parsed = new Date(value)
   return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString()
+}
+
+function formatEventDate(iso: string) {
+  return new Intl.DateTimeFormat('es-MX', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(iso))
 }
 
   function appointmentErrorResponse(error: unknown) {
@@ -152,6 +157,11 @@ export async function POST(request: Request) {
       await supabase.from('appointments').update({ google_sync_status: 'failed', google_sync_error: syncError instanceof Error ? syncError.message.slice(0, 500) : 'Error desconocido de Google Calendar.' }).eq('id', data.id).eq('account_id', accountId)
     })
     const [appointment] = await withAgents(supabase, accountId, [data as AppointmentRow])
+    if (contactId) {
+      await recordAppointmentMemoryEvent({ accountId, contactId, appointmentId: data.id, summary: `Cita agendada: ${title} para el ${formatEventDate(startsAt)}.` }).catch((memoryError) => {
+        console.error('[nexo-memory] Failed to record appointment scheduled event:', memoryError)
+      })
+    }
     return NextResponse.json({ appointment }, { status: 201 })
   } catch (error) { return appointmentErrorResponse(error) }
 }
@@ -163,6 +173,9 @@ export async function PATCH(request: Request) {
     const id = typeof body?.id === 'string' ? body.id : ''
     const status = typeof body?.status === 'string' && (STATUSES as readonly string[]).includes(body.status) ? body.status : null
     if (!id) return NextResponse.json({ error: 'Actualización inválida.' }, { status: 400 })
+    const { data: before, error: beforeError } = await supabase.from('appointments').select('contact_id, title, starts_at, status, specialist_id').eq('id', id).eq('account_id', accountId).maybeSingle()
+    if (beforeError) throw beforeError
+    if (!before) return NextResponse.json({ error: 'La cita no existe.' }, { status: 404 })
     const startsAt = body?.starts_at === undefined ? undefined : date(body.starts_at)
     const endsAt = body?.ends_at === undefined ? undefined : date(body.ends_at)
     if ((body?.starts_at !== undefined && !startsAt) || (body?.ends_at !== undefined && !endsAt)) return NextResponse.json({ error: 'Fecha u hora inválida.' }, { status: 400 })
@@ -196,9 +209,7 @@ export async function PATCH(request: Request) {
     }
     if (typeof body?.google_calendar_connection_id === 'string' || body?.google_calendar_connection_id === null) {
       if (typeof body.google_calendar_connection_id === 'string') {
-        const { data: current, error } = await supabase.from('appointments').select('specialist_id').eq('id', id).eq('account_id', accountId).maybeSingle()
-        if (error) throw error
-        const scopeSpecialistId = 'specialist_id' in update ? (update.specialist_id as string | null) : current?.specialist_id ?? null
+        const scopeSpecialistId = 'specialist_id' in update ? (update.specialist_id as string | null) : before.specialist_id ?? null
         if (!await validGoogleConnectionId(supabase, accountId, body.google_calendar_connection_id, scopeSpecialistId)) {
           return NextResponse.json({ error: 'Ese calendario de Google no está disponible para este especialista.' }, { status: 400 })
         }
@@ -214,6 +225,22 @@ export async function PATCH(request: Request) {
       console.error('[appointments] Google Calendar sync failed:', syncError)
       await supabase.from('appointments').update({ google_sync_status: 'failed', google_sync_error: syncError instanceof Error ? syncError.message.slice(0, 500) : 'Error desconocido de Google Calendar.' }).eq('id', data.id).eq('account_id', accountId)
     })
+    const contactId = 'contact_id' in update ? (update.contact_id as string | null) : before.contact_id
+    if (contactId) {
+      const when = formatEventDate(data.starts_at)
+      const logMemoryError = (memoryError: unknown) => console.error('[nexo-memory] Failed to record appointment event:', memoryError)
+      if (status === 'completed' && before.status !== 'completed') {
+        await recordAppointmentMemoryEvent({ accountId, contactId, appointmentId: id, summary: `Asistió a su cita: ${data.title} (${when}).` }).catch(logMemoryError)
+      } else if (status === 'no_show' && before.status !== 'no_show') {
+        await recordAppointmentMemoryEvent({ accountId, contactId, appointmentId: id, summary: `No asistió a su cita programada: ${data.title} (${when}).`, importance: 'high' }).catch(logMemoryError)
+        await upsertAppointmentFollowUp({ accountId, contactId, appointmentId: id, description: `Contactar para reagendar la cita perdida: ${data.title}` }).catch(logMemoryError)
+      } else if (status === 'cancelled' && before.status !== 'cancelled') {
+        await recordAppointmentMemoryEvent({ accountId, contactId, appointmentId: id, summary: `Canceló su cita: ${data.title} (${when}).` }).catch(logMemoryError)
+        await upsertAppointmentFollowUp({ accountId, contactId, appointmentId: id, description: `Confirmar si desea reagendar tras cancelar: ${data.title}` }).catch(logMemoryError)
+      } else if (!status && startsAt && startsAt !== before.starts_at) {
+        await recordAppointmentMemoryEvent({ accountId, contactId, appointmentId: id, summary: `Reagendó su cita del ${formatEventDate(before.starts_at)} al ${when}: ${data.title}.` }).catch(logMemoryError)
+      }
+    }
     return NextResponse.json({ success: true })
   } catch (error) { return appointmentErrorResponse(error) }
 }
