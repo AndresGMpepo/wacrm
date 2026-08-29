@@ -1,8 +1,10 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Brain, CheckCircle2, Loader2 } from 'lucide-react';
+import Link from 'next/link';
+import { ArrowUpRight, Brain, CheckCircle2, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
 type Memory = {
@@ -40,6 +42,17 @@ type Commitment = {
   status: 'pending' | 'done' | 'overdue' | 'cancelled';
 };
 
+// Shape already produced by the Inbox sidebar's own conversations/calls
+// fetch — kept structural (not imported) so this panel has no dependency
+// on that component.
+export type ContactHistoryItem =
+  | { kind: 'conversation'; id: string; channel: string; status: 'open' | 'pending' | 'closed'; summary: string; occurredAt: string | null }
+  | { kind: 'call'; id: string; direction: 'inbound' | 'outbound' | 'internal' | 'unknown' | null; summary: string; occurredAt: string | null; durationSeconds: number | null };
+
+type TimelineItem =
+  | { kind: 'memory_event'; id: string; occurredAt: string; label: string }
+  | (ContactHistoryItem & { label?: never });
+
 const SENTIMENT_LABEL: Record<string, string> = {
   positive: 'Positivo',
   neutral: 'Neutral',
@@ -63,7 +76,25 @@ function formatDate(value: string) {
   );
 }
 
-export function NexoMemoryPanel({ contactId }: { contactId: string }) {
+function formatDateTime(value: string) {
+  return new Intl.DateTimeFormat('es-MX', { dateStyle: 'medium', timeStyle: 'short' }).format(
+    new Date(value)
+  );
+}
+
+function callDuration(seconds: number | null) {
+  return seconds == null ? '' : ` · ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+}
+
+export function NexoMemoryPanel({
+  contactId,
+  history = [],
+  activeConversationId,
+}: {
+  contactId: string;
+  history?: ContactHistoryItem[];
+  activeConversationId?: string | null;
+}) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [memory, setMemory] = useState<Memory>(null);
@@ -136,6 +167,19 @@ export function NexoMemoryPanel({ contactId }: { contactId: string }) {
   const objections = facts.filter((fact) => fact.category === 'objection');
   const pendingCommitments = commitments.filter(
     (commitment) => commitment.status === 'pending'
+  );
+  const timeline: TimelineItem[] = [
+    ...events.map(
+      (event): TimelineItem => ({
+        kind: 'memory_event',
+        id: event.id,
+        occurredAt: event.event_date,
+        label: event.summary,
+      })
+    ),
+    ...history,
+  ].sort((left, right) =>
+    (right.occurredAt ?? '').localeCompare(left.occurredAt ?? '')
   );
 
   return (
@@ -242,21 +286,47 @@ export function NexoMemoryPanel({ contactId }: { contactId: string }) {
         </div>
       ) : null}
 
-      {events.length ? (
-        <div className="text-xs">
-          <p className="text-muted-foreground font-medium uppercase tracking-wide">
-            Historial
-          </p>
-          <ul className="mt-1 space-y-1">
-            {events.slice(0, 8).map((event) => (
-              <li key={event.id} className="text-muted-foreground">
-                <span className="text-foreground">{formatDate(event.event_date)}</span>{' '}
-                — {event.summary}
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
+      <div className="text-xs">
+        <p className="text-muted-foreground font-medium uppercase tracking-wide">
+          Historial omnicanal
+        </p>
+        {timeline.length === 0 ? (
+          <p className="text-muted-foreground mt-1">Sin interacciones registradas.</p>
+        ) : (
+          <div className="mt-1 max-h-64 space-y-1.5 overflow-y-auto pr-1">
+            {timeline.map((item) =>
+              item.kind === 'memory_event' ? (
+                <div key={`memory-${item.id}`} className="rounded-lg border px-2.5 py-1.5">
+                  <p className="text-foreground">{item.label}</p>
+                  <p className="text-muted-foreground mt-0.5 text-[10px]">{formatDateTime(item.occurredAt)}</p>
+                </div>
+              ) : (
+                <Link
+                  key={`${item.kind}-${item.id}`}
+                  href={item.kind === 'conversation' ? `/inbox?c=${encodeURIComponent(item.id)}` : `/call-transcriptions?call=${encodeURIComponent(item.id)}`}
+                  className={cn(
+                    'block rounded-lg border px-2.5 py-1.5 transition-colors hover:bg-muted',
+                    item.kind === 'conversation' && item.id === activeConversationId && 'border-primary/50 bg-primary/5'
+                  )}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-foreground truncate font-medium">
+                      {item.kind === 'call' ? `Llamada ${item.direction === 'outbound' ? 'saliente' : item.direction === 'inbound' ? 'entrante' : ''}` : item.channel}
+                    </span>
+                    <ArrowUpRight className="text-muted-foreground size-3 shrink-0" />
+                  </div>
+                  <p className="text-muted-foreground mt-0.5 line-clamp-2">{item.summary}</p>
+                  <p className="text-muted-foreground mt-0.5 text-[10px]">
+                    {item.kind === 'conversation' ? (item.status === 'open' ? 'Abierta' : item.status === 'pending' ? 'Pendiente' : 'Cerrada') : 'Llamada'}
+                    {item.kind === 'call' ? callDuration(item.durationSeconds) : ''}
+                    {item.occurredAt ? ` · ${formatDateTime(item.occurredAt)}` : ''}
+                  </p>
+                </Link>
+              )
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
-import { cn } from "@/lib/utils";
 import { displayContactPhone } from "@/lib/contacts/contact-identity";
 import type { Contact, Deal, ContactNote, Tag } from "@/types";
 import {
@@ -16,8 +15,6 @@ import {
   StickyNote,
   Plus,
   PhoneCall,
-  MessageSquare,
-  ArrowUpRight,
 } from "lucide-react";
 import { useTelephony } from '@/components/telephony/telephony-provider';
 import { ConversationInternalNotes } from './conversation-internal-notes';
@@ -26,7 +23,6 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { format } from "date-fns";
 import { useTranslations } from "next-intl";
-import Link from "next/link";
 
 type ContactConversation = {
   id: string;
@@ -197,7 +193,7 @@ export function ContactSidebar({ contact, conversationId, internalNotesOpenSigna
 
   if (!contact) {
     return (
-      <div className="flex h-full w-70 items-center justify-center border-l border-border bg-card">
+      <div className="flex h-full w-80 items-center justify-center border-l border-border bg-card">
         <p className="text-sm text-muted-foreground">{tThread("selectConversation")}</p>
       </div>
     );
@@ -215,10 +211,8 @@ export function ContactSidebar({ contact, conversationId, internalNotesOpenSigna
     return "WhatsApp";
   }
 
-  const callDuration = (seconds: number | null) => seconds == null ? "" : ` · ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
-
   return (
-    <div className="flex h-full w-70 flex-col border-l border-border bg-card">
+    <div className="flex h-full w-80 flex-col border-l border-border bg-card">
       <ScrollArea className="flex-1">
         <div className="p-4">
           {/* Contact Info */}
@@ -273,45 +267,11 @@ export function ContactSidebar({ contact, conversationId, internalNotesOpenSigna
           {/* Divider */}
           <div className="my-4 border-t border-border" />
 
-          <NexoMemoryPanel contactId={contact.id} />
-
-          {/* Divider */}
-          <div className="my-4 border-t border-border" />
-
-          {/* Omnichannel history: exact email/phone identity only. */}
-          <div>
-            <div className="flex items-center gap-2 px-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              <MessageSquare className="h-3 w-3" />
-              Historial omnicanal
-            </div>
-            <div className="mt-2 space-y-2">
-              {history.length === 0 ? (
-                <p className="px-1 text-xs text-muted-foreground">Sin interacciones registradas.</p>
-              ) : (
-                history.map((item) => (
-                  <Link
-                    key={`${item.kind}-${item.id}`}
-                    href={item.kind === "conversation" ? `/inbox?c=${encodeURIComponent(item.id)}` : `/call-transcriptions?call=${encodeURIComponent(item.id)}`}
-                    className={cn(
-                      "block rounded-lg border border-border px-3 py-2 transition-colors hover:bg-muted",
-                      item.kind === "conversation" && item.id === conversationId && "border-primary/50 bg-primary/5"
-                    )}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="truncate text-xs font-medium text-foreground">{item.kind === "call" ? `Llamada ${item.direction === "outbound" ? "saliente" : item.direction === "inbound" ? "entrante" : ""}` : item.channel}</span>
-                      <ArrowUpRight className="h-3 w-3 shrink-0 text-muted-foreground" />
-                    </div>
-                    <p className="mt-1 line-clamp-2 text-[11px] text-muted-foreground">{item.summary}</p>
-                    <p className="mt-1 text-[10px] text-muted-foreground">
-                      {item.kind === "conversation" ? item.status === "open" ? "Abierta" : item.status === "pending" ? "Pendiente" : "Cerrada" : "Llamada"}
-                      {item.kind === "call" ? callDuration(item.durationSeconds) : ""}
-                      {item.occurredAt ? ` · ${format(new Date(item.occurredAt), "MMM d, HH:mm")}` : ""}
-                    </p>
-                  </Link>
-                ))
-              )}
-            </div>
-          </div>
+          <NexoMemoryPanel
+            contactId={contact.id}
+            history={history}
+            activeConversationId={conversationId}
+          />
 
           <div className="my-4 border-t border-border" />
 

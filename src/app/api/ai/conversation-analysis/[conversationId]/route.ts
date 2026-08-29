@@ -7,6 +7,7 @@ import { generateText } from '@/lib/ai/generate'
 import { logAiUsage } from '@/lib/ai/usage'
 import { supabaseAdmin } from '@/lib/ai/admin-client'
 import { AiError } from '@/lib/ai/types'
+import { applyContactMemory, parseMemoryExtraction } from '@/lib/ai/memory'
 
 type Sentiment = 'positive' | 'neutral' | 'negative' | 'mixed'
 
@@ -24,10 +25,7 @@ type Analysis = {
   qa_findings: string[]
 }
 
-function parseAnalysis(raw: string): Analysis {
-  const match = raw.match(/\{[\s\S]*\}/)
-  if (!match) throw new AiError('The AI did not return a valid analysis.', { code: 'invalid_analysis' })
-  const data = JSON.parse(match[0]) as Record<string, unknown>
+function parseAnalysis(data: Record<string, unknown>): Analysis {
   const sentiment = data.sentiment
   if (!['positive', 'neutral', 'negative', 'mixed'].includes(String(sentiment))) {
     throw new AiError('The AI returned an invalid sentiment.', { code: 'invalid_analysis' })
@@ -62,12 +60,11 @@ function parseAnalysis(raw: string): Analysis {
 async function assertConversation(accountId: string, conversationId: string, supabase: Awaited<ReturnType<typeof requireRole>>['supabase']) {
   const { data, error } = await supabase
     .from('conversations')
-    .select('id')
+    .select('id, contact_id')
     .eq('id', conversationId)
     .maybeSingle()
   if (error) throw error
-  if (!data) return false
-  return true
+  return data ?? null
 }
 
 export async function GET(_: Request, { params }: { params: Promise<{ conversationId: string }> }) {
@@ -96,7 +93,8 @@ export async function POST(_: Request, { params }: { params: Promise<{ conversat
     const { conversationId } = await params
     const limit = checkRateLimit(`ai-analysis:${userId}`, RATE_LIMITS.aiDraft)
     if (!limit.success) return rateLimitResponse(limit)
-    if (!await assertConversation(accountId, conversationId, supabase)) {
+    const conversation = await assertConversation(accountId, conversationId, supabase)
+    if (!conversation) {
       return NextResponse.json({ error: 'Conversation not found' }, { status: 404 })
     }
 
@@ -127,9 +125,13 @@ export async function POST(_: Request, { params }: { params: Promise<{ conversat
         ? `Criterios propios de la cuenta para QA: ${qaPolicy.qa_scoring_criteria}`
         : '',
       config.systemPrompt ? `Contexto del negocio: ${config.systemPrompt}` : '',
+      'Incluye también memoria del cliente (Nexo Memory): "customer_stage":"..." (p.ej. prospecto, cotización, propuesta, cliente), "risk_level":"low|medium|high", "opportunity_score":0-100, "interests":[{"text":"...","confidence":0-1}], "objections":[{"text":"...","confidence":0-1}], "commitments":[{"description":"...","owner":"agent|customer","due_date":"YYYY-MM-DD|null"}], "important_facts":["..."] (hechos nuevos y relevantes, no saludos ni trivialidades). Omite cualquier campo del que no tengas evidencia clara.',
     ].filter(Boolean).join('\n\n')
     const result = await generateText({ config, systemPrompt, messages })
-    const analysis = parseAnalysis(result.text)
+    const match = result.text.match(/\{[\s\S]*\}/)
+    if (!match) throw new AiError('The AI did not return a valid analysis.', { code: 'invalid_analysis' })
+    const rawValue = JSON.parse(match[0]) as Record<string, unknown>
+    const analysis = parseAnalysis(rawValue)
 
     const admin = supabaseAdmin()
     const { data, error } = await admin
@@ -149,6 +151,11 @@ export async function POST(_: Request, { params }: { params: Promise<{ conversat
       .single()
     if (error) throw error
     void logAiUsage(admin, { accountId, conversationId, mode: 'analysis', provider: config.provider, model: config.model, usage: result.usage })
+    if (conversation.contact_id) {
+      await applyContactMemory(admin, { accountId, contactId: conversation.contact_id, conversationId }, analysis, parseMemoryExtraction(rawValue)).catch((memoryError) => {
+        console.error('[nexo-memory] Failed to apply memory extraction:', memoryError)
+      })
+    }
     return NextResponse.json({ analysis: data })
   } catch (error) {
     if (error instanceof AiError) return NextResponse.json({ error: error.message, code: error.code }, { status: error.status })
