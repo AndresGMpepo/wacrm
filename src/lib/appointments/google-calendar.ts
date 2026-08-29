@@ -1,8 +1,8 @@
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { decrypt, encrypt } from '@/lib/whatsapp/encryption'
 
-type AppointmentForGoogle = { id: string; title: string; notes: string | null; starts_at: string; ends_at: string; timezone: string; status: string; google_calendar_event_id: string | null; google_calendar_connection_id?: string | null; assigned_agent_id: string | null; contact?: { name: string | null; phone: string | null } | { name: string | null; phone: string | null }[] | null }
-type GoogleConnection = { id: string; account_id: string; assigned_agent_id: string | null; calendar_id: string; encrypted_access_token: string; encrypted_refresh_token: string; access_token_expires_at: string | null; sync_token: string | null }
+type AppointmentForGoogle = { id: string; title: string; notes: string | null; starts_at: string; ends_at: string; timezone: string; status: string; google_calendar_event_id: string | null; google_calendar_connection_id?: string | null; assigned_agent_id: string | null; specialist_id?: string | null; contact?: { name: string | null; phone: string | null } | { name: string | null; phone: string | null }[] | null }
+type GoogleConnection = { id: string; account_id: string; assigned_agent_id: string | null; specialist_id: string | null; calendar_id: string; encrypted_access_token: string; encrypted_refresh_token: string; access_token_expires_at: string | null; sync_token: string | null }
 type GoogleCalendarListItem = { id: string; summary: string; primary?: boolean }
 
 function admin() {
@@ -40,15 +40,23 @@ export async function exchangeGoogleCode(code: string, redirectUri: string) {
   return { accessToken: data.access_token, refreshToken: data.refresh_token, expiresAt: new Date(Date.now() + (data.expires_in ?? 3600) * 1000).toISOString() }
 }
 
-async function accessToken(accountId: string, assignedAgentId: string | null, connectionId?: string | null) {
+/** Resolution order: an explicit connection id, then the doctor's own default
+ *  calendar, then (legacy rows only) a connection scoped to an internal
+ *  agent, then the account's general default. */
+async function accessToken(accountId: string, scope: { specialistId: string | null; assignedAgentId: string | null }, connectionId?: string | null) {
   const db = admin()
-  const chosen = connectionId ? await db.from('google_calendar_connections').select('id, calendar_id, encrypted_access_token, encrypted_refresh_token, access_token_expires_at').eq('id', connectionId).eq('account_id', accountId).maybeSingle() : null
-  const exact = chosen?.data ? chosen : assignedAgentId
-    ? await db.from('google_calendar_connections').select('id, calendar_id, encrypted_access_token, encrypted_refresh_token, access_token_expires_at').eq('account_id', accountId).eq('assigned_agent_id', assignedAgentId).eq('is_default', true).maybeSingle()
+  const columns = 'id, calendar_id, encrypted_access_token, encrypted_refresh_token, access_token_expires_at'
+  const chosen = connectionId ? await db.from('google_calendar_connections').select(columns).eq('id', connectionId).eq('account_id', accountId).maybeSingle() : null
+  const bySpecialist = chosen?.data ? chosen : scope.specialistId
+    ? await db.from('google_calendar_connections').select(columns).eq('account_id', accountId).eq('specialist_id', scope.specialistId).eq('is_default', true).maybeSingle()
     : { data: null, error: null }
-  if (exact.error) throw exact.error
-  const fallback = exact.data ? { data: null, error: null } : await db.from('google_calendar_connections').select('id, calendar_id, encrypted_access_token, encrypted_refresh_token, access_token_expires_at').eq('account_id', accountId).is('assigned_agent_id', null).eq('is_default', true).maybeSingle()
-  const { data, error } = exact.data ? exact : fallback
+  if (bySpecialist.error) throw bySpecialist.error
+  const byAgent = bySpecialist.data ? bySpecialist : scope.assignedAgentId
+    ? await db.from('google_calendar_connections').select(columns).eq('account_id', accountId).eq('assigned_agent_id', scope.assignedAgentId).is('specialist_id', null).eq('is_default', true).maybeSingle()
+    : { data: null, error: null }
+  if (byAgent.error) throw byAgent.error
+  const fallback = byAgent.data ? { data: null, error: null } : await db.from('google_calendar_connections').select(columns).eq('account_id', accountId).is('assigned_agent_id', null).is('specialist_id', null).eq('is_default', true).maybeSingle()
+  const { data, error } = byAgent.data ? byAgent : fallback
   if (error) throw error
   if (!data) return null
   if (!data.access_token_expires_at || new Date(data.access_token_expires_at).getTime() > Date.now() + 60_000) return { db, calendarId: data.calendar_id, token: decrypt(data.encrypted_access_token), connectionId: data.id }
@@ -68,7 +76,7 @@ function eventBody(appointment: AppointmentForGoogle) {
 }
 
 export async function syncGoogleAppointment(accountId: string, appointment: AppointmentForGoogle) {
-  const connection = await accessToken(accountId, appointment.assigned_agent_id, appointment.google_calendar_connection_id)
+  const connection = await accessToken(accountId, { specialistId: appointment.specialist_id ?? null, assignedAgentId: appointment.assigned_agent_id }, appointment.google_calendar_connection_id)
   if (!connection) {
     await admin().from('appointments').update({ google_sync_status: 'not_connected', google_sync_error: null }).eq('id', appointment.id).eq('account_id', accountId)
     return
@@ -110,7 +118,7 @@ export async function syncGoogleCalendarChanges() {
   for (const connectionRow of connections ?? []) {
     summary.checked += 1
     try {
-      const connection = await accessToken(connectionRow.account_id, null, connectionRow.id)
+      const connection = await accessToken(connectionRow.account_id, { specialistId: null, assignedAgentId: null }, connectionRow.id)
       if (!connection) continue
       let pageToken: string | undefined
       let nextSyncToken: string | null = null
@@ -160,41 +168,42 @@ export async function syncGoogleCalendarChanges() {
 }
 
 export async function listGoogleCalendars(accountId: string, connectionId: string) {
-  const connection = await accessToken(accountId, null, connectionId)
+  const connection = await accessToken(accountId, { specialistId: null, assignedAgentId: null }, connectionId)
   if (!connection) throw new Error('No se encontró la conexión de Google Calendar.')
   const result = await googleRequest(connection.token, 'users/me/calendarList?maxResults=250') as { items?: GoogleCalendarListItem[] }
   return (result.items ?? []).map((calendar) => ({ id: calendar.id, summary: calendar.summary || calendar.id, primary: calendar.primary === true }))
 }
 
-export async function addGoogleCalendarConnection(accountId: string, sourceConnectionId: string, calendarId: string, targetAssignedAgentId?: string | null) {
+export async function addGoogleCalendarConnection(accountId: string, sourceConnectionId: string, calendarId: string, targetSpecialistId?: string | null) {
   const db = admin()
-  const { data: source, error } = await db.from('google_calendar_connections').select('id, account_id, assigned_agent_id, calendar_id, encrypted_access_token, encrypted_refresh_token, access_token_expires_at, sync_token').eq('id', sourceConnectionId).eq('account_id', accountId).maybeSingle<GoogleConnection>()
+  const { data: source, error } = await db.from('google_calendar_connections').select('id, account_id, assigned_agent_id, specialist_id, calendar_id, encrypted_access_token, encrypted_refresh_token, access_token_expires_at, sync_token').eq('id', sourceConnectionId).eq('account_id', accountId).maybeSingle<GoogleConnection>()
   if (error) throw error
   if (!source) throw new Error('No se encontró la conexión de Google Calendar.')
   const calendars = await listGoogleCalendars(accountId, sourceConnectionId)
   const calendar = calendars.find((item) => item.id === calendarId)
   if (!calendar) throw new Error('Ese calendario no pertenece a la cuenta Google conectada.')
   // A resource calendar visible from one connected Google account (e.g. a
-  // clinic's shared Workspace) can be attributed to any responsable in
+  // clinic's shared Workspace) can be attributed to any specialist in
   // NexoOmni, not only the one that authorized the source connection.
-  const targetAgent = targetAssignedAgentId !== undefined ? targetAssignedAgentId : source.assigned_agent_id
-  let existingQuery = db.from('google_calendar_connections').select('id').eq('account_id', accountId).eq('calendar_id', calendarId)
-  existingQuery = targetAgent ? existingQuery.eq('assigned_agent_id', targetAgent) : existingQuery.is('assigned_agent_id', null)
+  const targetSpecialist = targetSpecialistId !== undefined ? targetSpecialistId : source.specialist_id
+  let existingQuery = db.from('google_calendar_connections').select('id').eq('account_id', accountId).eq('calendar_id', calendarId).is('assigned_agent_id', null)
+  existingQuery = targetSpecialist ? existingQuery.eq('specialist_id', targetSpecialist) : existingQuery.is('specialist_id', null)
   const { data: existing, error: existingError } = await existingQuery.maybeSingle()
   if (existingError) throw existingError
   if (existing) return existing
-  const { data, error: insertError } = await db.from('google_calendar_connections').insert({ account_id: accountId, assigned_agent_id: targetAgent, calendar_id: calendar.id, display_name: calendar.summary, is_default: false, encrypted_access_token: source.encrypted_access_token, encrypted_refresh_token: source.encrypted_refresh_token, access_token_expires_at: source.access_token_expires_at, connected_by: null, connected_at: new Date().toISOString() }).select('id').single()
+  const { data, error: insertError } = await db.from('google_calendar_connections').insert({ account_id: accountId, assigned_agent_id: null, specialist_id: targetSpecialist, calendar_id: calendar.id, display_name: calendar.summary, is_default: false, encrypted_access_token: source.encrypted_access_token, encrypted_refresh_token: source.encrypted_refresh_token, access_token_expires_at: source.access_token_expires_at, connected_by: null, connected_at: new Date().toISOString() }).select('id').single()
   if (insertError) throw insertError
   return data
 }
 
 export async function setDefaultGoogleCalendarConnection(accountId: string, connectionId: string) {
   const db = admin()
-  const { data: connection, error } = await db.from('google_calendar_connections').select('id, assigned_agent_id').eq('id', connectionId).eq('account_id', accountId).maybeSingle()
+  const { data: connection, error } = await db.from('google_calendar_connections').select('id, assigned_agent_id, specialist_id').eq('id', connectionId).eq('account_id', accountId).maybeSingle()
   if (error) throw error
   if (!connection) throw new Error('No se encontró el calendario.')
   let scope = db.from('google_calendar_connections').update({ is_default: false }).eq('account_id', accountId)
   scope = connection.assigned_agent_id ? scope.eq('assigned_agent_id', connection.assigned_agent_id) : scope.is('assigned_agent_id', null)
+  scope = connection.specialist_id ? scope.eq('specialist_id', connection.specialist_id) : scope.is('specialist_id', null)
   const { error: clearError } = await scope
   if (clearError) throw clearError
   const { error: setError } = await db.from('google_calendar_connections').update({ is_default: true }).eq('id', connectionId).eq('account_id', accountId)

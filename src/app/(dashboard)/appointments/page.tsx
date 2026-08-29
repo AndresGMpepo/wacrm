@@ -31,6 +31,7 @@ type Appointment = {
   id: string;
   contact_id: string | null;
   assigned_agent_id: string | null;
+  specialist_id: string | null;
   title: string;
   starts_at: string;
   ends_at: string;
@@ -41,6 +42,7 @@ type Appointment = {
   google_sync_error: string | null;
   contact: { name: string | null; phone: string | null } | null;
   agent: { full_name: string | null } | null;
+  specialist: { full_name: string; specialty: string | null } | null;
   latest_audit: {
     source: 'nexoomni' | 'google_calendar';
     action: string;
@@ -50,9 +52,12 @@ type Appointment = {
 };
 type ContactOption = { id: string; name: string | null; phone: string | null };
 type MemberOption = { user_id: string; full_name: string; is_active: boolean };
+type Specialist = { id: string; full_name: string; specialty: string | null; notes: string | null; is_active: boolean };
 type GoogleConnection = {
   id: string;
   assigned_agent_id: string | null;
+  specialist_id: string | null;
+  specialist: { full_name: string; specialty: string | null } | null;
   calendar_id: string;
   display_name: string;
   is_default: boolean;
@@ -112,9 +117,11 @@ export default function AppointmentsPage() {
   const [duration, setDuration] = useState(30);
   const [contactId, setContactId] = useState('');
   const [assignedAgentId, setAssignedAgentId] = useState('');
+  const [specialistId, setSpecialistId] = useState('');
   const [notes, setNotes] = useState('');
   const [contacts, setContacts] = useState<ContactOption[]>([]);
   const [members, setMembers] = useState<MemberOption[]>([]);
+  const [specialists, setSpecialists] = useState<Specialist[]>([]);
   const [googleConnectionCount, setGoogleConnectionCount] = useState(0);
   const [googleConnections, setGoogleConnections] = useState<
     GoogleConnection[]
@@ -127,14 +134,14 @@ export default function AppointmentsPage() {
   const [calendarSourceId, setCalendarSourceId] = useState('');
   const [calendarToAdd, setCalendarToAdd] = useState('');
   const [managingCalendars, setManagingCalendars] = useState(false);
-  const [googleAssigneeId, setGoogleAssigneeId] = useState('');
+  const [googleTargetSpecialistId, setGoogleTargetSpecialistId] = useState('');
+  const [newSpecialistName, setNewSpecialistName] = useState('');
+  const [newSpecialistSpecialty, setNewSpecialistSpecialty] = useState('');
+  const [addCalendarTargetSpecialistId, setAddCalendarTargetSpecialistId] = useState('');
   const [googleAvailable, setGoogleAvailable] = useState(false);
   const [connectingGoogle, setConnectingGoogle] = useState(false);
   const [syncingId, setSyncingId] = useState<string | null>(null);
 
-  const memberName = (userId: string | null) =>
-    members.find((member) => member.user_id === userId)?.full_name ||
-    'Responsable sin nombre';
   const selectedCalendarSource = googleConnections.find(
     (connection) => connection.id === calendarSourceId
   );
@@ -143,8 +150,8 @@ export default function AppointmentsPage() {
       !googleConnections.some(
         (connection) =>
           connection.calendar_id === calendar.id &&
-          connection.assigned_agent_id ===
-            (selectedCalendarSource?.assigned_agent_id ?? null)
+          connection.specialist_id ===
+            (selectedCalendarSource?.specialist_id ?? null)
       )
   );
 
@@ -234,10 +241,10 @@ export default function AppointmentsPage() {
                 !googleConnections.some(
                   (connection) =>
                     connection.calendar_id === calendar.id &&
-                    connection.assigned_agent_id ===
+                    connection.specialist_id ===
                       (googleConnections.find(
                         (connection) => connection.id === connectionId
-                      )?.assigned_agent_id ?? null)
+                      )?.specialist_id ?? null)
                 )
             )?.id ||
             ''
@@ -255,10 +262,19 @@ export default function AppointmentsPage() {
     [googleConnections]
   );
 
+  const loadSpecialists = useCallback(async () => {
+    try {
+      const response = await fetch('/api/appointments/specialists', { cache: 'no-store' });
+      const payload = response.ok ? (await response.json()) as { specialists?: Specialist[] } : null;
+      setSpecialists(payload?.specialists ?? []);
+    } catch { setSpecialists([]); }
+  }, []);
+
   useEffect(() => {
     void load();
     void loadGoogleConnection();
-  }, [load, loadGoogleConnection]);
+    void loadSpecialists();
+  }, [load, loadGoogleConnection, loadSpecialists]);
 
   useEffect(() => {
     if (!accountId) return;
@@ -299,9 +315,10 @@ export default function AppointmentsPage() {
     setDuration(30);
     setContactId('');
     setAssignedAgentId('');
+    setSpecialistId('');
     setNotes('');
     setGoogleCalendarConnectionId(
-      googleConnections.find((connection) => connection.is_default)?.id ||
+      googleConnections.find((connection) => !connection.specialist_id && connection.is_default)?.id ||
         googleConnections[0]?.id ||
         ''
     );
@@ -325,6 +342,7 @@ export default function AppointmentsPage() {
     );
     setContactId(appointment.contact_id ?? '');
     setAssignedAgentId(appointment.assigned_agent_id ?? '');
+    setSpecialistId(appointment.specialist_id ?? '');
     setNotes(appointment.notes ?? '');
     setGoogleCalendarConnectionId(
       appointment.google_calendar_connection_id ?? ''
@@ -353,18 +371,18 @@ export default function AppointmentsPage() {
       setEndsAt(localDateTime(new Date(start.getTime() + value * 60_000)));
   }
 
-  function updateAssignedAgent(value: string) {
-    setAssignedAgentId(value);
+  function updateSpecialist(value: string) {
+    setSpecialistId(value);
     const specialistCalendar = googleConnections.find(
       (connection) =>
-        connection.assigned_agent_id === (value || null) &&
+        connection.specialist_id === (value || null) &&
         connection.is_default
     );
     const anySpecialistCalendar = googleConnections.find(
-      (connection) => connection.assigned_agent_id === (value || null)
+      (connection) => connection.specialist_id === (value || null)
     );
     const generalCalendar = googleConnections.find(
-      (connection) => !connection.assigned_agent_id && connection.is_default
+      (connection) => !connection.specialist_id && connection.is_default
     );
     setGoogleCalendarConnectionId(
       specialistCalendar?.id || anySpecialistCalendar?.id || generalCalendar?.id || ''
@@ -385,6 +403,7 @@ export default function AppointmentsPage() {
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         contact_id: contactId || null,
         assigned_agent_id: assignedAgentId || user?.id || null,
+        specialist_id: specialistId || null,
         notes,
         google_calendar_connection_id: googleCalendarConnectionId || null,
       };
@@ -447,7 +466,7 @@ export default function AppointmentsPage() {
       const response = await fetch('/api/appointments/google', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ assigned_agent_id: googleAssigneeId || null }),
+        body: JSON.stringify({ specialist_id: googleTargetSpecialistId || null }),
       });
       const payload = (await response.json().catch(() => null)) as {
         authorize_url?: string;
@@ -480,6 +499,7 @@ export default function AppointmentsPage() {
           action: 'add_calendar',
           connection_id: calendarSourceId,
           calendar_id: calendarToAdd,
+          specialist_id: addCalendarTargetSpecialistId || null,
         }),
       });
       const payload = (await response.json().catch(() => null)) as {
@@ -491,6 +511,7 @@ export default function AppointmentsPage() {
         'Calendario agregado. Ya puedes seleccionarlo en cada cita.'
       );
       setCalendarToAdd('');
+      setAddCalendarTargetSpecialistId('');
       await loadGoogleConnection();
       await loadAvailableGoogleCalendars(calendarSourceId);
     } catch (error) {
@@ -529,6 +550,39 @@ export default function AppointmentsPage() {
         error instanceof Error
           ? error.message
           : 'No se pudo actualizar el calendario predeterminado.'
+      );
+    }
+  }
+
+  async function createSpecialist(event: FormEvent) {
+    event.preventDefault();
+    if (!newSpecialistName.trim())
+      return toast.error('Indica el nombre del especialista.');
+    try {
+      const response = await fetch('/api/appointments/specialists', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          full_name: newSpecialistName.trim(),
+          specialty: newSpecialistSpecialty.trim() || null,
+        }),
+      });
+      const payload = (await response.json().catch(() => null)) as {
+        specialist?: Specialist;
+        error?: string;
+      } | null;
+      if (!response.ok)
+        throw new Error(payload?.error || 'No se pudo crear el especialista.');
+      toast.success('Especialista agregado.');
+      setNewSpecialistName('');
+      setNewSpecialistSpecialty('');
+      await loadSpecialists();
+      if (payload?.specialist) setGoogleTargetSpecialistId(payload.specialist.id);
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : 'No se pudo crear el especialista.'
       );
     }
   }
@@ -580,15 +634,15 @@ export default function AppointmentsPage() {
           {googleAvailable ? (
             <>
               <select
-                value={googleAssigneeId}
-                onChange={(event) => setGoogleAssigneeId(event.target.value)}
+                value={googleTargetSpecialistId}
+                onChange={(event) => setGoogleTargetSpecialistId(event.target.value)}
                 className="border-input h-9 rounded-lg border bg-transparent px-2 text-sm"
                 aria-label="Conectar calendario para"
               >
                 <option value="">Calendario general de la empresa</option>
-                {members.map((member) => (
-                  <option key={member.user_id} value={member.user_id}>
-                    {member.full_name || 'Responsable sin nombre'}
+                {specialists.filter((specialist) => specialist.is_active).map((specialist) => (
+                  <option key={specialist.id} value={specialist.id}>
+                    {specialist.full_name}{specialist.specialty ? ` · ${specialist.specialty}` : ''}
                   </option>
                 ))}
               </select>
@@ -602,11 +656,9 @@ export default function AppointmentsPage() {
                 ) : (
                   <Link2 />
                 )}
-                {googleAssigneeId
+                {googleTargetSpecialistId
                   ? 'Conectar calendario del especialista'
-                  : googleConnectionCount
-                    ? 'Conectar otra cuenta Google'
-                    : 'Conectar calendario general'}
+                  : 'Conectar cuenta de Google'}
               </Button>
             </>
           ) : null}
@@ -616,6 +668,62 @@ export default function AppointmentsPage() {
           </Button>
         </div>
       </div>
+
+      {googleAvailable ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Especialistas</CardTitle>
+            <CardDescription>
+              Registra a cada médico o especialista con su nombre y
+              especialidad. No necesitan una cuenta de agente: solo se usan
+              para elegir con quién es la cita y qué calendario le corresponde.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <form
+              className="flex flex-wrap items-end gap-2"
+              onSubmit={createSpecialist}
+            >
+              <label className="grid gap-1 text-sm">
+                <span>Nombre</span>
+                <Input
+                  value={newSpecialistName}
+                  onChange={(event) => setNewSpecialistName(event.target.value)}
+                  placeholder="Dra. Ana López"
+                  className="min-w-48"
+                />
+              </label>
+              <label className="grid gap-1 text-sm">
+                <span>Especialidad</span>
+                <Input
+                  value={newSpecialistSpecialty}
+                  onChange={(event) => setNewSpecialistSpecialty(event.target.value)}
+                  placeholder="Odontología"
+                  className="min-w-40"
+                />
+              </label>
+              <Button type="submit" variant="outline">
+                <Plus />
+                Agregar especialista
+              </Button>
+            </form>
+            {specialists.length > 0 ? (
+              <ul className="grid gap-1 text-sm sm:grid-cols-2">
+                {specialists.map((specialist) => (
+                  <li key={specialist.id} className="text-muted-foreground rounded-lg border px-3 py-2">
+                    <span className="text-foreground font-medium">{specialist.full_name}</span>
+                    {specialist.specialty ? ` · ${specialist.specialty}` : ''}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-muted-foreground text-xs">
+                Aún no hay especialistas registrados.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      ) : null}
 
       {googleAvailable && googleConnections.length > 0 ? (
         <Card>
@@ -629,50 +737,73 @@ export default function AppointmentsPage() {
               origen.
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-3">
-            <p className="rounded-lg border border-primary/25 bg-primary/5 p-3 text-xs text-muted-foreground">
-              Para conectar la cuenta Google de un médico o especialista, elígelo
-              en el selector superior y pulsa <strong>Conectar calendario del especialista</strong>.
-              Para añadir calendarios compartidos que viven en la misma cuenta
-              Google, usa el selector inferior.
-            </p>
+          <CardContent className="space-y-4">
             <div className="space-y-2">
-              {googleConnections.map((connection) => (
-                <div
-                  key={connection.id}
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3 text-sm"
-                >
-                  <div>
-                    <p className="font-medium">
-                      {connection.display_name || connection.calendar_id}
-                      {connection.is_default ? ' · Predeterminado' : ''}
-                    </p>
-                    <p className="text-muted-foreground text-xs">
-                      {connection.assigned_agent_id
-                        ? `Especialista: ${memberName(connection.assigned_agent_id)}`
-                        : 'Calendario general de la empresa'}
-                      {connection.last_error
-                        ? ` · Error de sincronización: ${connection.last_error}`
-                        : connection.last_synced_at
-                          ? ` · Sincronizado ${appointmentTime(connection.last_synced_at)}`
-                          : ''}
-                    </p>
+              <p className="text-muted-foreground text-xs font-medium uppercase tracking-wide">
+                Calendario general de la empresa
+              </p>
+              {googleConnections.filter((connection) => !connection.specialist_id).length === 0 ? (
+                <p className="text-muted-foreground text-xs">Sin conectar todavía.</p>
+              ) : null}
+              {googleConnections.filter((connection) => !connection.specialist_id).map((connection) => {
+                const scopeCount = googleConnections.filter((item) => !item.specialist_id).length;
+                return (
+                  <div key={connection.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3 text-sm">
+                    <div>
+                      <p className="font-medium">{connection.display_name || connection.calendar_id}{scopeCount > 1 && connection.is_default ? ' · Predeterminado' : ''}</p>
+                      <p className="text-muted-foreground text-xs">
+                        {connection.last_error
+                          ? `Error de sincronización: ${connection.last_error}`
+                          : connection.last_synced_at
+                            ? `Sincronizado ${appointmentTime(connection.last_synced_at)}`
+                            : 'Aún sin sincronizar'}
+                      </p>
+                    </div>
+                    {scopeCount > 1 && !connection.is_default ? (
+                      <Button type="button" size="sm" variant="outline" onClick={() => void setDefaultGoogleCalendar(connection.id)}>
+                        Usar por defecto
+                      </Button>
+                    ) : null}
                   </div>
-                  {!connection.is_default ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={() =>
-                        void setDefaultGoogleCalendar(connection.id)
-                      }
-                    >
-                      Usar por defecto
-                    </Button>
-                  ) : null}
-                </div>
-              ))}
+                );
+              })}
             </div>
+            <div className="space-y-2">
+              <p className="text-muted-foreground text-xs font-medium uppercase tracking-wide">
+                Especialistas
+              </p>
+              {googleConnections.filter((connection) => connection.specialist_id).length === 0 ? (
+                <p className="text-muted-foreground text-xs">Ningún especialista tiene calendario conectado.</p>
+              ) : null}
+              {googleConnections.filter((connection) => connection.specialist_id).map((connection) => {
+                const scopeCount = googleConnections.filter((item) => item.specialist_id === connection.specialist_id).length;
+                return (
+                  <div key={connection.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3 text-sm">
+                    <div>
+                      <p className="font-medium">
+                        {connection.specialist?.full_name || 'Especialista'}
+                        {connection.specialist?.specialty ? ` · ${connection.specialist.specialty}` : ''}
+                        {scopeCount > 1 && connection.is_default ? ' · Predeterminado' : ''}
+                      </p>
+                      <p className="text-muted-foreground text-xs">
+                        {connection.display_name || connection.calendar_id}
+                        {connection.last_error
+                          ? ` · Error de sincronización: ${connection.last_error}`
+                          : connection.last_synced_at
+                            ? ` · Sincronizado ${appointmentTime(connection.last_synced_at)}`
+                            : ''}
+                      </p>
+                    </div>
+                    {scopeCount > 1 && !connection.is_default ? (
+                      <Button type="button" size="sm" variant="outline" onClick={() => void setDefaultGoogleCalendar(connection.id)}>
+                        Usar por defecto
+                      </Button>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+
             <div className="flex flex-wrap items-end gap-2 border-t pt-3">
               <label className="grid gap-1 text-sm">
                 <span>Añadir otro calendario</span>
@@ -720,6 +851,18 @@ export default function AppointmentsPage() {
                       <option key={calendar.id} value={calendar.id}>
                         {calendar.summary}
                         {calendar.primary ? ' (principal)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={addCalendarTargetSpecialistId}
+                    onChange={(event) => setAddCalendarTargetSpecialistId(event.target.value)}
+                    className="border-input h-9 min-w-48 rounded-lg border bg-transparent px-2 text-sm"
+                  >
+                    <option value="">Asignar a: Calendario general</option>
+                    {specialists.filter((specialist) => specialist.is_active).map((specialist) => (
+                      <option key={specialist.id} value={specialist.id}>
+                        {specialist.full_name}
                       </option>
                     ))}
                   </select>
@@ -777,11 +920,25 @@ export default function AppointmentsPage() {
                 value={assignedAgentId}
                 onChange={(event) => setAssignedAgentId(event.target.value)}
                 className="border-input h-9 rounded-lg border bg-transparent px-2 text-sm"
+                aria-label="Atiende (equipo interno)"
               >
-                <option value="">Responsable: yo</option>
+                <option value="">Atiende: yo</option>
                 {members.map((member) => (
                   <option key={member.user_id} value={member.user_id}>
                     {member.full_name || 'Miembro sin nombre'}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={specialistId}
+                onChange={(event) => updateSpecialist(event.target.value)}
+                className="border-input h-9 rounded-lg border bg-transparent px-2 text-sm"
+                aria-label="Especialista"
+              >
+                <option value="">Sin especialista asignado</option>
+                {specialists.filter((specialist) => specialist.is_active).map((specialist) => (
+                  <option key={specialist.id} value={specialist.id}>
+                    {specialist.full_name}{specialist.specialty ? ` · ${specialist.specialty}` : ''}
                   </option>
                 ))}
               </select>
@@ -793,10 +950,11 @@ export default function AppointmentsPage() {
                 className="border-input h-9 rounded-lg border bg-transparent px-2 text-sm"
               >
                 <option value="">Sin sincronización Google</option>
-                {googleConnections.map((connection) => (
+                {googleConnections
+                  .filter((connection) => (connection.specialist_id ?? null) === (specialistId || null) || !connection.specialist_id)
+                  .map((connection) => (
                   <option key={connection.id} value={connection.id}>
-                    {connection.display_name || connection.calendar_id}
-                    {connection.is_default ? ' (predeterminado)' : ''}
+                    {connection.specialist_id ? connection.specialist?.full_name || 'Especialista' : 'General'} · {connection.display_name || connection.calendar_id}
                   </option>
                 ))}
               </select>
@@ -872,8 +1030,11 @@ export default function AppointmentsPage() {
                       </CardTitle>
                       <CardDescription>
                         {appointment.contact?.name || 'Sin contacto'}
+                        {appointment.specialist?.full_name
+                          ? ` · ${appointment.specialist.full_name}${appointment.specialist.specialty ? ` (${appointment.specialist.specialty})` : ''}`
+                          : ''}
                         {appointment.agent?.full_name
-                          ? ` · ${appointment.agent.full_name}`
+                          ? ` · Atiende: ${appointment.agent.full_name}`
                           : ''}
                       </CardDescription>
                     </div>
@@ -901,8 +1062,11 @@ export default function AppointmentsPage() {
                           ? 'Google Calendar pendiente'
                           : appointment.google_sync_status === 'failed'
                             ? `Google Calendar: ${appointment.google_sync_error || 'Falló la sincronización.'}`
-                            : 'Sin calendario Google conectado para este responsable'}
+                            : 'Sin calendario Google conectado para este especialista'}
                     </p>
+                    {auditLabel(appointment.latest_audit) ? (
+                      <p className="text-muted-foreground mt-1 text-xs">{auditLabel(appointment.latest_audit)}</p>
+                    ) : null}
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {appointment.google_sync_status !== 'synced' ? (

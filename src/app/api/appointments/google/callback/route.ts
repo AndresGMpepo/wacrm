@@ -25,24 +25,30 @@ export async function GET(request: Request) {
     if (error) throw error
     if (!attempt || attempt.completed_at || new Date(attempt.expires_at).getTime() < Date.now()) return redirect(request, 'expired')
     const tokens = await exchangeGoogleCode(code, attempt.redirect_uri)
-    const scopeAgent: string | null = attempt.assigned_agent_id ?? null
+    const scopeSpecialist: string | null = attempt.specialist_id ?? null
+    let specialistName: string | null = null
+    if (scopeSpecialist) {
+      const { data: specialist, error: specialistError } = await db.from('specialists').select('full_name').eq('id', scopeSpecialist).eq('account_id', attempt.account_id).maybeSingle()
+      if (specialistError) throw specialistError
+      specialistName = specialist?.full_name ?? null
+    }
     // Reconnecting the same scope must refresh its tokens in place — it must
-    // never delete sibling calendars added for that same doctor/responsable
-    // (see addGoogleCalendarConnection), and must never collide with the
-    // unique (account, calendar_id, scope) index on a second attempt.
-    let existingQuery = db.from('google_calendar_connections').select('id').eq('account_id', attempt.account_id).eq('calendar_id', 'primary')
-    existingQuery = scopeAgent ? existingQuery.eq('assigned_agent_id', scopeAgent) : existingQuery.is('assigned_agent_id', null)
+    // never delete sibling calendars added for that same doctor/especialista,
+    // and must never collide with the unique (account, calendar_id, scope) index
+    // on a second attempt.
+    let existingQuery = db.from('google_calendar_connections').select('id').eq('account_id', attempt.account_id).eq('calendar_id', 'primary').is('assigned_agent_id', null)
+    existingQuery = scopeSpecialist ? existingQuery.eq('specialist_id', scopeSpecialist) : existingQuery.is('specialist_id', null)
     const { data: existing, error: existingError } = await existingQuery.maybeSingle()
     if (existingError) throw existingError
     if (existing) {
       const { error: updateError } = await db.from('google_calendar_connections').update({ encrypted_access_token: encrypt(tokens.accessToken), encrypted_refresh_token: encrypt(tokens.refreshToken), access_token_expires_at: tokens.expiresAt, connected_by: attempt.user_id, connected_at: new Date().toISOString(), last_error: null }).eq('id', existing.id)
       if (updateError) throw updateError
     } else {
-      let scopeCountQuery = db.from('google_calendar_connections').select('id', { count: 'exact', head: true }).eq('account_id', attempt.account_id)
-      scopeCountQuery = scopeAgent ? scopeCountQuery.eq('assigned_agent_id', scopeAgent) : scopeCountQuery.is('assigned_agent_id', null)
+      let scopeCountQuery = db.from('google_calendar_connections').select('id', { count: 'exact', head: true }).eq('account_id', attempt.account_id).is('assigned_agent_id', null)
+      scopeCountQuery = scopeSpecialist ? scopeCountQuery.eq('specialist_id', scopeSpecialist) : scopeCountQuery.is('specialist_id', null)
       const { count, error: countError } = await scopeCountQuery
       if (countError) throw countError
-      const { error: connectionError } = await db.from('google_calendar_connections').insert({ account_id: attempt.account_id, assigned_agent_id: scopeAgent, calendar_id: 'primary', display_name: scopeAgent ? 'Calendario principal' : 'Calendario general', is_default: !count, encrypted_access_token: encrypt(tokens.accessToken), encrypted_refresh_token: encrypt(tokens.refreshToken), access_token_expires_at: tokens.expiresAt, connected_by: attempt.user_id, connected_at: new Date().toISOString() })
+      const { error: connectionError } = await db.from('google_calendar_connections').insert({ account_id: attempt.account_id, assigned_agent_id: null, specialist_id: scopeSpecialist, calendar_id: 'primary', display_name: scopeSpecialist ? `Calendario de ${specialistName ?? 'especialista'}` : 'Calendario general de la empresa', is_default: !count, encrypted_access_token: encrypt(tokens.accessToken), encrypted_refresh_token: encrypt(tokens.refreshToken), access_token_expires_at: tokens.expiresAt, connected_by: attempt.user_id, connected_at: new Date().toISOString() })
       if (connectionError) throw connectionError
     }
     await db.from('google_calendar_oauth_attempts').update({ completed_at: new Date().toISOString() }).eq('state', state)
