@@ -5,6 +5,11 @@ import { createClient as createAdminClient } from '@supabase/supabase-js'
 
 import { requireEntitlement } from '@/lib/account/entitlements'
 import { toErrorResponse } from '@/lib/auth/account'
+import {
+  getMetaCustomerServiceWindow,
+  isMetaDirectMessageChannel,
+  META_MESSAGING_WINDOW_CLOSED_MESSAGE,
+} from '@/lib/omnichannel/messaging-window'
 import { checkRateLimit, RATE_LIMITS, rateLimitResponse } from '@/lib/rate-limit'
 import { sendZernioMedia, sendZernioText, zernioAttachmentTypeFrom } from '@/lib/zernio/server'
 
@@ -37,12 +42,24 @@ export async function POST(request: Request) {
 
     const db = admin()
     const { data: conversation, error: conversationError } = await db.from('conversations')
-      .select('id, connector_id, external_session_id, channel_type')
+      .select('id, connector_id, external_session_id, channel_type, social_comment_id')
       .eq('id', conversationId).eq('account_id', accountId)
       .in('channel_type', ['zernio_whatsapp', 'zernio_facebook', 'zernio_instagram']).maybeSingle()
     if (conversationError) throw conversationError
     if (!conversation?.connector_id || !conversation.external_session_id) {
       return NextResponse.json({ error: 'Esta conversación no tiene un destinatario conectado disponible.' }, { status: 409 })
+    }
+    if (isMetaDirectMessageChannel(conversation.channel_type, Boolean(conversation.social_comment_id))) {
+      const { data: lastCustomerMessage, error: lastCustomerMessageError } = await db.from('messages')
+        .select('created_at').eq('conversation_id', conversation.id).eq('sender_type', 'customer')
+        .order('created_at', { ascending: false }).limit(1).maybeSingle()
+      if (lastCustomerMessageError) throw lastCustomerMessageError
+      if (!getMetaCustomerServiceWindow(lastCustomerMessage?.created_at).isOpen) {
+        return NextResponse.json(
+          { error: META_MESSAGING_WINDOW_CLOSED_MESSAGE, code: 'meta_messaging_window_closed' },
+          { status: 409 },
+        )
+      }
     }
     const { data: connector, error: connectorError } = await db.from('omnichannel_connectors')
       .select('zernio_account_id, status').eq('id', conversation.connector_id).eq('account_id', accountId).maybeSingle()

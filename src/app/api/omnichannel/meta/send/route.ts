@@ -5,6 +5,11 @@ import { createClient as createAdminClient } from '@supabase/supabase-js'
 
 import { requireEntitlement } from '@/lib/account/entitlements'
 import { toErrorResponse } from '@/lib/auth/account'
+import {
+  getMetaCustomerServiceWindow,
+  isMetaDirectMessageChannel,
+  META_MESSAGING_WINDOW_CLOSED_MESSAGE,
+} from '@/lib/omnichannel/messaging-window'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { checkRateLimit, RATE_LIMITS, rateLimitResponse } from '@/lib/rate-limit'
 import { describeMetaSendError, type MetaProvider } from '@/lib/omnichannel/meta-diagnostics'
@@ -48,6 +53,18 @@ export async function POST(request: Request) {
     let accessToken: string
     try { accessToken = decrypt(connector.meta_access_token) } catch { return NextResponse.json({ error: 'No se pudo leer de forma segura el token de este canal Meta.' }, { status: 503 }) }
     const isPublicComment = Boolean(conversation.social_comment_id)
+    if (isMetaDirectMessageChannel(conversation.channel_type, isPublicComment)) {
+      const { data: lastCustomerMessage, error: lastCustomerMessageError } = await db.from('messages')
+        .select('created_at').eq('conversation_id', conversation.id).eq('sender_type', 'customer')
+        .order('created_at', { ascending: false }).limit(1).maybeSingle()
+      if (lastCustomerMessageError) throw lastCustomerMessageError
+      if (!getMetaCustomerServiceWindow(lastCustomerMessage?.created_at).isOpen) {
+        return NextResponse.json(
+          { error: META_MESSAGING_WINDOW_CLOSED_MESSAGE, code: 'meta_messaging_window_closed' },
+          { status: 409 },
+        )
+      }
+    }
     const endpoint = isPublicComment
       ? `https://graph.facebook.com/${graphVersion()}/${encodeURIComponent(conversation.social_comment_id!)}/${conversation.channel_type === 'instagram' ? 'replies' : 'comments'}`
       : `https://graph.facebook.com/${graphVersion()}/${encodeURIComponent(connector.external_channel_id)}/messages`

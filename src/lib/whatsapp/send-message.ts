@@ -35,6 +35,11 @@ import {
   type InteractiveMessagePayload,
 } from '@/lib/whatsapp/interactive';
 import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption';
+import {
+  getMetaCustomerServiceWindow,
+  isMetaDirectMessageChannel,
+  META_MESSAGING_WINDOW_CLOSED_MESSAGE,
+} from '@/lib/omnichannel/messaging-window';
 import { supabaseAdmin } from '@/lib/flows/admin-client';
 import {
   sanitizePhoneForMeta,
@@ -227,6 +232,36 @@ export async function sendMessageToConversation(
 
   if (convError || !conversation) {
     throw new SendMessageError('not_found', 'Conversation not found', 404);
+  }
+
+  if (
+    messageType !== 'template' &&
+    isMetaDirectMessageChannel(conversation.channel_type, Boolean(conversation.social_comment_id))
+  ) {
+    const { data: lastCustomerMessage, error: lastCustomerMessageError } = await db
+      .from('messages')
+      .select('created_at')
+      .eq('conversation_id', conversation.id)
+      .eq('sender_type', 'customer')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (lastCustomerMessageError) {
+      throw new SendMessageError(
+        'database_error',
+        'No se pudo validar la ventana de mensajes de Meta.',
+        503
+      );
+    }
+
+    if (!getMetaCustomerServiceWindow(lastCustomerMessage?.created_at).isOpen) {
+      throw new SendMessageError(
+        'meta_messaging_window_closed',
+        META_MESSAGING_WINDOW_CLOSED_MESSAGE,
+        409
+      );
+    }
   }
 
   const contact = conversation.contact;

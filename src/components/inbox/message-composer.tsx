@@ -117,6 +117,9 @@ interface MessageComposerProps {
   onSendMedia: (payload: SendMediaPayload) => void;
   onSendInteractive: (payload: InteractiveMessagePayload, replyToId?: string) => void;
   onOpenTemplates: () => void;
+  /** Templates are currently supported only by the native WhatsApp connector. */
+  templatesAvailable?: boolean;
+  sessionExpiredHint?: string;
   /** Undefined means every WhatsApp attachment type is available. */
   supportedMediaKinds?: ComposerMediaKind[];
   channelType?: string | null;
@@ -140,6 +143,8 @@ export function MessageComposer({
   onSendMedia,
   onSendInteractive,
   onOpenTemplates,
+  templatesAvailable = true,
+  sessionExpiredHint,
   supportedMediaKinds,
   channelType,
   replyTo,
@@ -607,17 +612,19 @@ export function MessageComposer({
       {sessionExpired && (
         <div className="mb-2 flex items-center justify-between rounded-lg bg-amber-500/10 px-3 py-2">
           <p className="text-xs text-amber-400">
-            {t("sessionExpiredHint")}
+            {sessionExpiredHint ?? t("sessionExpiredHint")}
           </p>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 text-xs text-amber-400 hover:text-amber-300"
-            onClick={onOpenTemplates}
-          >
-            <LayoutTemplate className="mr-1 h-3 w-3" />
-            {t("templates")}
-          </Button>
+          {templatesAvailable ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 text-xs text-amber-400 hover:text-amber-300"
+              onClick={onOpenTemplates}
+            >
+              <LayoutTemplate className="mr-1 h-3 w-3" />
+              {t("templates")}
+            </Button>
+          ) : null}
         </div>
       )}
 
@@ -755,17 +762,19 @@ export function MessageComposer({
             </DropdownMenuContent>
           </DropdownMenu>
 
-          <GatedButton
-            variant="ghost"
-            size="sm"
-            canAct={!readOnly}
-            gateReason="send messages"
-            title={readOnly ? undefined : t("sendTemplate")}
-            className="h-9 w-9 shrink-0 p-0 text-muted-foreground hover:text-foreground"
-            onClick={onOpenTemplates}
-          >
-            <LayoutTemplate className="h-4 w-4" />
-          </GatedButton>
+          {templatesAvailable ? (
+            <GatedButton
+              variant="ghost"
+              size="sm"
+              canAct={!readOnly}
+              gateReason="send messages"
+              title={readOnly ? undefined : t("sendTemplate")}
+              className="h-9 w-9 shrink-0 p-0 text-muted-foreground hover:text-foreground"
+              onClick={onOpenTemplates}
+            >
+              <LayoutTemplate className="h-4 w-4" />
+            </GatedButton>
+          ) : null}
 
           <GatedButton
             variant="ghost"

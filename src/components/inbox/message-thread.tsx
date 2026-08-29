@@ -29,7 +29,7 @@ import {
   PanelRightOpen,
   PanelRightClose,
 } from "lucide-react";
-import { format, isToday, isYesterday, differenceInHours } from "date-fns";
+import { format, isToday, isYesterday } from "date-fns";
 import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -55,6 +55,11 @@ import { InternalNoteAttention } from "./internal-note-attention";
 import { buildReplyPreview } from "./reply-quote";
 import { toast } from "sonner";
 import { getReactionEndpoint } from '@/lib/omnichannel/reaction-route';
+import {
+  getMetaCustomerServiceWindow,
+  isMetaDirectMessageChannel,
+  META_MESSAGING_WINDOW_CLOSED_MESSAGE,
+} from "@/lib/omnichannel/messaging-window";
 
 interface ReplyDraft {
   id: string;
@@ -208,6 +213,14 @@ export function MessageThread({
     }, 700);
   }, [isRefreshing, onRefresh]);
   const [replyTo, setReplyTo] = useState<ReplyDraft | null>(null);
+  // Keep the countdown honest while an agent leaves the conversation open.
+  // The server remains authoritative, but this prevents a stale composer from
+  // appearing sendable after Meta's customer-service window has elapsed.
+  const [messagingWindowNow, setMessagingWindowNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setMessagingWindowNow(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   // Profiles are bounded by RLS to rows the current user is allowed to
   // see — today that's just the current user, but the dropdown keeps the
@@ -232,32 +245,35 @@ export function MessageThread({
     };
   }, []);
 
-  // 24-hour session timer
-  const sessionInfo = useMemo(() => {
-    if (!messages.length) return { expired: false, remaining: "" };
+  const isMetaDirectConversation = isMetaDirectMessageChannel(
+    conversation?.channel_type,
+    Boolean(conversation?.social_comment_id),
+  );
+  const canUseWhatsAppTemplates =
+    conversation?.channel_type === "whatsapp" && !conversation?.social_comment_id;
 
-    // Find last customer message
+  // Meta's 24-hour customer service window applies to private WhatsApp,
+  // Messenger and Instagram messages. Public comments and Yeastar web chat
+  // remain outside this policy.
+  const sessionInfo = useMemo(() => {
+    if (!isMetaDirectConversation) return { expired: false, remaining: "" };
     const lastCustomerMsg = [...messages]
       .reverse()
       .find((m) => m.sender_type === "customer");
-
-    if (!lastCustomerMsg) return { expired: true, remaining: "No customer messages" };
-
-    const hoursSince = differenceInHours(new Date(), new Date(lastCustomerMsg.created_at));
-    const expired = hoursSince >= 24;
-
-    if (expired) {
+    const window = getMetaCustomerServiceWindow(
+      lastCustomerMsg?.created_at,
+      new Date(messagingWindowNow),
+    );
+    if (!window.isOpen) {
       return { expired: true, remaining: tTimer("expired") };
     }
-
-    const hoursLeft = 24 - hoursSince;
-    const remaining =
-      hoursLeft >= 1
-        ? tTimer("xhRemaining", { hours: Math.floor(hoursLeft) })
-        : tTimer("xmRemaining", { minutes: Math.floor(hoursLeft * 60) });
-
-    return { expired, remaining };
-  }, [messages, tTimer]);
+    return {
+      expired: false,
+      remaining: tTimer("xhRemaining", {
+        hours: Math.max(1, Math.ceil(window.remainingMs / (60 * 60 * 1000))),
+      }),
+    };
+  }, [isMetaDirectConversation, messages, messagingWindowNow, tTimer]);
 
   // Store latest callback in a ref so fetchMessages doesn't need to
   // depend on `onMessagesLoaded` — otherwise parent re-renders cause
@@ -933,7 +949,7 @@ export function MessageThread({
           </div>
           {/* Session timer badge — hidden on the narrowest phones so
               the name + back arrow keep their room. */}
-          {conversation.channel_type === "whatsapp" ? <Badge
+          {isMetaDirectConversation ? <Badge
             variant="outline"
             className={cn(
               "ml-1 hidden gap-1 border-border text-[10px] sm:inline-flex sm:ml-2",
@@ -1186,11 +1202,13 @@ export function MessageThread({
       <MessageComposer
         conversationId={conversation.id}
         channelType={conversation.channel_type}
-        sessionExpired={conversation.channel_type === "whatsapp" && sessionInfo.expired}
+        sessionExpired={isMetaDirectConversation && sessionInfo.expired}
         onSend={handleSend}
         onSendMedia={handleSendMedia}
         onSendInteractive={handleSendInteractive}
         onOpenTemplates={handleOpenTemplates}
+        templatesAvailable={canUseWhatsAppTemplates}
+        sessionExpiredHint={canUseWhatsAppTemplates ? undefined : META_MESSAGING_WINDOW_CLOSED_MESSAGE}
         supportedMediaKinds={conversation.channel_type === "yeastar_live_chat" ? ["image"] : conversation.channel_type === "facebook" || conversation.channel_type === "instagram" ? [] : undefined}
         replyTo={replyTo}
         onClearReply={() => setReplyTo(null)}
