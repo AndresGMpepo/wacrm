@@ -31,6 +31,8 @@ type CallRecord = {
   recording_url: string | null
   transcript: string | null
   summary: string | null
+  key_points: string[] | null
+  action_items: Array<{ description: string; owner: 'agent' | 'customer'; due_date: string | null }> | null
   transcription_status: string
   error_message: string | null
   contact: { name: string | null; phone: string; email: string | null } | null
@@ -38,6 +40,7 @@ type CallRecord = {
 }
 
 function date(value: string | null) { return value ? new Intl.DateTimeFormat('es-MX', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) : 'Sin fecha' }
+function dueDate(value: string | null) { return value ? new Intl.DateTimeFormat('es-MX', { dateStyle: 'medium' }).format(new Date(value)) : '' }
 function duration(value: number | null) { if (value == null) return 'Sin datos'; return `${Math.floor(value / 60)}:${String(value % 60).padStart(2, '0')}` }
 
 const EVENT_LABELS: Record<string, (data: Record<string, unknown> | null) => string> = {
@@ -168,6 +171,14 @@ export default function CallTranscriptionsPage() {
                   <h2 className="text-sm font-semibold">Resumen</h2>
                   <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">{call.summary || 'Sin resumen disponible.'}</p>
                 </div>
+                {call.key_points?.length ? <div>
+                  <h2 className="text-sm font-semibold">Puntos clave</h2>
+                  <ul className="mt-1 list-inside list-disc text-sm text-muted-foreground">{call.key_points.map((point, index) => <li key={index}>{point}</li>)}</ul>
+                </div> : null}
+                {call.action_items?.length ? <div>
+                  <h2 className="text-sm font-semibold">Pendientes</h2>
+                  <ul className="mt-1 space-y-1 text-sm text-muted-foreground">{call.action_items.map((item, index) => <li key={index}>{item.description}{item.due_date ? ` · ${dueDate(item.due_date)}` : ''}{item.owner === 'customer' ? ' (cliente)' : ''}</li>)}</ul>
+                </div> : null}
                 <details>
                   <summary className="cursor-pointer text-sm font-semibold">Ver transcripción</summary>
                   <p className="mt-2 whitespace-pre-wrap border-l-2 border-primary/30 pl-3 text-sm leading-6 text-muted-foreground">{call.transcript || 'Sin transcripción disponible.'}</p>

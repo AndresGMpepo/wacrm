@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/ai/admin-client'
 import { fetchAiResult, type JsonRecord } from '@/lib/telephony/yeastar-ai'
-import { generateCallSummary } from '@/lib/telephony/call-summary'
+import { analyzeCall } from '@/lib/telephony/call-summary'
+import { applyContactMemory } from '@/lib/ai/memory'
 
 export const dynamic = 'force-dynamic'
 
@@ -10,7 +11,7 @@ export const dynamic = 'force-dynamic'
 // Re-attempt pending rows for a bounded window before giving up.
 const RETRY_WINDOW_MS = 3 * 60 * 60 * 1000
 
-type PendingRow = { id: string; account_id: string; call_id: string; created_at: string; yeastar_payload: JsonRecord | null }
+type PendingRow = { id: string; account_id: string; call_id: string; contact_id: string | null; created_at: string; yeastar_payload: JsonRecord | null }
 
 export async function POST(request: Request) {
   const secret = process.env.AI_ANALYSIS_WORKER_SECRET
@@ -19,7 +20,7 @@ export async function POST(request: Request) {
   }
   const db = supabaseAdmin()
   const { data: rows, error } = await db.from('yeastar_call_transcriptions')
-    .select('id, account_id, call_id, created_at, yeastar_payload')
+    .select('id, account_id, call_id, contact_id, created_at, yeastar_payload')
     .eq('transcription_status', 'pending')
     .order('created_at', { ascending: true })
     .limit(20)
@@ -33,16 +34,23 @@ export async function POST(request: Request) {
       const ai = await fetchAiResult(db, row.account_id, row.call_id, eventPayload)
       const apiError = ai.contextError
       if (ai.transcript) {
-        const summary = await generateCallSummary(db, row.account_id, ai.transcript).catch(() => null)
+        const call = await analyzeCall(db, row.account_id, ai.transcript).catch(() => null)
         const { error: updateError } = await db.from('yeastar_call_transcriptions').update({
           transcript: ai.transcript,
-          summary,
+          summary: call?.summary ?? null,
+          key_points: call?.key_points ?? [],
+          action_items: call?.action_items ?? [],
           transcription_status: 'completed',
           error_message: null,
           yeastar_payload: { event: eventPayload, ai: ai.raw },
           updated_at: new Date().toISOString(),
         }).eq('id', row.id)
         if (updateError) throw updateError
+        if (call && row.contact_id) {
+          await applyContactMemory(db, { accountId: row.account_id, contactId: row.contact_id, source: { type: 'call', id: row.id } }, call, call.memory).catch((memoryError) => {
+            console.error('[nexo-memory] Failed to apply call memory extraction:', memoryError)
+          })
+        }
         completed++
       } else if (expiredRow) {
         await db.from('yeastar_call_transcriptions').update({

@@ -4,7 +4,8 @@ import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { findExistingContact } from '@/lib/contacts/dedupe'
 import { fetchAiResult, fetchCdrDetail, findValue, parsePbxLocalTime, type JsonRecord } from '@/lib/telephony/yeastar-ai'
-import { generateCallSummary } from '@/lib/telephony/call-summary'
+import { analyzeCall } from '@/lib/telephony/call-summary'
+import { applyContactMemory } from '@/lib/ai/memory'
 
 export const dynamic = 'force-dynamic'
 
@@ -240,7 +241,7 @@ export async function POST(request: Request, context: { params: Promise<{ accoun
       const customerPhone = fromExtension ? callTo : toExtension ? callFrom : (callTo ?? callFrom)
       const direction = callType && ['inbound', 'outbound', 'internal'].includes(callType.toLowerCase()) ? callType.toLowerCase() : 'unknown'
       const ai = await fetchAiResult(db, accountId, event.callId, event.payload)
-      const summary = ai.transcript ? await generateCallSummary(db, accountId, ai.transcript).catch(() => null) : null
+      const call = ai.transcript ? await analyzeCall(db, accountId, ai.transcript).catch(() => null) : null
       const uid = firstNestedText(event.payload, ['uid'])
       const cdrDetail = uid ? await fetchCdrDetail(db, accountId, uid).catch(() => null) : null
       const recordingUrl = firstNestedText(event.payload, ['recording'])
@@ -250,7 +251,7 @@ export async function POST(request: Request, context: { params: Promise<{ accoun
       const contact = customerPhone ? await findExistingContact(db, accountId, customerPhone) : null
       const contactRow = contact ? (await db.from('contacts').select('id, name, email, phone').eq('id', contact.id).maybeSingle()).data : null
       const agentConfig = agentExtension ? (await db.from('telephony_user_configs').select('user_id').eq('account_id', accountId).eq('provider', 'yeastar').eq('extension', agentExtension).maybeSingle()).data : null
-      const { error } = await db.from('yeastar_call_transcriptions').upsert({
+      const { data: transcriptionRow, error } = await db.from('yeastar_call_transcriptions').upsert({
         account_id: accountId,
         call_id: event.callId,
         cdr_id: ai?.cdrId ?? null,
@@ -272,13 +273,20 @@ export async function POST(request: Request, context: { params: Promise<{ accoun
         timeline: cdrDetail?.timeline ?? [],
         recording_url: recordingUrl || null,
         transcript: ai?.transcript,
-        summary,
+        summary: call?.summary ?? null,
+        key_points: call?.key_points ?? [],
+        action_items: call?.action_items ?? [],
         transcription_status: ai?.transcript ? 'completed' : 'pending',
         error_message: ai?.contextError ?? null,
         yeastar_payload: { event: event.payload, ai: ai?.raw ?? null },
         updated_at: new Date().toISOString(),
-      }, { onConflict: 'account_id,call_id' })
+      }, { onConflict: 'account_id,call_id' }).select('id').single()
       if (error) throw error
+      if (call && contactRow?.id) {
+        await applyContactMemory(db, { accountId, contactId: contactRow.id, source: { type: 'call', id: transcriptionRow.id } }, call, call.memory).catch((memoryError) => {
+          console.error('[nexo-memory] Failed to apply call memory extraction:', memoryError)
+        })
+      }
       const detail = ai?.transcript
         ? 'CDR 30012 sincronizado con transcripción y resumen generado por NexoOmni.'
         : `CDR 30012 recibido, pero Yeastar aún no tiene la transcripción lista; se reintentará automáticamente.${ai?.contextError ? ` (${ai.contextError})` : ''}`

@@ -71,11 +71,13 @@ export function parseMemoryExtraction(value: Record<string, unknown>): MemoryExt
  *  instead of being written as if it were established knowledge. */
 const FACT_CONFIDENCE_FLOOR = 0.6
 
+export type MemorySource = { type: 'conversation' | 'call'; id: string }
+
 async function upsertFacts(
   db: Db,
   accountId: string,
   contactId: string,
-  sourceConversationId: string,
+  source: MemorySource,
   category: 'interest' | 'objection',
   facts: Array<{ text: string; confidence: number }>,
 ) {
@@ -87,21 +89,21 @@ async function upsertFacts(
     if (existing) continue
     await db.from('contact_facts').insert({
       account_id: accountId, contact_id: contactId, category, fact: fact.text, confidence: fact.confidence,
-      source_type: 'conversation', source_id: sourceConversationId,
+      source_type: source.type, source_id: source.id,
     })
   }
 }
 
-/** Applies one conversation's structured extraction on top of a contact's
- *  memory: overwrites the consolidated summary, appends timeline events,
- *  records new facts/commitments. Never deletes prior history. */
+/** Applies one conversation's or call's structured extraction on top of a
+ *  contact's memory: overwrites the consolidated summary, appends timeline
+ *  events, records new facts/commitments. Never deletes prior history. */
 export async function applyContactMemory(
   db: Db,
-  args: { accountId: string; contactId: string; conversationId: string },
+  args: { accountId: string; contactId: string; source: MemorySource },
   analysis: { summary: string; sentiment: string; sentiment_score: number; next_best_action: string },
   memory: MemoryExtraction,
 ) {
-  const { accountId, contactId, conversationId } = args
+  const { accountId, contactId, source } = args
   await db.from('contact_memory').upsert({
     contact_id: contactId,
     account_id: accountId,
@@ -112,7 +114,8 @@ export async function applyContactMemory(
     risk_level: memory.risk_level,
     opportunity_score: memory.opportunity_score,
     next_best_action: analysis.next_best_action || null,
-    last_source_conversation_id: conversationId,
+    last_source_conversation_id: source.type === 'conversation' ? source.id : null,
+    last_source_call_id: source.type === 'call' ? source.id : null,
     updated_at: new Date().toISOString(),
   }, { onConflict: 'contact_id' })
 
@@ -120,12 +123,12 @@ export async function applyContactMemory(
     await db.from('contact_memory_events').insert({
       account_id: accountId, contact_id: contactId, event_type: 'fact', summary: fact,
       importance: memory.risk_level === 'high' ? 'high' : 'normal', confidence: 0.8,
-      source_type: 'conversation', source_id: conversationId,
+      source_type: source.type, source_id: source.id,
     })
   }
 
-  await upsertFacts(db, accountId, contactId, conversationId, 'interest', memory.interests)
-  await upsertFacts(db, accountId, contactId, conversationId, 'objection', memory.objections)
+  await upsertFacts(db, accountId, contactId, source, 'interest', memory.interests)
+  await upsertFacts(db, accountId, contactId, source, 'objection', memory.objections)
 
   for (const commitment of memory.commitments) {
     const { data: existing } = await db.from('contact_commitments').select('id')
@@ -133,7 +136,7 @@ export async function applyContactMemory(
     if (existing) continue
     await db.from('contact_commitments').insert({
       account_id: accountId, contact_id: contactId, description: commitment.description, owner: commitment.owner,
-      due_date: commitment.due_date, source_type: 'conversation', source_id: conversationId,
+      due_date: commitment.due_date, source_type: source.type, source_id: source.id,
     })
   }
 }

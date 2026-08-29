@@ -108,7 +108,7 @@ export async function POST(request: Request) {
       if (writeError) throw writeError
       const contactId = Array.isArray(job.conversation) ? job.conversation[0]?.contact_id : job.conversation?.contact_id
       if (contactId) {
-        await applyContactMemory(db, { accountId: job.account_id, contactId, conversationId: job.conversation_id }, analysis, parseMemoryExtraction(rawValue)).catch((memoryError) => {
+        await applyContactMemory(db, { accountId: job.account_id, contactId, source: { type: 'conversation', id: job.conversation_id } }, analysis, parseMemoryExtraction(rawValue)).catch((memoryError) => {
           console.error('[nexo-memory] Failed to apply memory extraction:', memoryError)
         })
       }

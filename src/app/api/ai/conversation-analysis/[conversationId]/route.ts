@@ -152,7 +152,7 @@ export async function POST(_: Request, { params }: { params: Promise<{ conversat
     if (error) throw error
     void logAiUsage(admin, { accountId, conversationId, mode: 'analysis', provider: config.provider, model: config.model, usage: result.usage })
     if (conversation.contact_id) {
-      await applyContactMemory(admin, { accountId, contactId: conversation.contact_id, conversationId }, analysis, parseMemoryExtraction(rawValue)).catch((memoryError) => {
+      await applyContactMemory(admin, { accountId, contactId: conversation.contact_id, source: { type: 'conversation', id: conversationId } }, analysis, parseMemoryExtraction(rawValue)).catch((memoryError) => {
         console.error('[nexo-memory] Failed to apply memory extraction:', memoryError)
       })
     }
