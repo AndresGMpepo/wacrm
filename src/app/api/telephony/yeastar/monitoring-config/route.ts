@@ -35,6 +35,14 @@ export async function GET(request: Request) {
       .select('event_type, call_id, outcome, detail, received_at').eq('account_id', accountId)
       .order('received_at', { ascending: false }).limit(5)
     if (receiptError) throw receiptError
+    // A single call can emit several 30011 (call state) events, which pushes
+    // the far less frequent 30012 (call end / transcription trigger) out of
+    // the top-5 list above — query it separately so it's always visible for
+    // diagnosing "transcription never arrives" reports.
+    const { data: lastCallEndReceipt, error: callEndError } = await db.from('yeastar_webhook_event_receipts')
+      .select('call_id, outcome, detail, received_at').eq('account_id', accountId).eq('event_type', '30012')
+      .order('received_at', { ascending: false }).limit(1).maybeSingle()
+    if (callEndError) throw callEndError
     return NextResponse.json({
       webhookUrl: webhookUrl(request, accountId),
       config: {
@@ -42,6 +50,7 @@ export async function GET(request: Request) {
         apiConfigured: Boolean(data?.api_client_id && data?.api_client_secret),
       },
       receipts: receipts ?? [],
+      lastCallEndReceipt: lastCallEndReceipt ?? null,
     })
   } catch (error) {
     return toErrorResponse(error)

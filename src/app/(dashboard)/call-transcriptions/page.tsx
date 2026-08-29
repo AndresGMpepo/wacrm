@@ -164,8 +164,8 @@ export default function CallTranscriptionsPage() {
               <CardContent className="space-y-4">
                 {call.recording_url ? <audio controls preload="none" className="w-full" src={call.recording_url} /> : null}
                 {call.transcription_status === 'failed' ? <p className="text-sm text-red-400">{call.error_message || 'La sincronización de IA falló.'}</p> : null}
-                {call.transcription_status === 'pending' ? <p className="text-sm text-amber-400">Yeastar aún no publica la transcripción de esta llamada. Se reintenta automáticamente cada minuto.</p> : null}
-                {call.transcription_status === 'unavailable' ? <p className="text-sm text-muted-foreground">Yeastar no generó transcripción para esta llamada dentro del tiempo esperado.</p> : null}
+                {call.transcription_status === 'pending' ? <p className="text-sm text-amber-400">Yeastar aún no publica la transcripción de esta llamada. Se reintenta automáticamente cada minuto.{call.error_message ? ` Último intento: ${call.error_message}` : ''}</p> : null}
+                {call.transcription_status === 'unavailable' ? <p className="text-sm text-muted-foreground">Yeastar no generó transcripción para esta llamada dentro del tiempo esperado.{call.error_message ? ` (${call.error_message})` : ''}</p> : null}
                 <TimeBreakdown call={call} />
                 <div>
                   <h2 className="text-sm font-semibold">Resumen</h2>
