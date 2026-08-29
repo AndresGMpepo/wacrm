@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { Copy, Loader2, Radio, Save } from 'lucide-react'
+import { Copy, Loader2, RefreshCw, Radio, Save } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -32,6 +32,7 @@ export function YeastarMonitoringConfig() {
   const [receipts, setReceipts] = useState<WebhookReceipt[]>([])
   const [lastCallEndReceipt, setLastCallEndReceipt] = useState<LastCallEndReceipt>(null)
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [saving, setSaving] = useState(false)
   const load = useCallback(async () => {
     try {
@@ -46,6 +47,7 @@ export function YeastarMonitoringConfig() {
     finally { setLoading(false) }
   }, [])
   useEffect(() => { const timer = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(timer) }, [load])
+  const refresh = async () => { setRefreshing(true); try { await load() } finally { setRefreshing(false) } }
   const save = async () => {
     setSaving(true)
     try {
@@ -71,7 +73,10 @@ export function YeastarMonitoringConfig() {
       </p> : <p className="mt-1 text-destructive">Nunca se ha recibido un evento 30012 para esta cuenta. Revisa en Yeastar que “Call End Details Notification (30012)” esté marcado en el mismo webhook que 30011, apuntando a esta misma URL.</p>}
     </div>
     <div className="rounded-md border p-3 text-xs">
-      <p className="font-medium text-foreground">Diagnóstico de eventos recibidos</p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="font-medium text-foreground">Diagnóstico de eventos recibidos</p>
+        <Button type="button" size="icon" variant="ghost" title="Actualizar" onClick={() => void refresh()} disabled={refreshing}><RefreshCw className={refreshing ? 'size-3.5 animate-spin' : 'size-3.5'} /></Button>
+      </div>
       <p className="mt-1 text-muted-foreground">Haz una llamada activa y pulsa Guardar supervisión o recarga esta sección. El envío de prueba de Yeastar puede aparecer como “ignorado”; eso solo valida la conectividad.</p>
       {receipts.length ? <div className="mt-3 space-y-2">
         {receipts.map((item, index) => <p key={`${item.received_at}-${index}`} className={item.outcome === 'processed' ? 'text-emerald-500' : item.outcome === 'rejected' || item.outcome === 'invalid' ? 'text-destructive' : 'text-muted-foreground'}>
