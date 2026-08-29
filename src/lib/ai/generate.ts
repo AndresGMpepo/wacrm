@@ -15,6 +15,10 @@ export interface GenerateArgs {
   systemPrompt: string
   /** Recent conversation turns, oldest first. */
   messages: ChatMessage[]
+  /** Override the reply-sized default for long analytical outputs. */
+  maxOutputTokens?: number
+  /** Override the default per-call timeout for slow analytical calls. */
+  timeoutMs?: number
 }
 
 /** Generate arbitrary structured assistance with the configured provider. */
@@ -23,13 +27,14 @@ export async function generateText(args: GenerateArgs): Promise<{
   usage: AiUsage | null
 }> {
   const { config, systemPrompt, messages } = args
-  const timeoutMs = aiRequestTimeoutMs()
+  const timeoutMs = args.timeoutMs ?? aiRequestTimeoutMs()
   const providerArgs = {
     apiKey: config.apiKey,
     model: config.model,
     systemPrompt,
     messages,
     timeoutMs,
+    maxOutputTokens: args.maxOutputTokens,
   }
 
   switch (config.provider) {

@@ -10,6 +10,9 @@ import { checkRateLimit, rateLimitResponse, RATE_LIMITS } from '@/lib/rate-limit
 import { buildExecutiveReport, computeRange } from '@/lib/reports/build-executive-report'
 import type { ExecutiveReport } from '@/lib/reports/executive-report-export'
 
+export const dynamic = 'force-dynamic'
+export const maxDuration = 300
+
 type InsightArea = 'operacion' | 'comercial' | 'marketing' | 'experiencia'
 type InsightPriority = 'alta' | 'media' | 'baja'
 
@@ -41,12 +44,12 @@ function strings(value: unknown, limit: number, itemLimit: number) {
 
 function parseInsight(raw: string): ExecutiveInsight {
   const match = raw.match(/\{[\s\S]*\}/)
-  if (!match) throw new AiError('La IA no devolviÃ³ un dictamen vÃ¡lido.', { code: 'invalid_report_insight' })
+  if (!match) throw new AiError('La IA no devolvió un dictamen válido. Revisa que el modelo configurado tenga capacidad de respuesta suficiente.', { code: 'invalid_report_insight' })
   let data: Record<string, unknown>
   try {
     data = JSON.parse(match[0]) as Record<string, unknown>
   } catch {
-    throw new AiError('La IA no devolviÃ³ un dictamen vÃ¡lido.', { code: 'invalid_report_insight' })
+    throw new AiError('La IA devolvió un dictamen incompleto. Intenta de nuevo o usa un periodo más corto.', { code: 'invalid_report_insight' })
   }
   const priorities = Array.isArray(data.priorities)
     ? data.priorities.flatMap((item) => {
@@ -62,7 +65,7 @@ function parseInsight(raw: string): ExecutiveInsight {
       return title && recommendation ? [{ area: area as InsightArea, priority: priority as InsightPriority, title, recommendation, rationale }] : []
     }).slice(0, 5)
     : []
-  if (!priorities.length) throw new AiError('La IA no devolviÃ³ prioridades utilizables.', { code: 'invalid_report_insight' })
+  if (!priorities.length) throw new AiError('La IA no devolvió prioridades utilizables.', { code: 'invalid_report_insight' })
   return {
     headline: asString(data.headline, 180) || 'Lectura ejecutiva del periodo',
     summary: asString(data.summary, 1_000),
@@ -75,6 +78,11 @@ function parseInsight(raw: string): ExecutiveInsight {
 }
 
 const MAX_INSIGHT_RANGE_DAYS = 60
+
+// The dictamen is a long structured analysis, not a chat reply: reasoning
+// models burn the 1024-token reply budget before emitting any JSON.
+const INSIGHT_MAX_OUTPUT_TOKENS = 6_000
+const INSIGHT_TIMEOUT_MS = 120_000
 
 function parseInsightRange(from: unknown, to: unknown) {
   if (typeof from !== 'string' || typeof to !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) {
@@ -94,6 +102,27 @@ function parseInsightRange(from: unknown, to: unknown) {
  *  can fail depending on how the app is proxied/deployed). */
 async function fetchReportForRange(accountId: string, range: { from: string; to: string }): Promise<ExecutiveReport> {
   return buildExecutiveReport(accountId, computeRange(range.from, range.to)) as unknown as Promise<ExecutiveReport>
+}
+
+/** Keeps the model's input bounded: longer ranges add campaign rows that
+ *  blow past the context budget without adding executive signal. */
+function compactReportForModel(report: ExecutiveReport) {
+  return {
+    ...report,
+    campaigns: {
+      ...report.campaigns,
+      items: report.campaigns.items.slice(0, 8).map((campaign) => ({
+        name: campaign.name,
+        status: campaign.status,
+        total_recipients: campaign.total_recipients,
+        delivery_rate: campaign.delivery_rate,
+        read_rate: campaign.read_rate,
+        reply_rate: campaign.reply_rate,
+        attributed_deals: campaign.attributed_deals,
+        attributed_won_value: campaign.attributed_won_value,
+      })),
+    },
+  }
 }
 
 export async function GET(request: Request) {
@@ -141,7 +170,13 @@ export async function POST(request: Request) {
       `Perfil operativo de la empresa: ${report.meta.operating_mode}.`,
       config.systemPrompt ? `Contexto adicional de la empresa: ${config.systemPrompt}` : '',
     ].filter(Boolean).join('\n\n')
-    const result = await generateText({ config, systemPrompt, messages: [{ role: 'user', content: JSON.stringify(report) }] })
+    const result = await generateText({
+      config,
+      systemPrompt,
+      messages: [{ role: 'user', content: JSON.stringify(compactReportForModel(report)) }],
+      maxOutputTokens: INSIGHT_MAX_OUTPUT_TOKENS,
+      timeoutMs: INSIGHT_TIMEOUT_MS,
+    })
     const insight = parseInsight(result.text)
     const admin = supabaseAdmin()
     const generatedAt = new Date().toISOString()
