@@ -90,10 +90,45 @@ export async function syncGoogleAppointment(accountId: string, appointment: Appo
     return
   }
   if (appointment.status === 'cancelled') return
-  const response = await fetch(appointment.google_calendar_event_id ? `${base}/${encodeURIComponent(appointment.google_calendar_event_id)}` : base, { method: appointment.google_calendar_event_id ? 'PATCH' : 'POST', headers: { Authorization: `Bearer ${connection.token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(eventBody(appointment)), signal: AbortSignal.timeout(10_000) })
+  let response = await fetch(appointment.google_calendar_event_id ? `${base}/${encodeURIComponent(appointment.google_calendar_event_id)}` : base, { method: appointment.google_calendar_event_id ? 'PATCH' : 'POST', headers: { Authorization: `Bearer ${connection.token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(eventBody(appointment)), signal: AbortSignal.timeout(10_000) })
+  // The doctor (or someone else) may have deleted the event straight from Google:
+  // a PATCH to a gone event 404s, so recreate it instead of failing the whole edit.
+  if (response.status === 404 && appointment.google_calendar_event_id) {
+    response = await fetch(base, { method: 'POST', headers: { Authorization: `Bearer ${connection.token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(eventBody(appointment)), signal: AbortSignal.timeout(10_000) })
+  }
   const event = await response.json().catch(() => ({})) as { id?: string }
   if (!response.ok || !event.id) throw new Error('No se pudo sincronizar la cita en Google Calendar.')
-  await connection.db.from('appointments').update({ google_calendar_event_id: appointment.google_calendar_event_id ?? event.id, google_sync_status: 'synced', google_sync_error: null }).eq('id', appointment.id).eq('account_id', accountId)
+  await connection.db.from('appointments').update({ google_calendar_event_id: event.id, google_sync_status: 'synced', google_sync_error: null }).eq('id', appointment.id).eq('account_id', accountId)
+}
+
+/** Best-effort cleanup of the Google-side event when an appointment is hard-deleted
+ *  from NexoOmni. Tolerant of the event already being gone (deleted from Google itself). */
+export async function deleteGoogleEvent(accountId: string, appointment: Pick<AppointmentForGoogle, 'google_calendar_connection_id' | 'google_calendar_event_id' | 'specialist_id' | 'assigned_agent_id'>) {
+  if (!appointment.google_calendar_event_id) return
+  const connection = await accessToken(accountId, { specialistId: appointment.specialist_id ?? null, assignedAgentId: appointment.assigned_agent_id }, appointment.google_calendar_connection_id)
+  if (!connection) return
+  const base = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(connection.calendarId)}/events`
+  const response = await fetch(`${base}/${encodeURIComponent(appointment.google_calendar_event_id)}`, { method: 'DELETE', headers: { Authorization: `Bearer ${connection.token}` }, signal: AbortSignal.timeout(10_000) })
+  if (!response.ok && response.status !== 404 && response.status !== 410) throw new Error('No se pudo eliminar el evento en Google Calendar.')
+}
+
+/** Deletes a connection and, if it was the scope's default, promotes another
+ *  remaining connection in the same scope so the doctor/company isn't left
+ *  without a default calendar. */
+export async function removeGoogleCalendarConnection(accountId: string, connectionId: string) {
+  const db = admin()
+  const { data: connection, error } = await db.from('google_calendar_connections').select('id, assigned_agent_id, specialist_id, is_default').eq('id', connectionId).eq('account_id', accountId).maybeSingle()
+  if (error) throw error
+  if (!connection) throw new Error('No se encontró el calendario.')
+  const { error: deleteError } = await db.from('google_calendar_connections').delete().eq('id', connectionId).eq('account_id', accountId)
+  if (deleteError) throw deleteError
+  if (!connection.is_default) return
+  let scope = db.from('google_calendar_connections').select('id').eq('account_id', accountId)
+  scope = connection.assigned_agent_id ? scope.eq('assigned_agent_id', connection.assigned_agent_id) : scope.is('assigned_agent_id', null)
+  scope = connection.specialist_id ? scope.eq('specialist_id', connection.specialist_id) : scope.is('specialist_id', null)
+  const { data: remaining, error: remainingError } = await scope.limit(1).maybeSingle()
+  if (remainingError) throw remainingError
+  if (remaining) await db.from('google_calendar_connections').update({ is_default: true }).eq('id', remaining.id)
 }
 
 async function googleRequest(token: string, path: string) {

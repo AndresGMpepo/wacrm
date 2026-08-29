@@ -11,6 +11,7 @@ import {
   Pencil,
   Plus,
   RefreshCw,
+  Trash2,
   UserRoundX,
   X,
 } from 'lucide-react';
@@ -137,6 +138,10 @@ export default function AppointmentsPage() {
   const [googleTargetSpecialistId, setGoogleTargetSpecialistId] = useState('');
   const [newSpecialistName, setNewSpecialistName] = useState('');
   const [newSpecialistSpecialty, setNewSpecialistSpecialty] = useState('');
+  const [editingSpecialistId, setEditingSpecialistId] = useState<string | null>(null);
+  const [editSpecialistName, setEditSpecialistName] = useState('');
+  const [editSpecialistSpecialty, setEditSpecialistSpecialty] = useState('');
+  const [savingSpecialist, setSavingSpecialist] = useState(false);
   const [addCalendarTargetSpecialistId, setAddCalendarTargetSpecialistId] = useState('');
   const [googleAvailable, setGoogleAvailable] = useState(false);
   const [connectingGoogle, setConnectingGoogle] = useState(false);
@@ -587,6 +592,164 @@ export default function AppointmentsPage() {
     }
   }
 
+  function startEditSpecialist(specialist: Specialist) {
+    setEditingSpecialistId(specialist.id);
+    setEditSpecialistName(specialist.full_name);
+    setEditSpecialistSpecialty(specialist.specialty ?? '');
+  }
+
+  function cancelEditSpecialist() {
+    setEditingSpecialistId(null);
+    setEditSpecialistName('');
+    setEditSpecialistSpecialty('');
+  }
+
+  async function saveSpecialist(event: FormEvent) {
+    event.preventDefault();
+    if (!editingSpecialistId) return;
+    if (!editSpecialistName.trim())
+      return toast.error('Indica el nombre del especialista.');
+    setSavingSpecialist(true);
+    try {
+      const response = await fetch(
+        `/api/appointments/specialists/${editingSpecialistId}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            full_name: editSpecialistName.trim(),
+            specialty: editSpecialistSpecialty.trim() || '',
+          }),
+        }
+      );
+      const payload = (await response.json().catch(() => null)) as {
+        error?: string;
+      } | null;
+      if (!response.ok)
+        throw new Error(
+          payload?.error || 'No se pudo actualizar el especialista.'
+        );
+      toast.success('Especialista actualizado.');
+      cancelEditSpecialist();
+      await loadSpecialists();
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : 'No se pudo actualizar el especialista.'
+      );
+    } finally {
+      setSavingSpecialist(false);
+    }
+  }
+
+  async function toggleSpecialistActive(specialist: Specialist) {
+    try {
+      const response = await fetch(
+        `/api/appointments/specialists/${specialist.id}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ is_active: !specialist.is_active }),
+        }
+      );
+      if (!response.ok)
+        throw new Error('No se pudo actualizar el especialista.');
+      toast.success(
+        specialist.is_active
+          ? 'Especialista desactivado.'
+          : 'Especialista reactivado.'
+      );
+      await loadSpecialists();
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : 'No se pudo actualizar el especialista.'
+      );
+    }
+  }
+
+  async function deleteSpecialist(specialist: Specialist) {
+    if (
+      !window.confirm(
+        `¿Eliminar a ${specialist.full_name}? También se desconectarán sus calendarios de Google.`
+      )
+    )
+      return;
+    try {
+      const response = await fetch(
+        `/api/appointments/specialists/${specialist.id}`,
+        { method: 'DELETE' }
+      );
+      if (!response.ok)
+        throw new Error('No se pudo eliminar el especialista.');
+      toast.success('Especialista eliminado.');
+      if (editingSpecialistId === specialist.id) cancelEditSpecialist();
+      await Promise.all([loadSpecialists(), loadGoogleConnection()]);
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : 'No se pudo eliminar el especialista.'
+      );
+    }
+  }
+
+  async function disconnectGoogleCalendar(connection: GoogleConnection) {
+    if (
+      !window.confirm(
+        `¿Desconectar el calendario "${connection.display_name || connection.calendar_id}"? Las citas que lo usan dejarán de sincronizarse.`
+      )
+    )
+      return;
+    try {
+      const response = await fetch(
+        `/api/appointments/google?connection_id=${encodeURIComponent(connection.id)}`,
+        { method: 'DELETE' }
+      );
+      const payload = (await response.json().catch(() => null)) as {
+        error?: string;
+      } | null;
+      if (!response.ok)
+        throw new Error(payload?.error || 'No se pudo desconectar el calendario.');
+      toast.success('Calendario desconectado.');
+      await loadGoogleConnection();
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : 'No se pudo desconectar el calendario.'
+      );
+    }
+  }
+
+  async function deleteAppointment(appointment: Appointment) {
+    if (
+      !window.confirm(
+        `¿Eliminar la cita "${appointment.title}"? Esta acción no se puede deshacer.`
+      )
+    )
+      return;
+    try {
+      const response = await fetch(
+        `/api/appointments?id=${encodeURIComponent(appointment.id)}`,
+        { method: 'DELETE' }
+      );
+      const payload = (await response.json().catch(() => null)) as {
+        error?: string;
+      } | null;
+      if (!response.ok)
+        throw new Error(payload?.error || 'No se pudo eliminar la cita.');
+      toast.success('Cita eliminada.');
+      await load();
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : 'No se pudo eliminar la cita.'
+      );
+    }
+  }
+
   if (loading)
     return (
       <div className="text-muted-foreground flex justify-center py-16">
@@ -708,13 +871,89 @@ export default function AppointmentsPage() {
               </Button>
             </form>
             {specialists.length > 0 ? (
-              <ul className="grid gap-1 text-sm sm:grid-cols-2">
-                {specialists.map((specialist) => (
-                  <li key={specialist.id} className="text-muted-foreground rounded-lg border px-3 py-2">
-                    <span className="text-foreground font-medium">{specialist.full_name}</span>
-                    {specialist.specialty ? ` · ${specialist.specialty}` : ''}
-                  </li>
-                ))}
+              <ul className="grid gap-2 text-sm sm:grid-cols-2">
+                {specialists.map((specialist) =>
+                  editingSpecialistId === specialist.id ? (
+                    <li key={specialist.id} className="rounded-lg border p-2">
+                      <form
+                        className="flex flex-wrap items-end gap-2"
+                        onSubmit={saveSpecialist}
+                      >
+                        <Input
+                          value={editSpecialistName}
+                          onChange={(event) =>
+                            setEditSpecialistName(event.target.value)
+                          }
+                          placeholder="Nombre"
+                          className="min-w-32"
+                        />
+                        <Input
+                          value={editSpecialistSpecialty}
+                          onChange={(event) =>
+                            setEditSpecialistSpecialty(event.target.value)
+                          }
+                          placeholder="Especialidad"
+                          className="min-w-32"
+                        />
+                        <Button type="submit" size="sm" disabled={savingSpecialist}>
+                          {savingSpecialist ? (
+                            <Loader2 className="animate-spin" />
+                          ) : null}
+                          Guardar
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={cancelEditSpecialist}
+                        >
+                          <X />
+                        </Button>
+                      </form>
+                    </li>
+                  ) : (
+                    <li
+                      key={specialist.id}
+                      className="text-muted-foreground flex items-center justify-between gap-2 rounded-lg border px-3 py-2"
+                    >
+                      <span>
+                        <span className="text-foreground font-medium">
+                          {specialist.full_name}
+                        </span>
+                        {specialist.specialty ? ` · ${specialist.specialty}` : ''}
+                        {!specialist.is_active ? ' · Inactivo' : ''}
+                      </span>
+                      <span className="flex shrink-0 gap-1">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => startEditSpecialist(specialist)}
+                          aria-label="Editar especialista"
+                        >
+                          <Pencil />
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => void toggleSpecialistActive(specialist)}
+                        >
+                          {specialist.is_active ? 'Desactivar' : 'Reactivar'}
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => void deleteSpecialist(specialist)}
+                          aria-label="Eliminar especialista"
+                        >
+                          <Trash2 />
+                        </Button>
+                      </span>
+                    </li>
+                  )
+                )}
               </ul>
             ) : (
               <p className="text-muted-foreground text-xs">
@@ -764,6 +1003,9 @@ export default function AppointmentsPage() {
                         Usar por defecto
                       </Button>
                     ) : null}
+                    <Button type="button" size="sm" variant="outline" onClick={() => void disconnectGoogleCalendar(connection)}>
+                      Desconectar
+                    </Button>
                   </div>
                 );
               })}
@@ -799,6 +1041,9 @@ export default function AppointmentsPage() {
                         Usar por defecto
                       </Button>
                     ) : null}
+                    <Button type="button" size="sm" variant="outline" onClick={() => void disconnectGoogleCalendar(connection)}>
+                      Desconectar
+                    </Button>
                   </div>
                 );
               })}
@@ -1139,6 +1384,15 @@ export default function AppointmentsPage() {
                         </Button>
                       </>
                     ) : null}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-destructive"
+                      onClick={() => void deleteAppointment(appointment)}
+                    >
+                      <Trash2 />
+                      Eliminar
+                    </Button>
                   </div>
                 </CardContent>
                 {appointment.status === 'completed' ? (

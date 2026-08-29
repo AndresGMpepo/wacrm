@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { requireAccountModule } from '@/lib/account/modules'
 import { toErrorResponse } from '@/lib/auth/account'
-import { syncGoogleAppointment } from '@/lib/appointments/google-calendar'
+import { deleteGoogleEvent, syncGoogleAppointment } from '@/lib/appointments/google-calendar'
 
 const STATUSES = ['scheduled', 'confirmed', 'completed', 'cancelled', 'no_show'] as const
 
@@ -214,6 +214,25 @@ export async function PATCH(request: Request) {
       console.error('[appointments] Google Calendar sync failed:', syncError)
       await supabase.from('appointments').update({ google_sync_status: 'failed', google_sync_error: syncError instanceof Error ? syncError.message.slice(0, 500) : 'Error desconocido de Google Calendar.' }).eq('id', data.id).eq('account_id', accountId)
     })
+    return NextResponse.json({ success: true })
+  } catch (error) { return appointmentErrorResponse(error) }
+}
+
+export async function DELETE(request: Request) {
+  try {
+    const { supabase, accountId } = await requireAccountModule('appointments', 'agent')
+    const url = new URL(request.url)
+    const id = url.searchParams.get('id') || ''
+    if (!id) return NextResponse.json({ error: 'Falta la cita a eliminar.' }, { status: 400 })
+    const { data, error } = await supabase.from('appointments').select('id, google_calendar_connection_id, google_calendar_event_id, specialist_id, assigned_agent_id').eq('id', id).eq('account_id', accountId).maybeSingle()
+    if (error) throw error
+    if (!data) return NextResponse.json({ error: 'La cita no existe.' }, { status: 404 })
+    // Best-effort: if the event was already removed directly in Google this simply no-ops.
+    await deleteGoogleEvent(accountId, data).catch((syncError) => {
+      console.error('[appointments] Failed to remove Google Calendar event on delete:', syncError)
+    })
+    const { error: deleteError } = await supabase.from('appointments').delete().eq('id', id).eq('account_id', accountId)
+    if (deleteError) throw deleteError
     return NextResponse.json({ success: true })
   } catch (error) { return appointmentErrorResponse(error) }
 }

@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { requireAccountModule } from '@/lib/account/modules'
 import { toErrorResponse } from '@/lib/auth/account'
-import { addGoogleCalendarConnection, googleAuthorizeUrl, googleCalendarConfigured, listGoogleCalendars, setDefaultGoogleCalendarConnection } from '@/lib/appointments/google-calendar'
+import { addGoogleCalendarConnection, googleAuthorizeUrl, googleCalendarConfigured, listGoogleCalendars, removeGoogleCalendarConnection, setDefaultGoogleCalendarConnection } from '@/lib/appointments/google-calendar'
 
 function admin() {
   return createAdminClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false } })
@@ -86,5 +86,16 @@ export async function POST(request: Request) {
     const { error } = await admin().from('google_calendar_oauth_attempts').insert({ state, account_id: accountId, user_id: userId, specialist_id: specialistId, redirect_uri: redirectUri, expires_at: new Date(Date.now() + 15 * 60_000).toISOString() })
     if (error) throw error
     return NextResponse.json({ authorize_url: googleAuthorizeUrl(redirectUri, state) })
+  } catch (error) { return toErrorResponse(error) }
+}
+
+export async function DELETE(request: Request) {
+  try {
+    const { accountId } = await requireAccountModule('appointments', 'admin')
+    const url = new URL(request.url)
+    const connectionId = url.searchParams.get('connection_id') || ''
+    if (!connectionId) return NextResponse.json({ error: 'Selecciona un calendario para desconectar.' }, { status: 400 })
+    await removeGoogleCalendarConnection(accountId, connectionId)
+    return NextResponse.json({ success: true })
   } catch (error) { return toErrorResponse(error) }
 }
