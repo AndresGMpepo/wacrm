@@ -65,6 +65,7 @@ function formatDate(value: string) {
 
 export function NexoMemoryPanel({ contactId }: { contactId: string }) {
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [memory, setMemory] = useState<Memory>(null);
   const [events, setEvents] = useState<MemoryEvent[]>([]);
   const [facts, setFacts] = useState<Fact[]>([]);
@@ -72,24 +73,32 @@ export function NexoMemoryPanel({ contactId }: { contactId: string }) {
 
   const load = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const response = await fetch(`/api/contacts/${contactId}/memory`, {
         cache: 'no-store',
       });
-      const payload = response.ok
-        ? ((await response.json()) as {
-            memory?: Memory;
-            events?: MemoryEvent[];
-            facts?: Fact[];
-            commitments?: Commitment[];
-          })
-        : null;
+      const payload = (await response.json().catch(() => null)) as {
+        memory?: Memory;
+        events?: MemoryEvent[];
+        facts?: Fact[];
+        commitments?: Commitment[];
+        error?: string;
+      } | null;
+      if (!response.ok)
+        throw new Error(payload?.error || 'No se pudo cargar Nexo Memory.');
       setMemory(payload?.memory ?? null);
       setEvents(payload?.events ?? []);
       setFacts(payload?.facts ?? []);
       setCommitments(payload?.commitments ?? []);
-    } catch {
+    } catch (error) {
       setMemory(null);
+      setEvents([]);
+      setFacts([]);
+      setCommitments([]);
+      setLoadError(
+        error instanceof Error ? error.message : 'No se pudo cargar Nexo Memory.'
+      );
     } finally {
       setLoading(false);
     }
@@ -129,16 +138,15 @@ export function NexoMemoryPanel({ contactId }: { contactId: string }) {
     (commitment) => commitment.status === 'pending'
   );
 
-  if (!memory && !events.length && !facts.length && !commitments.length)
-    return null;
-
   return (
     <div className="space-y-3 rounded-lg border p-3 text-sm">
       <div className="flex items-center gap-2 font-semibold">
         <Brain className="text-primary size-4" />
         Nexo Memory
       </div>
-      {memory ? (
+      {loadError ? (
+        <p className="text-destructive text-xs">{loadError}</p>
+      ) : memory ? (
         <div className="space-y-1.5 text-xs">
           {memory.current_summary ? (
             <p className="text-foreground">{memory.current_summary}</p>
