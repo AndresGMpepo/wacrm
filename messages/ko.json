@@ -368,6 +368,7 @@
         "custom": "커스텀 필드",
         "deals": "딜",
         "tags": "태그",
+        "memory": "Nexo Memory",
         "noTags": "태그 없음",
         "noDeals": "딜 없음",
         "addNotePlaceholder": "메모 추가..."

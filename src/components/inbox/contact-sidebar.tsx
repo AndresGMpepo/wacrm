@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { useTelephony } from '@/components/telephony/telephony-provider';
 import { ConversationInternalNotes } from './conversation-internal-notes';
+import { NexoMemoryPanel } from '@/components/contacts/nexo-memory-panel';
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { format } from "date-fns";
@@ -268,6 +269,11 @@ export function ContactSidebar({ contact, conversationId, internalNotesOpenSigna
               </div>
             )}
           </div>
+
+          {/* Divider */}
+          <div className="my-4 border-t border-border" />
+
+          <NexoMemoryPanel contactId={contact.id} />
 
           {/* Divider */}
           <div className="my-4 border-t border-border" />
