@@ -33,7 +33,7 @@ type MetaEntry = { id?: string; time?: number; messaging?: MetaMessaging[]; chan
 type MetaPayload = { object?: string; entry?: MetaEntry[] }
 type Connector = {
   id: string; account_id: string; provider: 'facebook' | 'instagram'; display_name: string; external_channel_id: string
-  meta_access_token: string | null; meta_app_secret: string | null; meta_verify_token: string | null; status: string
+  meta_access_token: string | null; meta_app_secret: string | null; meta_verify_token: string | null; status: string; queue_id: string | null
 }
 
 type MetaProfile = {
@@ -283,7 +283,7 @@ async function ingestMessage(db: ReturnType<typeof admin>, connector: Connector,
   if (!conversation) {
     const { data, error } = await db.from('conversations').insert({
       account_id: connector.account_id, user_id: auditUserId, contact_id: contactId, channel_type: connector.provider,
-      connector_id: connector.id, external_session_id: senderId, channel_source_label: connector.display_name,
+      connector_id: connector.id, external_session_id: senderId, channel_source_label: connector.display_name, queue_id: connector.queue_id,
     }).select('id, unread_count').single()
     if (error || !data) throw error ?? new Error('No se pudo crear la conversación Meta.')
     conversation = data
@@ -368,7 +368,7 @@ async function ingestComment(db: ReturnType<typeof admin>, connector: Connector,
       account_id: connector.account_id, user_id: auditUserId, contact_id: contactId, channel_type: connector.provider,
       connector_id: connector.id, external_session_id: sessionId,
       channel_source_label: `${connector.display_name} · Comentarios públicos`, social_comment_id: rootCommentId,
-      social_parent_comment_id: parentId || null, social_post_id: postId || null,
+      social_parent_comment_id: parentId || null, social_post_id: postId || null, queue_id: connector.queue_id,
     }).select('id, unread_count, social_comment_id').single()
     if (error || !data) throw error ?? new Error('No se pudo crear la conversación del comentario Meta.')
     conversation = data
@@ -440,7 +440,7 @@ export async function POST(request: Request) {
     if (payload.object !== 'page' && payload.object !== 'instagram') return NextResponse.json({ received: true, ignored: true })
     const ids = (payload.entry ?? []).map((entry) => entry.id?.trim()).filter((id): id is string => Boolean(id))
     const { data, error } = await db.from('omnichannel_connectors')
-      .select('id, account_id, provider, display_name, external_channel_id, meta_access_token, meta_app_secret, meta_verify_token, status')
+      .select('id, account_id, provider, display_name, external_channel_id, meta_access_token, meta_app_secret, meta_verify_token, status, queue_id')
       .in('provider', ['facebook', 'instagram']).in('external_channel_id', ids)
     if (error) throw error
     const connectors = (data ?? []) as Connector[]

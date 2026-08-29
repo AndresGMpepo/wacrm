@@ -320,7 +320,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
     const rawBody = await request.text()
     const event = JSON.parse(rawBody) as YeastarEvent
     const { data: connector, error: connectorError } = await db.from('omnichannel_connectors')
-      .select('id, account_id, provider, display_name, source_url, webhook_secret, status, outbound_pbx_url, outbound_api_client_id, outbound_api_client_secret')
+      .select('id, account_id, provider, display_name, source_url, webhook_secret, status, outbound_pbx_url, outbound_api_client_id, outbound_api_client_secret, queue_id')
       .eq('id', connectorId).eq('provider', 'yeastar_live_chat').maybeSingle()
     if (connectorError) throw connectorError
     if (!connector?.webhook_secret) return NextResponse.json({ error: 'Webhook no configurado.' }, { status: 404 })
@@ -413,6 +413,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
         external_session_id: sessionId,
         channel_source_label: connector.display_name,
         channel_source_url: connector.source_url,
+        queue_id: connector.queue_id,
       }).select('id, unread_count').single()
       if (createConversationError || !created) throw createConversationError ?? new Error('Could not create Live Chat conversation')
       conversation = created

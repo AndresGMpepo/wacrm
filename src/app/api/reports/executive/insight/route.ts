@@ -73,18 +73,34 @@ function parseInsight(raw: string): ExecutiveInsight {
   }
 }
 
-function isReport(value: unknown): value is ExecutiveReport {
-  if (!value || typeof value !== 'object') return false
-  const report = value as Partial<ExecutiveReport>
-  return Boolean(report.meta && report.operational && report.intelligence && report.commercial && Array.isArray(report.channels) && Array.isArray(report.agents) && report.campaigns)
-}
+const MAX_INSIGHT_RANGE_DAYS = 60
 
-function reportRange(report: ExecutiveReport) {
-  const { from, to } = report.meta.range
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) {
-    throw new AiError('El periodo del reporte no es válido.', { code: 'invalid_report_range', status: 400 })
+function parseInsightRange(from: unknown, to: unknown) {
+  if (typeof from !== 'string' || typeof to !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) {
+    throw new AiError('El periodo del dictamen no es válido.', { code: 'invalid_report_range', status: 400 })
+  }
+  const dayCount = Math.round((new Date(`${to}T00:00:00Z`).getTime() - new Date(`${from}T00:00:00Z`).getTime()) / 86_400_000) + 1
+  if (dayCount < 1 || dayCount > MAX_INSIGHT_RANGE_DAYS) {
+    throw new AiError(`El dictamen admite periodos de hasta ${MAX_INSIGHT_RANGE_DAYS} días.`, { code: 'invalid_report_range', status: 400 })
   }
   return { from, to }
+}
+
+/** The dictamen has its own (shorter) date range than the main dashboard —
+ *  fetches a fresh report for exactly that range instead of trusting
+ *  whatever the client last had loaded, reusing the executive report route's
+ *  existing worker-secret bypass instead of duplicating its aggregation logic. */
+async function fetchReportForRange(request: Request, accountId: string, range: { from: string; to: string }): Promise<ExecutiveReport> {
+  const secret = process.env.AI_ANALYSIS_WORKER_SECRET
+  if (!secret) throw new Error('Falta configurar AI_ANALYSIS_WORKER_SECRET en el servidor.')
+  const url = new URL('/api/reports/executive', request.url)
+  url.searchParams.set('account_id', accountId)
+  url.searchParams.set('from', range.from)
+  url.searchParams.set('to', range.to)
+  const response = await fetch(url, { headers: { 'x-report-worker-secret': secret }, cache: 'no-store' })
+  const payload = await response.json().catch(() => null) as ExecutiveReport & { error?: string } | null
+  if (!response.ok || !payload) throw new Error(payload && 'error' in payload ? String(payload.error) : 'No se pudo calcular el reporte para el dictamen.')
+  return payload
 }
 
 export async function GET(request: Request) {
@@ -116,19 +132,19 @@ export async function POST(request: Request) {
     const limit = checkRateLimit(`ai-report:${accountId}`, RATE_LIMITS.aiReportAccount)
     if (!limit.success) return rateLimitResponse(limit)
 
-    const body = await request.json().catch(() => null) as { report?: unknown } | null
-    if (!isReport(body?.report)) return NextResponse.json({ error: 'El reporte a analizar no es vÃ¡lido.' }, { status: 400 })
-    const report = body.report
-    const range = reportRange(report)
+    const body = await request.json().catch(() => null) as { from?: unknown; to?: unknown } | null
+    const range = parseInsightRange(body?.from, body?.to)
+    const report = await fetchReportForRange(request, accountId, range)
     const config = await loadAiConfig(supabase, accountId)
     if (!config) return NextResponse.json({ error: 'Configura y activa la IA de la cuenta antes de generar el dictamen.' }, { status: 400 })
 
     const systemPrompt = [
-      'Eres el comitÃ© ejecutivo de NexoOmni: especialista en direcciÃ³n, marketing, ventas, operaciÃ³n y experiencia de cliente.',
-      'Analiza Ãºnicamente los indicadores entregados. No inventes conversiones, causalidad, costos, ventas ni datos de clientes.',
-      'Responde exclusivamente JSON vÃ¡lido, sin markdown, con exactamente esta forma:',
+      'Eres el comité ejecutivo de NexoOmni: especialista en dirección, marketing, ventas, operación, calidad de agentes y experiencia de cliente.',
+      'Analiza únicamente los indicadores entregados. No inventes conversiones, causalidad, costos, ventas ni datos de clientes.',
+      'Responde exclusivamente JSON válido, sin markdown, con exactamente esta forma:',
       '{"headline":"...","summary":"...","priorities":[{"area":"operacion|comercial|marketing|experiencia","priority":"alta|media|baja","title":"...","recommendation":"...","rationale":"..."}],"risks":["..."],"opportunities":["..."],"indicators_to_watch":["..."],"data_note":"... o null"}',
-      'PropÃ³n entre 2 y 5 prioridades concretas, ordenadas por impacto. Distingue insuficiencia de datos de un mal resultado. Escribe en espaÃ±ol claro para direcciÃ³n.',
+      'Propón entre 2 y 5 prioridades concretas, ordenadas por impacto. Distingue insuficiencia de datos de un mal resultado. Escribe en español claro para dirección.',
+      'Incluye explícitamente en tu análisis (cuando haya datos suficientes): riesgos y oportunidades comerciales/operativos, tendencias frente al periodo anterior (new_conversations vs previous_new_conversations), calidad de agentes (average_qa_score general y por agente en "agents"), y si el objeto "appointments" trae datos, sus tasas de confirmación, cancelación, no-show, ocupación y conversión de conversación a cita.',
       `Perfil operativo de la empresa: ${report.meta.operating_mode}.`,
       config.systemPrompt ? `Contexto adicional de la empresa: ${config.systemPrompt}` : '',
     ].filter(Boolean).join('\n\n')

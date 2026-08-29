@@ -16,6 +16,7 @@ import { WhatsAppConfig } from '@/components/settings/whatsapp-config';
 import { ZernioConnectConfig } from '@/components/settings/zernio-connect-config';
 import { YeastarLiveChatConfig } from '@/components/settings/yeastar-live-chat-config';
 import { ConversationAssignmentConfig } from '@/components/settings/conversation-assignment-config';
+import { ConversationQueuesConfig } from '@/components/settings/conversation-queues-config';
 import { TelephonyConfig } from '@/components/settings/telephony-config';
 import { TemplateManager } from '@/components/settings/template-manager';
 import { QuickRepliesManager } from '@/components/settings/quick-replies-manager';
@@ -83,7 +84,7 @@ function SettingsPageInner() {
     whatsapp: <div className="space-y-6"><ZernioConnectConfig channels={['whatsapp']} /><WhatsAppConfig /></div>,
     'social-messaging': <div className="space-y-6"><ZernioConnectConfig channels={['facebook', 'instagram']} /></div>,
     'live-chat': <YeastarLiveChatConfig />,
-    assignment: <ConversationAssignmentConfig />,
+    assignment: <div><ConversationAssignmentConfig /><ConversationQueuesConfig /></div>,
     telephony: <TelephonyConfig />,
     templates: <TemplateManager />,
     'quick-replies': <QuickRepliesManager />,

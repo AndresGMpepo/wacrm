@@ -22,6 +22,7 @@ type ActionQueue = {
 }
 
 const PERIODS = [7, 30, 90] as const
+const INSIGHT_PERIODS = [8, 15, 30] as const
 const nf = new Intl.NumberFormat('es-MX')
 function dateOffset(days: number) { const date = new Date(); date.setDate(date.getDate() - days + 1); return date.toISOString().slice(0, 10) }
 function today() { return new Date().toISOString().slice(0, 10) }
@@ -39,6 +40,7 @@ export default function ReportsPage() {
   const [report, setReport] = useState<Report | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [insightDays, setInsightDays] = useState<number>(15)
   const [insight, setInsight] = useState<ExecutiveInsight | null>(null)
   const [insightGeneratedAt, setInsightGeneratedAt] = useState<string | null>(null)
   const [insightLoading, setInsightLoading] = useState(false)
@@ -53,12 +55,6 @@ export default function ReportsPage() {
       const payload = await response.json().catch(() => null) as Report & { error?: string }
       if (!response.ok) throw new Error(payload?.error ?? 'No se pudieron cargar los reportes.')
       setReport(payload)
-      const insightResponse = await fetch(`/api/reports/executive/insight?from=${payload.meta.range.from}&to=${payload.meta.range.to}`, { cache: 'no-store' })
-      const insightPayload = await insightResponse.json().catch(() => null) as { insight?: ExecutiveInsight | null; generated_at?: string | null }
-      if (!insightResponse.ok) throw new Error('No se pudo recuperar el último dictamen guardado.')
-      setInsight(insightPayload?.insight ?? null)
-      setInsightGeneratedAt(insightPayload?.generated_at ?? null)
-      setInsightError(null)
       try {
         const actionResponse = await fetch('/api/reports/action-queue', { cache: 'no-store' })
         const actionPayload = await actionResponse.json().catch(() => null) as ActionQueue & { error?: string }
@@ -73,15 +69,34 @@ export default function ReportsPage() {
   }
   useEffect(() => { void load() }, [days]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // The dictamen keeps its own (usually shorter) date range so switching the
+  // main dashboard period, or just navigating away and back, never clears it
+  // — it's whatever was last generated/saved for `insightDays`, independent
+  // of `days`.
+  const loadInsight = async () => {
+    try {
+      const from = dateOffset(insightDays)
+      const to = today()
+      const insightResponse = await fetch(`/api/reports/executive/insight?from=${from}&to=${to}`, { cache: 'no-store' })
+      const insightPayload = await insightResponse.json().catch(() => null) as { insight?: ExecutiveInsight | null; generated_at?: string | null }
+      if (!insightResponse.ok) throw new Error('No se pudo recuperar el último dictamen guardado.')
+      setInsight(insightPayload?.insight ?? null)
+      setInsightGeneratedAt(insightPayload?.generated_at ?? null)
+      setInsightError(null)
+    } catch (err) {
+      setInsightError(err instanceof Error ? err.message : 'No se pudo recuperar el último dictamen guardado.')
+    }
+  }
+  useEffect(() => { void loadInsight() }, [insightDays]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const generateInsight = async () => {
-    if (!report) return
     setInsightLoading(true)
     setInsightError(null)
     try {
       const response = await fetch('/api/reports/executive/insight', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ report }),
+        body: JSON.stringify({ from: dateOffset(insightDays), to: today() }),
       })
       const payload = await response.json().catch(() => null) as { insight?: ExecutiveInsight; generated_at?: string | null; error?: string }
       if (!response.ok || !payload?.insight) throw new Error(payload?.error ?? 'No se pudo generar el dictamen de IA.')
@@ -161,14 +176,28 @@ export default function ReportsPage() {
       <CardHeader className="gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <CardTitle className="flex items-center gap-2"><Sparkles className="size-4 text-primary" /> Dictamen IA para dirección</CardTitle>
-          <CardDescription className="mt-1">Lectura bajo demanda de los indicadores visibles. No ejecuta cambios ni envía mensajes; usa la IA configurada por esta empresa.</CardDescription>
+          <CardDescription className="mt-1">Lectura bajo demanda de riesgos, oportunidades, tendencias, calidad de agentes y citas. No ejecuta cambios ni envía mensajes; usa la IA configurada por esta empresa. Se guarda y no desaparece al cambiar de pestaña.</CardDescription>
         </div>
-        <Button size="sm" onClick={() => void generateInsight()} disabled={insightLoading}>
-          <Sparkles className={`size-4 ${insightLoading ? 'animate-pulse' : ''}`} />
-          {insightLoading ? 'Analizando…' : insight ? 'Actualizar dictamen' : 'Generar dictamen IA'}
-        </Button>
+        <div className="flex flex-col items-end gap-2">
+          <div className="flex rounded-lg border border-border bg-card p-1">
+            {INSIGHT_PERIODS.map((period) => (
+              <button
+                key={period}
+                type="button"
+                onClick={() => setInsightDays(period)}
+                className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${insightDays === period ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+              >
+                {period} días
+              </button>
+            ))}
+          </div>
+          <Button size="sm" onClick={() => void generateInsight()} disabled={insightLoading}>
+            <Sparkles className={`size-4 ${insightLoading ? 'animate-pulse' : ''}`} />
+            {insightLoading ? 'Analizando…' : insight ? 'Actualizar dictamen' : 'Generar dictamen IA'}
+          </Button>
+        </div>
       </CardHeader>
-      {insightGeneratedAt ? <p className="px-6 text-xs text-muted-foreground">Último dictamen guardado: {new Intl.DateTimeFormat('es-MX', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(insightGeneratedAt))}. Se conserva al salir o recargar esta página.</p> : null}
+      {insightGeneratedAt ? <p className="px-6 text-xs text-muted-foreground">Último dictamen guardado para los últimos {insightDays} días: {new Intl.DateTimeFormat('es-MX', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(insightGeneratedAt))}. Se conserva al salir o recargar esta página.</p> : null}
       {insight ? <CardContent className="space-y-5">
         <div><p className="font-semibold text-foreground">{insight.headline}</p><p className="mt-1 text-sm leading-6 text-muted-foreground">{insight.summary}</p></div>
         <div className="grid gap-3 lg:grid-cols-2">
@@ -222,8 +251,10 @@ export default function ReportsPage() {
       </Card>
     </div>
 
-    <div className="grid gap-6 xl:grid-cols-2"><Card><CardHeader><CardTitle>Carga y respuesta por agente</CardTitle><CardDescription>Ayuda a redistribuir atención antes de que una cola se convierta en incidencia.</CardDescription></CardHeader><CardContent className="space-y-2">{report.agents.map((agent) => <div key={agent.id} className="flex items-center justify-between gap-4 rounded-lg border border-border px-3 py-2.5"><div className="min-w-0"><p className="truncate text-sm font-medium text-foreground">{agent.name}</p><p className="text-xs text-muted-foreground">{agent.open_conversations} chats abiertos</p></div><span className="shrink-0 text-sm text-muted-foreground">{minutes(agent.first_response_minutes)}</span></div>)}</CardContent></Card>
+    <div className="grid gap-6 xl:grid-cols-2"><Card><CardHeader><CardTitle>Carga y respuesta por agente</CardTitle><CardDescription>Ayuda a redistribuir atención antes de que una cola se convierta en incidencia.</CardDescription></CardHeader><CardContent className="space-y-2">{report.agents.map((agent) => <div key={agent.id} className="flex items-center justify-between gap-4 rounded-lg border border-border px-3 py-2.5"><div className="min-w-0"><p className="truncate text-sm font-medium text-foreground">{agent.name}</p><p className="text-xs text-muted-foreground">{agent.open_conversations} chats abiertos{agent.average_qa_score !== null ? ` · QA ${agent.average_qa_score}/100` : ''}</p></div><span className="shrink-0 text-sm text-muted-foreground">{minutes(agent.first_response_minutes)}</span></div>)}</CardContent></Card>
       <Card><CardHeader><CardTitle className="flex items-center gap-2"><Megaphone className="size-4 text-primary" /> Campañas del periodo</CardTitle><CardDescription>Entrega, lectura, respuesta y resultados de los tratos atribuidos manualmente.</CardDescription></CardHeader><CardContent className="space-y-4"><div className="grid grid-cols-4 gap-2 text-center"><div className="rounded-lg bg-muted p-2"><p className="text-lg font-semibold">{ratio(report.campaigns.delivery_rate)}</p><p className="text-[11px] text-muted-foreground">entrega</p></div><div className="rounded-lg bg-muted p-2"><p className="text-lg font-semibold">{ratio(report.campaigns.read_rate)}</p><p className="text-[11px] text-muted-foreground">lectura</p></div><div className="rounded-lg bg-muted p-2"><p className="text-lg font-semibold">{ratio(report.campaigns.reply_rate)}</p><p className="text-[11px] text-muted-foreground">respuesta</p></div><div className="rounded-lg bg-primary/10 p-2"><p className="text-lg font-semibold text-primary">{report.commercial.attributed_deals}</p><p className="text-[11px] text-muted-foreground">tratos atribuidos</p></div></div>{report.campaigns.items.length === 0 ? <p className="text-sm text-muted-foreground">No se crearon ni atribuyeron campañas en este periodo.</p> : report.campaigns.items.slice(0, 4).map((campaign) => <div key={campaign.id} className="flex items-center justify-between gap-3 text-sm"><div className="min-w-0"><Link href={`/broadcasts/${campaign.id}`} className="block truncate font-medium text-foreground hover:text-primary hover:underline">{campaign.name}</Link><p className="truncate text-xs text-muted-foreground">{campaign.template_name}</p></div><span className="shrink-0 text-muted-foreground">{campaign.attributed_won_deals} ganados · {ratio(campaign.reply_rate)} respuesta</span></div>)}</CardContent></Card></div>
+
+    {report.appointments && report.appointments.total > 0 ? <Card><CardHeader><CardTitle className="flex items-center gap-2"><CheckCircle2 className="size-4 text-primary" /> Citas del periodo</CardTitle><CardDescription>Confirmación, cancelación, no-show, ocupación y conversión de conversación a cita.</CardDescription></CardHeader><CardContent><div className="grid grid-cols-2 gap-3 sm:grid-cols-5"><div className="rounded-lg bg-muted p-3 text-center"><p className="text-lg font-semibold text-foreground">{ratio(report.appointments.confirmation_rate)}</p><p className="text-[11px] text-muted-foreground">confirmación</p></div><div className="rounded-lg bg-muted p-3 text-center"><p className="text-lg font-semibold text-red-400">{ratio(report.appointments.cancellation_rate)}</p><p className="text-[11px] text-muted-foreground">cancelación</p></div><div className="rounded-lg bg-muted p-3 text-center"><p className="text-lg font-semibold text-amber-400">{ratio(report.appointments.no_show_rate)}</p><p className="text-[11px] text-muted-foreground">no-show</p></div><div className="rounded-lg bg-muted p-3 text-center"><p className="text-lg font-semibold text-emerald-400">{ratio(report.appointments.occupancy_rate)}</p><p className="text-[11px] text-muted-foreground">ocupación</p></div><div className="rounded-lg bg-primary/10 p-3 text-center"><p className="text-lg font-semibold text-primary">{ratio(report.appointments.conversion_rate)}</p><p className="text-[11px] text-muted-foreground">conversión desde chat</p></div></div><p className="mt-3 text-xs text-muted-foreground">{report.appointments.total} citas en el periodo · {report.appointments.completed} completadas · {report.appointments.cancelled} canceladas · {report.appointments.no_show} sin asistir.</p></CardContent></Card> : null}
 
     <Card>
       <CardHeader>

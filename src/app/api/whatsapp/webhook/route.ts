@@ -311,7 +311,8 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
           // inserts that need it for NOT NULL FK compliance. Always
           // the admin who saved the WhatsApp config.
           config.user_id,
-          decryptedAccessToken
+          decryptedAccessToken,
+          config.queue_id ?? null
         )
       }
     }
@@ -587,7 +588,8 @@ async function processMessage(
   // (contacts, conversations). Always the admin who saved the
   // WhatsApp config; the choice is arbitrary post-017 but stable.
   configOwnerUserId: string,
-  accessToken: string
+  accessToken: string,
+  queueId: string | null
 ) {
   const senderPhone = normalizePhone(message.from)
   const contactName = contact.profile.name
@@ -606,7 +608,8 @@ async function processMessage(
   const convResult = await findOrCreateConversation(
     accountId,
     configOwnerUserId,
-    contactRecord.id
+    contactRecord.id,
+    queueId
   )
   if (!convResult) return
   const conversation = convResult.conversation
@@ -1079,6 +1082,7 @@ async function findOrCreateConversation(
   accountId: string,
   configOwnerUserId: string,
   contactId: string,
+  queueId: string | null,
 ) {
   // Look for an existing conversation in this account, oldest-first.
   //
@@ -1120,6 +1124,7 @@ async function findOrCreateConversation(
       user_id: configOwnerUserId,
       contact_id: contactId,
       channel_type: 'whatsapp',
+      queue_id: queueId,
     })
     .select()
     .single()

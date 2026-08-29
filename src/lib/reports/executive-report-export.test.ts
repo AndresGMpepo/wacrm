@@ -6,7 +6,7 @@ const report: ExecutiveReport = {
   meta: { operating_mode: 'hybrid', currency: 'MXN', range: { from: '2026-08-01', to: '2026-08-07', days: 7 }, response_metrics_capped: false },
   operational: { new_conversations: 12, previous_new_conversations: 9, open_backlog: 3, resolved: 8, first_response_minutes: 4, first_response_samples: 9 },
   channels: [{ channel: '=WhatsApp', conversations: 12, resolved: 8, first_response_minutes: 4 }],
-  agents: [{ id: 'agent-1', name: '+Agente', open_conversations: 1, first_response_minutes: 3, measured_responses: 4 }],
+  agents: [{ id: 'agent-1', name: '+Agente', open_conversations: 1, first_response_minutes: 3, measured_responses: 4, average_qa_score: 91 }],
   intelligence: { analyzed: 10, negative: 1, negative_rate: 10, average_sentiment_score: 72, average_qa_score: 89 },
   commercial: {
     open_pipeline_value: 15000, open_deals: 2, won_deals: 1, lost_deals: 0, won_value: 9000,

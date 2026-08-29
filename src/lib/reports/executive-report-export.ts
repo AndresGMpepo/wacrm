@@ -2,7 +2,7 @@ export type ExecutiveReport = {
   meta: { operating_mode: 'commercial' | 'support' | 'hybrid'; currency: string; range: { from: string; to: string; days: number }; response_metrics_capped: boolean }
   operational: { new_conversations: number; previous_new_conversations: number; open_backlog: number; resolved: number; first_response_minutes: number | null; first_response_samples: number }
   channels: { channel: string; conversations: number; resolved: number; first_response_minutes: number | null }[]
-  agents: { id: string; name: string; open_conversations: number; first_response_minutes: number | null; measured_responses: number }[]
+  agents: { id: string; name: string; open_conversations: number; first_response_minutes: number | null; measured_responses: number; average_qa_score: number | null }[]
   intelligence: { analyzed: number; negative: number; negative_rate: number | null; average_sentiment_score: number | null; average_qa_score: number | null }
   commercial: {
     open_pipeline_value: number; open_deals: number; won_deals: number; lost_deals: number; won_value: number
@@ -19,6 +19,19 @@ export type ExecutiveReport = {
     average_opportunity_score: number | null
     overdue_commitments: number
     top_objections: { objection: string; count: number }[]
+  }
+  appointments?: {
+    total: number
+    scheduled: number
+    confirmed: number
+    completed: number
+    cancelled: number
+    no_show: number
+    confirmation_rate: number | null
+    cancellation_rate: number | null
+    no_show_rate: number | null
+    occupancy_rate: number | null
+    conversion_rate: number | null
   }
 }
 

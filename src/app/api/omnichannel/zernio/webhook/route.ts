@@ -17,6 +17,7 @@ type Connector = {
   provider: `zernio_${ZernioChannel}`
   display_name: string
   zernio_account_id: string | null
+  queue_id: string | null
 }
 
 function admin() {
@@ -220,7 +221,7 @@ export async function POST(request: Request) {
 
       const { data: connector, error: connectorError } = await db
         .from('omnichannel_connectors')
-        .select('id, account_id, provider, display_name, zernio_account_id')
+        .select('id, account_id, provider, display_name, zernio_account_id, queue_id')
         .eq('provider', `zernio_${channel}`)
         .eq('zernio_account_id', zernioAccountId)
         .neq('status', 'paused')
@@ -311,7 +312,7 @@ export async function POST(request: Request) {
       if (!conversationRow) {
         const { data, error } = await db
           .from('conversations')
-          .insert({ account_id: typed.account_id, user_id: auditUserId, contact_id: contactId, channel_type: typed.provider, connector_id: typed.id, external_session_id: externalConversationId, channel_source_label: typed.display_name })
+          .insert({ account_id: typed.account_id, user_id: auditUserId, contact_id: contactId, channel_type: typed.provider, connector_id: typed.id, external_session_id: externalConversationId, channel_source_label: typed.display_name, queue_id: typed.queue_id })
           .select('id, unread_count')
           .single()
         if (error || !data) throw error ?? new Error('No se pudo crear la conversación entrante.')
