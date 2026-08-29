@@ -132,6 +132,22 @@ export default function AppointmentsPage() {
   const [connectingGoogle, setConnectingGoogle] = useState(false);
   const [syncingId, setSyncingId] = useState<string | null>(null);
 
+  const memberName = (userId: string | null) =>
+    members.find((member) => member.user_id === userId)?.full_name ||
+    'Responsable sin nombre';
+  const selectedCalendarSource = googleConnections.find(
+    (connection) => connection.id === calendarSourceId
+  );
+  const calendarsAvailableToAdd = availableGoogleCalendars.filter(
+    (calendar) =>
+      !googleConnections.some(
+        (connection) =>
+          connection.calendar_id === calendar.id &&
+          connection.assigned_agent_id ===
+            (selectedCalendarSource?.assigned_agent_id ?? null)
+      )
+  );
+
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
@@ -216,7 +232,12 @@ export default function AppointmentsPage() {
             calendars.find(
               (calendar) =>
                 !googleConnections.some(
-                  (connection) => connection.calendar_id === calendar.id
+                  (connection) =>
+                    connection.calendar_id === calendar.id &&
+                    connection.assigned_agent_id ===
+                      (googleConnections.find(
+                        (connection) => connection.id === connectionId
+                      )?.assigned_agent_id ?? null)
                 )
             )?.id ||
             ''
@@ -330,6 +351,24 @@ export default function AppointmentsPage() {
     const start = new Date(startsAt);
     if (!Number.isNaN(start.getTime()))
       setEndsAt(localDateTime(new Date(start.getTime() + value * 60_000)));
+  }
+
+  function updateAssignedAgent(value: string) {
+    setAssignedAgentId(value);
+    const specialistCalendar = googleConnections.find(
+      (connection) =>
+        connection.assigned_agent_id === (value || null) &&
+        connection.is_default
+    );
+    const anySpecialistCalendar = googleConnections.find(
+      (connection) => connection.assigned_agent_id === (value || null)
+    );
+    const generalCalendar = googleConnections.find(
+      (connection) => !connection.assigned_agent_id && connection.is_default
+    );
+    setGoogleCalendarConnectionId(
+      specialistCalendar?.id || anySpecialistCalendar?.id || generalCalendar?.id || ''
+    );
   }
 
   async function saveAppointment(event: FormEvent) {
@@ -544,8 +583,9 @@ export default function AppointmentsPage() {
                 value={googleAssigneeId}
                 onChange={(event) => setGoogleAssigneeId(event.target.value)}
                 className="border-input h-9 rounded-lg border bg-transparent px-2 text-sm"
+                aria-label="Conectar calendario para"
               >
-                <option value="">Calendario general</option>
+                <option value="">Calendario general de la empresa</option>
                 {members.map((member) => (
                   <option key={member.user_id} value={member.user_id}>
                     {member.full_name || 'Responsable sin nombre'}
@@ -562,9 +602,11 @@ export default function AppointmentsPage() {
                 ) : (
                   <Link2 />
                 )}
-                {googleConnectionCount
-                  ? 'Reconectar Google'
-                  : 'Conectar Google Calendar'}
+                {googleAssigneeId
+                  ? 'Conectar calendario del especialista'
+                  : googleConnectionCount
+                    ? 'Conectar otra cuenta Google'
+                    : 'Conectar calendario general'}
               </Button>
             </>
           ) : null}
@@ -588,6 +630,12 @@ export default function AppointmentsPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
+            <p className="rounded-lg border border-primary/25 bg-primary/5 p-3 text-xs text-muted-foreground">
+              Para conectar la cuenta Google de un médico o especialista, elígelo
+              en el selector superior y pulsa <strong>Conectar calendario del especialista</strong>.
+              Para añadir calendarios compartidos que viven en la misma cuenta
+              Google, usa el selector inferior.
+            </p>
             <div className="space-y-2">
               {googleConnections.map((connection) => (
                 <div
@@ -601,8 +649,8 @@ export default function AppointmentsPage() {
                     </p>
                     <p className="text-muted-foreground text-xs">
                       {connection.assigned_agent_id
-                        ? 'Calendario de un responsable'
-                        : 'Calendario general'}
+                        ? `Especialista: ${memberName(connection.assigned_agent_id)}`
+                        : 'Calendario general de la empresa'}
                       {connection.last_error
                         ? ` · Error de sincronización: ${connection.last_error}`
                         : connection.last_synced_at

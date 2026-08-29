@@ -25,7 +25,10 @@ export function googleCalendarConfigured() {
 
 export function googleAuthorizeUrl(redirectUri: string, state: string) {
   const { clientId } = credentials()
-  const params = new URLSearchParams({ client_id: clientId, redirect_uri: redirectUri, response_type: 'code', access_type: 'offline', prompt: 'consent', scope: 'https://www.googleapis.com/auth/calendar', state })
+  // Always show Google's account picker. This prevents a specialist calendar
+  // connection from silently reusing the account already selected for the
+  // organisation's general calendar.
+  const params = new URLSearchParams({ client_id: clientId, redirect_uri: redirectUri, response_type: 'code', access_type: 'offline', prompt: 'consent select_account', scope: 'https://www.googleapis.com/auth/calendar', state })
   return `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`
 }
 
@@ -163,7 +166,7 @@ export async function listGoogleCalendars(accountId: string, connectionId: strin
   return (result.items ?? []).map((calendar) => ({ id: calendar.id, summary: calendar.summary || calendar.id, primary: calendar.primary === true }))
 }
 
-export async function addGoogleCalendarConnection(accountId: string, sourceConnectionId: string, calendarId: string) {
+export async function addGoogleCalendarConnection(accountId: string, sourceConnectionId: string, calendarId: string, targetAssignedAgentId?: string | null) {
   const db = admin()
   const { data: source, error } = await db.from('google_calendar_connections').select('id, account_id, assigned_agent_id, calendar_id, encrypted_access_token, encrypted_refresh_token, access_token_expires_at, sync_token').eq('id', sourceConnectionId).eq('account_id', accountId).maybeSingle<GoogleConnection>()
   if (error) throw error
@@ -171,10 +174,16 @@ export async function addGoogleCalendarConnection(accountId: string, sourceConne
   const calendars = await listGoogleCalendars(accountId, sourceConnectionId)
   const calendar = calendars.find((item) => item.id === calendarId)
   if (!calendar) throw new Error('Ese calendario no pertenece a la cuenta Google conectada.')
-  const { data: existing, error: existingError } = await db.from('google_calendar_connections').select('id').eq('account_id', accountId).eq('calendar_id', calendarId).eq('assigned_agent_id', source.assigned_agent_id).maybeSingle()
+  // A resource calendar visible from one connected Google account (e.g. a
+  // clinic's shared Workspace) can be attributed to any responsable in
+  // NexoOmni, not only the one that authorized the source connection.
+  const targetAgent = targetAssignedAgentId !== undefined ? targetAssignedAgentId : source.assigned_agent_id
+  let existingQuery = db.from('google_calendar_connections').select('id').eq('account_id', accountId).eq('calendar_id', calendarId)
+  existingQuery = targetAgent ? existingQuery.eq('assigned_agent_id', targetAgent) : existingQuery.is('assigned_agent_id', null)
+  const { data: existing, error: existingError } = await existingQuery.maybeSingle()
   if (existingError) throw existingError
   if (existing) return existing
-  const { data, error: insertError } = await db.from('google_calendar_connections').insert({ account_id: accountId, assigned_agent_id: source.assigned_agent_id, calendar_id: calendar.id, display_name: calendar.summary, is_default: false, encrypted_access_token: source.encrypted_access_token, encrypted_refresh_token: source.encrypted_refresh_token, access_token_expires_at: source.access_token_expires_at, connected_by: null, connected_at: new Date().toISOString() }).select('id').single()
+  const { data, error: insertError } = await db.from('google_calendar_connections').insert({ account_id: accountId, assigned_agent_id: targetAgent, calendar_id: calendar.id, display_name: calendar.summary, is_default: false, encrypted_access_token: source.encrypted_access_token, encrypted_refresh_token: source.encrypted_refresh_token, access_token_expires_at: source.access_token_expires_at, connected_by: null, connected_at: new Date().toISOString() }).select('id').single()
   if (insertError) throw insertError
   return data
 }

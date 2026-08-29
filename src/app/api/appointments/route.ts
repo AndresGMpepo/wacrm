@@ -14,40 +14,12 @@ function date(value: unknown) {
   function appointmentErrorResponse(error: unknown) {
     const databaseError = error as { code?: string; message?: string } | null
     if (databaseError?.code === '42P01' || databaseError?.code === '42703') {
-      return NextResponse.json({ error: 'La base de datos aún no tiene la actualización de Agenda. Aplica las migraciones 091 a 095 y vuelve a intentar.' }, { status: 503 })
+      return NextResponse.json({ error: 'La base de datos aún no tiene la actualización de Agenda. Aplica las migraciones 091 a 094 y vuelve a intentar.' }, { status: 503 })
     }
     return toErrorResponse(error)
   }
 
   type AppointmentRow = { assigned_agent_id: string | null; [key: string]: unknown }
-
-  async function writeAudit(
-    supabase: Awaited<ReturnType<typeof requireAccountModule>>['supabase'],
-    accountId: string,
-    appointmentId: string,
-    userId: string,
-    action: string,
-    beforeData: Record<string, unknown> | null,
-    afterData: Record<string, unknown>,
-  ) {
-    const { error } = await supabase.from('appointment_audit_log').insert({ account_id: accountId, appointment_id: appointmentId, actor_user_id: userId, source: 'nexoomni', action, before_data: beforeData, after_data: afterData })
-    if (error && error.code !== '42P01') throw error
-  }
-
-  async function validateCalendarConnection(
-    supabase: Awaited<ReturnType<typeof requireAccountModule>>['supabase'],
-    accountId: string,
-    connectionId: unknown,
-    assignedAgentId: string | null,
-  ) {
-    if (connectionId === undefined) return undefined
-    if (connectionId === null) return null
-    if (typeof connectionId !== 'string') throw new Error('Calendario invÃ¡lido.')
-    const { data, error } = await supabase.from('google_calendar_connections').select('id, assigned_agent_id').eq('id', connectionId).eq('account_id', accountId).maybeSingle()
-    if (error) throw error
-    if (!data || (data.assigned_agent_id && data.assigned_agent_id !== assignedAgentId)) throw new Error('El calendario no corresponde al responsable de la cita.')
-    return data.id
-  }
 
   async function withAgents(
     supabase: Awaited<ReturnType<typeof requireAccountModule>>['supabase'],
@@ -62,40 +34,20 @@ function date(value: unknown) {
     return appointments.map((appointment) => ({ ...appointment, agent: appointment.assigned_agent_id ? agents.get(appointment.assigned_agent_id) ?? null : null }))
   }
 
-  async function withLatestAudit(
+  /** A chosen calendar must belong to this account and match the appointment's own scope (a specific
+   *  responsable, or the general/no-responsable scope) — otherwise a doctor's private calendar could
+   *  be picked for someone else's appointment. */
+  async function validGoogleConnectionId(
     supabase: Awaited<ReturnType<typeof requireAccountModule>>['supabase'],
     accountId: string,
-    appointments: AppointmentRow[],
+    connectionId: string,
+    scopeAgentId: string | null,
   ) {
-    const appointmentIds = appointments.map((appointment) => typeof appointment.id === 'string' ? appointment.id : '').filter(Boolean)
-    if (!appointmentIds.length) return appointments
-    const { data, error } = await supabase.from('appointment_audit_log')
-      .select('appointment_id, actor_user_id, source, action, created_at')
-      .eq('account_id', accountId).in('appointment_id', appointmentIds)
-      .order('created_at', { ascending: false })
-    // Appointments stay visible while the audit migration is being applied.
-    if (error?.code === '42P01') return appointments
+    let query = supabase.from('google_calendar_connections').select('id').eq('id', connectionId).eq('account_id', accountId)
+    query = scopeAgentId ? query.eq('assigned_agent_id', scopeAgentId) : query.is('assigned_agent_id', null)
+    const { data, error } = await query.maybeSingle()
     if (error) throw error
-    const latestByAppointment = new Map<string, { actor_user_id: string | null; source: string; action: string; created_at: string }>()
-    for (const item of data ?? []) if (!latestByAppointment.has(item.appointment_id)) latestByAppointment.set(item.appointment_id, item)
-    const actorIds = [...new Set([...latestByAppointment.values()].map((item) => item.actor_user_id).filter((id): id is string => Boolean(id)))]
-    const { data: actors, error: actorsError } = actorIds.length
-      ? await supabase.from('profiles').select('user_id, full_name').eq('account_id', accountId).in('user_id', actorIds)
-      : { data: [], error: null }
-    if (actorsError) throw actorsError
-    const actorNames = new Map((actors ?? []).map((actor) => [actor.user_id, actor.full_name]))
-    return appointments.map((appointment) => {
-      const audit = latestByAppointment.get(appointment.id as string)
-      return {
-        ...appointment,
-        latest_audit: audit ? {
-          source: audit.source,
-          action: audit.action,
-          created_at: audit.created_at,
-          actor_name: audit.actor_user_id ? actorNames.get(audit.actor_user_id) ?? null : null,
-        } : null,
-      }
-    })
+    return Boolean(data)
   }
 
 export async function GET(request: Request) {
@@ -105,11 +57,10 @@ export async function GET(request: Request) {
     const from = date(url.searchParams.get('from')) ?? new Date(Date.now() - 7 * 86_400_000).toISOString()
     const to = date(url.searchParams.get('to')) ?? new Date(Date.now() + 30 * 86_400_000).toISOString()
     const { data, error } = await supabase.from('appointments')
-      .select('id, contact_id, assigned_agent_id, title, notes, starts_at, ends_at, timezone, status, google_calendar_connection_id, google_sync_status, google_sync_error, created_at, contact:contacts(name, phone)')
+      .select('id, contact_id, assigned_agent_id, title, notes, starts_at, ends_at, timezone, status, google_sync_status, google_sync_error, google_calendar_connection_id, created_at, contact:contacts(name, phone)')
       .eq('account_id', accountId).gte('starts_at', from).lt('starts_at', to).order('starts_at')
     if (error) throw error
-    const withPeople = await withAgents(supabase, accountId, (data ?? []) as AppointmentRow[])
-    return NextResponse.json({ appointments: await withLatestAudit(supabase, accountId, withPeople) })
+    return NextResponse.json({ appointments: await withAgents(supabase, accountId, (data ?? []) as AppointmentRow[]) })
   } catch (error) { return appointmentErrorResponse(error) }
 }
 
@@ -131,17 +82,19 @@ export async function POST(request: Request) {
     if (agentResult.error) throw agentResult.error
     if (contactId && !contactResult.data) return NextResponse.json({ error: 'El contacto no pertenece a esta cuenta.' }, { status: 400 })
     if (!agentResult.data) return NextResponse.json({ error: 'El responsable no está activo en esta cuenta.' }, { status: 400 })
-    const calendarConnectionId = await validateCalendarConnection(supabase, accountId, body?.google_calendar_connection_id, assignedAgentId)
+    const googleCalendarConnectionId = typeof body?.google_calendar_connection_id === 'string' ? body.google_calendar_connection_id : null
+    if (googleCalendarConnectionId && !await validGoogleConnectionId(supabase, accountId, googleCalendarConnectionId, assignedAgentId)) {
+      return NextResponse.json({ error: 'Ese calendario de Google no está disponible para este responsable.' }, { status: 400 })
+    }
     const { data, error } = await supabase.from('appointments').insert({
       account_id: accountId, created_by: userId, title, starts_at: startsAt, ends_at: endsAt,
       contact_id: contactId,
       assigned_agent_id: assignedAgentId,
+      google_calendar_connection_id: googleCalendarConnectionId,
       notes: typeof body?.notes === 'string' ? body.notes.trim().slice(0, 2000) || null : null,
       timezone: typeof body?.timezone === 'string' ? body.timezone.slice(0, 80) : 'UTC',
-      google_calendar_connection_id: calendarConnectionId ?? null,
-    }).select('id, title, notes, starts_at, ends_at, timezone, status, google_calendar_event_id, google_sync_status, google_sync_error, assigned_agent_id, contact:contacts(name, phone)').single()
+    }).select('id, title, notes, starts_at, ends_at, timezone, status, google_calendar_event_id, google_calendar_connection_id, google_sync_status, google_sync_error, assigned_agent_id, contact:contacts(name, phone)').single()
     if (error) throw error
-    await writeAudit(supabase, accountId, data.id, userId, 'created', null, data)
     await syncGoogleAppointment(accountId, data).catch(async (syncError) => {
       console.error('[appointments] Google Calendar sync failed:', syncError)
       await supabase.from('appointments').update({ google_sync_status: 'failed', google_sync_error: syncError instanceof Error ? syncError.message.slice(0, 500) : 'Error desconocido de Google Calendar.' }).eq('id', data.id).eq('account_id', accountId)
@@ -153,7 +106,7 @@ export async function POST(request: Request) {
 
 export async function PATCH(request: Request) {
   try {
-    const { supabase, accountId, userId } = await requireAccountModule('appointments', 'agent')
+    const { supabase, accountId } = await requireAccountModule('appointments', 'agent')
     const body = await request.json().catch(() => null) as Record<string, unknown> | null
     const id = typeof body?.id === 'string' ? body.id : ''
     const status = typeof body?.status === 'string' && (STATUSES as readonly string[]).includes(body.status) ? body.status : null
@@ -162,9 +115,6 @@ export async function PATCH(request: Request) {
     const endsAt = body?.ends_at === undefined ? undefined : date(body.ends_at)
     if ((body?.starts_at !== undefined && !startsAt) || (body?.ends_at !== undefined && !endsAt)) return NextResponse.json({ error: 'Fecha u hora inválida.' }, { status: 400 })
     if (startsAt && endsAt && new Date(endsAt) <= new Date(startsAt)) return NextResponse.json({ error: 'La hora final debe ser posterior a la inicial.' }, { status: 400 })
-    const { data: before, error: beforeError } = await supabase.from('appointments').select('id, assigned_agent_id, title, notes, starts_at, ends_at, timezone, status, google_calendar_connection_id, google_calendar_event_id').eq('id', id).eq('account_id', accountId).maybeSingle()
-    if (beforeError) throw beforeError
-    if (!before) return NextResponse.json({ error: 'La cita no existe.' }, { status: 404 })
     const update: Record<string, unknown> = {}
     if (status) update.status = status
     if (typeof body?.title === 'string' && body.title.trim()) update.title = body.title.trim().slice(0, 160)
@@ -186,21 +136,21 @@ export async function PATCH(request: Request) {
       if (!member) return NextResponse.json({ error: 'El responsable no está activo en esta cuenta.' }, { status: 400 })
       update.assigned_agent_id = body.assigned_agent_id
     }
-    if (body?.google_calendar_connection_id !== undefined) {
-      const selectedAgentId = typeof update.assigned_agent_id === 'string' ? update.assigned_agent_id : before.assigned_agent_id
-      update.google_calendar_connection_id = await validateCalendarConnection(supabase, accountId, body.google_calendar_connection_id, selectedAgentId)
-      if (update.google_calendar_connection_id !== before.google_calendar_connection_id && before.google_calendar_event_id) {
-        // The event identifier belongs to the previous Google calendar. Clearing it
-        // creates a fresh event in the newly chosen calendar instead of PATCHing a
-        // non-existent event and leaving the appointment out of sync.
-        update.google_calendar_event_id = null
+    if (typeof body?.google_calendar_connection_id === 'string' || body?.google_calendar_connection_id === null) {
+      if (typeof body.google_calendar_connection_id === 'string') {
+        const { data: current, error } = await supabase.from('appointments').select('assigned_agent_id').eq('id', id).eq('account_id', accountId).maybeSingle()
+        if (error) throw error
+        const scopeAgentId = typeof update.assigned_agent_id === 'string' ? update.assigned_agent_id : current?.assigned_agent_id ?? null
+        if (!await validGoogleConnectionId(supabase, accountId, body.google_calendar_connection_id, scopeAgentId)) {
+          return NextResponse.json({ error: 'Ese calendario de Google no está disponible para este responsable.' }, { status: 400 })
+        }
       }
+      update.google_calendar_connection_id = body.google_calendar_connection_id
     }
     if (!Object.keys(update).length) return NextResponse.json({ error: 'No hay cambios para guardar.' }, { status: 400 })
     const { data, error } = await supabase.from('appointments').update(update).eq('id', id).eq('account_id', accountId).select('id, title, notes, starts_at, ends_at, timezone, status, google_calendar_event_id, google_calendar_connection_id, assigned_agent_id, contact:contacts(name, phone)').maybeSingle()
     if (error) throw error
     if (!data) return NextResponse.json({ error: 'La cita no existe.' }, { status: 404 })
-    await writeAudit(supabase, accountId, data.id, userId, status ? `status_${status}` : 'updated', before, data)
     await syncGoogleAppointment(accountId, data).catch(async (syncError) => {
       console.error('[appointments] Google Calendar sync failed:', syncError)
       await supabase.from('appointments').update({ google_sync_status: 'failed', google_sync_error: syncError instanceof Error ? syncError.message.slice(0, 500) : 'Error desconocido de Google Calendar.' }).eq('id', data.id).eq('account_id', accountId)

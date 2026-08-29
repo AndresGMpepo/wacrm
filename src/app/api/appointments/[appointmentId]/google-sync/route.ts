@@ -8,7 +8,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ ap
     const { appointmentId } = await params
     const { supabase, accountId } = await requireAccountModule('appointments', 'agent')
     const { data, error } = await supabase.from('appointments')
-      .select('id, title, notes, starts_at, ends_at, timezone, status, google_calendar_event_id, assigned_agent_id, contact:contacts(name, phone)')
+      .select('id, title, notes, starts_at, ends_at, timezone, status, google_calendar_event_id, google_calendar_connection_id, assigned_agent_id, contact:contacts(name, phone)')
       .eq('id', appointmentId).eq('account_id', accountId).maybeSingle()
     if (error) throw error
     if (!data) return NextResponse.json({ error: 'La cita no existe.' }, { status: 404 })
