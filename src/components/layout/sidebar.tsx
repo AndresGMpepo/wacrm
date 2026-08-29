@@ -10,6 +10,7 @@ import { useUnreadNotifications } from "@/hooks/use-unread-notifications";
 import { usePendingCallTasks } from "@/hooks/use-pending-call-tasks";
 import {
   Bell,
+  Brain,
   Building2,
   ChartNoAxesCombined,
   Bot,
@@ -102,7 +103,7 @@ const navItems: NavItem[] = [
   { href: "/dashboard", labelKey: "dashboard", icon: LayoutDashboard },
   { href: "/inbox", labelKey: "inbox", icon: MessageSquare },
   { href: "/notifications", labelKey: "notifications", icon: Bell },
-  { href: "/call-tasks", labelKey: "callTasks", icon: PhoneCall },
+  { href: "/call-tasks", labelKey: "callTasks", icon: Brain },
   { href: "/contacts", labelKey: "contacts", icon: Users },
   { href: "/pipelines", labelKey: "pipelines", icon: GitBranch, module: 'pipelines' },
   { href: "/appointments", labelKey: "appointments", icon: CalendarDays, module: 'appointments' },
