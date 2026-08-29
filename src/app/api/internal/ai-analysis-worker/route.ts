@@ -137,13 +137,31 @@ export async function POST(request: Request) {
   }
   const mediaResult = await processMediaJobs(db)
   const followUps = await processCallFollowUps(db)
+  const overdueCommitments = await markOverdueCommitments(db)
   let googleCalendar: Awaited<ReturnType<typeof syncGoogleCalendarChanges>> | null = null
   try {
     googleCalendar = await syncGoogleCalendarChanges()
   } catch (error) {
     console.error('[appointments] Google Calendar inbound sync could not start:', error)
   }
-  return NextResponse.json({ completed, skipped, failed, media: mediaResult, follow_ups: followUps, google_calendar: googleCalendar })
+  return NextResponse.json({ completed, skipped, failed, media: mediaResult, follow_ups: followUps, overdue_commitments: overdueCommitments, google_calendar: googleCalendar })
+}
+
+/** A commitment ("enviar cotización el viernes") that's still 'pending' past its
+ *  due date is a broken promise — flag it automatically so Nexo Memory and the
+ *  executive action queue surface it without waiting for the next AI analysis. */
+async function markOverdueCommitments(db: ReturnType<typeof supabaseAdmin>) {
+  const today = new Date().toISOString().slice(0, 10)
+  const { data, error } = await db.from('contact_commitments')
+    .update({ status: 'overdue', updated_at: new Date().toISOString() })
+    .eq('status', 'pending')
+    .lt('due_date', today)
+    .select('id')
+  if (error) {
+    console.error('[nexo-memory] Failed to mark overdue commitments:', error)
+    return { marked: 0 }
+  }
+  return { marked: data?.length ?? 0 }
 }
 
 async function processCallFollowUps(db: ReturnType<typeof supabaseAdmin>) {

@@ -116,7 +116,7 @@ export async function GET(request: Request) {
     const range = parseRange(url)
     const db = admin()
 
-    const [accountResult, conversationResult, previousConversationResult, backlogResult, resolvedResult, profilesResult, openConversationsResult, analysesResult, dealsResult, openDealsResult, broadcastsResult] = await Promise.all([
+    const [accountResult, conversationResult, previousConversationResult, backlogResult, resolvedResult, profilesResult, openConversationsResult, analysesResult, dealsResult, openDealsResult, broadcastsResult, contactMemoryResult, contactObjectionsResult, overdueCommitmentsResult] = await Promise.all([
       db.from('accounts').select('operating_mode, default_currency').eq('id', accountId).single(),
       db.from('conversations').select('id, assigned_agent_id, status, channel_type, created_at').eq('account_id', accountId).gte('created_at', range.from).lt('created_at', range.toExclusive).order('created_at'),
       db.from('conversations').select('*', { count: 'exact', head: true }).eq('account_id', accountId).gte('created_at', range.previousFrom).lt('created_at', range.previousToExclusive),
@@ -128,9 +128,15 @@ export async function GET(request: Request) {
       db.from('deals').select('value, status, updated_at, source_broadcast_id, source_channel, stage:pipeline_stages(name, position)').eq('account_id', accountId).gte('updated_at', range.from).lt('updated_at', range.toExclusive),
       db.from('deals').select('value').eq('account_id', accountId).eq('status', 'open'),
       db.from('broadcasts').select('id, name, template_name, status, created_at, total_recipients, sent_count, delivered_count, read_count, replied_count, failed_count').eq('account_id', accountId).gte('created_at', range.from).lt('created_at', range.toExclusive).order('created_at', { ascending: false }).limit(12),
+      // Nexo Memory is a live snapshot ("current state of the relationship"),
+      // not date-ranged like the rest of this report — a contact's risk
+      // doesn't reset just because the report window changed.
+      db.from('contact_memory').select('risk_level, opportunity_score').eq('account_id', accountId),
+      db.from('contact_facts').select('fact').eq('account_id', accountId).eq('category', 'objection').eq('status', 'active').limit(2_000),
+      db.from('contact_commitments').select('id', { count: 'exact', head: true }).eq('account_id', accountId).eq('status', 'overdue'),
     ])
 
-    for (const result of [accountResult, conversationResult, previousConversationResult, backlogResult, resolvedResult, profilesResult, openConversationsResult, analysesResult, dealsResult, openDealsResult, broadcastsResult]) {
+    for (const result of [accountResult, conversationResult, previousConversationResult, backlogResult, resolvedResult, profilesResult, openConversationsResult, analysesResult, dealsResult, openDealsResult, broadcastsResult, contactMemoryResult, contactObjectionsResult, overdueCommitmentsResult]) {
       if (result.error) throw result.error
     }
 
@@ -258,6 +264,14 @@ export async function GET(request: Request) {
     const account = accountResult.data
     if (!account) throw new Error('Account not found')
     const mode = (account.operating_mode === 'commercial' || account.operating_mode === 'support' || account.operating_mode === 'hybrid' ? account.operating_mode : 'hybrid') as OperatingMode
+
+    const memoryRows = (contactMemoryResult.data ?? []) as Array<{ risk_level: string | null; opportunity_score: number | null }>
+    const opportunityScores = memoryRows.map((row) => row.opportunity_score).filter((value): value is number => typeof value === 'number')
+    const objectionCounts = new Map<string, number>()
+    for (const row of (contactObjectionsResult.data ?? []) as Array<{ fact: string }>) {
+      objectionCounts.set(row.fact, (objectionCounts.get(row.fact) ?? 0) + 1)
+    }
+
     return NextResponse.json({
       meta: {
         operating_mode: mode,
@@ -314,6 +328,15 @@ export async function GET(request: Request) {
           attributed_won_value: attributionByBroadcast.get(campaign.id)?.won_value ?? 0,
           attributed_pipeline_value: attributionByBroadcast.get(campaign.id)?.pipeline_value ?? 0,
         })),
+      },
+      nexo_memory: {
+        contacts_with_memory: memoryRows.length,
+        high_risk_count: memoryRows.filter((row) => row.risk_level === 'high').length,
+        medium_risk_count: memoryRows.filter((row) => row.risk_level === 'medium').length,
+        low_risk_count: memoryRows.filter((row) => row.risk_level === 'low').length,
+        average_opportunity_score: opportunityScores.length ? Math.round(opportunityScores.reduce((sum, value) => sum + value, 0) / opportunityScores.length) : null,
+        overdue_commitments: overdueCommitmentsResult.count ?? 0,
+        top_objections: [...objectionCounts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 5).map(([objection, count]) => ({ objection, count })),
       },
     })
   } catch (error) {

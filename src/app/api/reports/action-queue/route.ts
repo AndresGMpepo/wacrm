@@ -32,7 +32,7 @@ export async function GET() {
     const { supabase, accountId } = await requireRole('admin')
     const staleBefore = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
 
-    const [analysesResult, followUpsResult, dealsResult] = await Promise.all([
+    const [analysesResult, followUpsResult, dealsResult, overdueCommitmentsResult, highRiskResult] = await Promise.all([
       supabase
         .from('ai_conversation_analyses')
         .select('conversation_id, sentiment_score, qa_score, next_best_action, updated_at')
@@ -57,10 +57,26 @@ export async function GET() {
         .lt('updated_at', staleBefore)
         .order('updated_at', { ascending: true })
         .limit(8),
+      supabase
+        .from('contact_commitments')
+        .select('id, description, owner, due_date, contact:contacts(name, phone)')
+        .eq('account_id', accountId)
+        .eq('status', 'overdue')
+        .order('due_date', { ascending: true })
+        .limit(8),
+      supabase
+        .from('contact_memory')
+        .select('contact_id, risk_level, opportunity_score, next_best_action, updated_at, contact:contacts(name, phone)')
+        .eq('account_id', accountId)
+        .eq('risk_level', 'high')
+        .order('updated_at', { ascending: false })
+        .limit(8),
     ])
     if (analysesResult.error) throw analysesResult.error
     if (followUpsResult.error) throw followUpsResult.error
     if (dealsResult.error) throw dealsResult.error
+    if (overdueCommitmentsResult.error) throw overdueCommitmentsResult.error
+    if (highRiskResult.error) throw highRiskResult.error
 
     // A conversation may have many historical negative analyses. One latest
     // item is enough for action and prevents duplicate cards in the queue.
@@ -118,6 +134,20 @@ export async function GET() {
         expected_close_date: deal.expected_close_date,
         updated_at: deal.updated_at,
         stage_name: contactName(deal.stage as unknown as ContactRelation),
+      })),
+      overdue_commitments: (overdueCommitmentsResult.data ?? []).map((commitment) => ({
+        id: commitment.id,
+        contact_name: contactName(commitment.contact as ContactRelation),
+        description: commitment.description,
+        owner: commitment.owner,
+        due_date: commitment.due_date,
+      })),
+      high_risk_contacts: (highRiskResult.data ?? []).map((memory) => ({
+        contact_id: memory.contact_id,
+        contact_name: contactName(memory.contact as ContactRelation),
+        opportunity_score: memory.opportunity_score,
+        next_best_action: memory.next_best_action,
+        updated_at: memory.updated_at,
       })),
     })
   } catch (error) {

@@ -11,6 +11,15 @@ export type ExecutiveReport = {
   }
   funnel: { stage: string; position: number; deals: number; won_deals: number; lost_deals: number; open_deals: number; value: number; won_value: number }[]
   campaigns: { totals: { recipients: number; sent: number; delivered: number; read: number; replied: number; failed: number }; delivery_rate: number | null; read_rate: number | null; reply_rate: number | null; items: { id: string; name: string; template_name: string; status: string; created_at: string; total_recipients: number | null; sent_count: number | null; delivered_count: number | null; read_count: number | null; replied_count: number | null; failed_count: number | null; delivery_rate: number | null; read_rate: number | null; reply_rate: number | null; attributed_deals: number; attributed_won_deals: number; attributed_won_value: number; attributed_pipeline_value: number }[] }
+  nexo_memory?: {
+    contacts_with_memory: number
+    high_risk_count: number
+    medium_risk_count: number
+    low_risk_count: number
+    average_opportunity_score: number | null
+    overdue_commitments: number
+    top_objections: { objection: string; count: number }[]
+  }
 }
 
 export type ExecutiveReportInsight = {
