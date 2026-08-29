@@ -159,6 +159,17 @@ export async function POST(request: Request) {
         { status: 500 },
       )
     }
+    // The dashboard only ever lists APPROVED templates, but this endpoint
+    // is also reachable directly (public API, MCP server) with any
+    // template name — enforce the same rule here so a PENDING/REJECTED
+    // template can never go out and risk the WhatsApp number's quality
+    // rating with Meta.
+    if (rawTemplateRow && rawTemplateRow.status !== 'APPROVED') {
+      return NextResponse.json(
+        { error: `Template "${template_name}" is not approved by Meta (status: ${rawTemplateRow.status}).` },
+        { status: 400 },
+      )
+    }
     const templateRow = rawTemplateRow ?? null
 
     const results: BroadcastResult[] = []

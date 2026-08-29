@@ -7,6 +7,7 @@ import { supabaseAdmin } from '@/lib/ai/admin-client'
 import { AiError } from '@/lib/ai/types'
 import { logAiUsage } from '@/lib/ai/usage'
 import { checkRateLimit, rateLimitResponse, RATE_LIMITS } from '@/lib/rate-limit'
+import { buildExecutiveReport, computeRange } from '@/lib/reports/build-executive-report'
 import type { ExecutiveReport } from '@/lib/reports/executive-report-export'
 
 type InsightArea = 'operacion' | 'comercial' | 'marketing' | 'experiencia'
@@ -87,20 +88,12 @@ function parseInsightRange(from: unknown, to: unknown) {
 }
 
 /** The dictamen has its own (shorter) date range than the main dashboard —
- *  fetches a fresh report for exactly that range instead of trusting
- *  whatever the client last had loaded, reusing the executive report route's
- *  existing worker-secret bypass instead of duplicating its aggregation logic. */
-async function fetchReportForRange(request: Request, accountId: string, range: { from: string; to: string }): Promise<ExecutiveReport> {
-  const secret = process.env.AI_ANALYSIS_WORKER_SECRET
-  if (!secret) throw new Error('Falta configurar AI_ANALYSIS_WORKER_SECRET en el servidor.')
-  const url = new URL('/api/reports/executive', request.url)
-  url.searchParams.set('account_id', accountId)
-  url.searchParams.set('from', range.from)
-  url.searchParams.set('to', range.to)
-  const response = await fetch(url, { headers: { 'x-report-worker-secret': secret }, cache: 'no-store' })
-  const payload = await response.json().catch(() => null) as ExecutiveReport & { error?: string } | null
-  if (!response.ok || !payload) throw new Error(payload && 'error' in payload ? String(payload.error) : 'No se pudo calcular el reporte para el dictamen.')
-  return payload
+ *  computes a fresh report for exactly that range instead of trusting
+ *  whatever the client last had loaded. Calls the same in-process builder
+ *  the executive report route uses, rather than an HTTP self-fetch (which
+ *  can fail depending on how the app is proxied/deployed). */
+async function fetchReportForRange(accountId: string, range: { from: string; to: string }): Promise<ExecutiveReport> {
+  return buildExecutiveReport(accountId, computeRange(range.from, range.to)) as unknown as Promise<ExecutiveReport>
 }
 
 export async function GET(request: Request) {
@@ -134,7 +127,7 @@ export async function POST(request: Request) {
 
     const body = await request.json().catch(() => null) as { from?: unknown; to?: unknown } | null
     const range = parseInsightRange(body?.from, body?.to)
-    const report = await fetchReportForRange(request, accountId, range)
+    const report = await fetchReportForRange(accountId, range)
     const config = await loadAiConfig(supabase, accountId)
     if (!config) return NextResponse.json({ error: 'Configura y activa la IA de la cuenta antes de generar el dictamen.' }, { status: 400 })
 

@@ -372,6 +372,16 @@ export async function sendMessageToConversation(
         500
       );
     }
+    // Same rule as the broadcast endpoint: never let a PENDING/REJECTED
+    // template go out just because the caller knew its name (manual send,
+    // automations, MCP server) — it would risk the number's quality rating.
+    if (data && data.status !== 'APPROVED') {
+      throw new SendMessageError(
+        'template_not_approved',
+        `Template "${templateName}" is not approved by Meta (status: ${data.status}).`,
+        400
+      );
+    }
     templateRow = data ?? null;
   }
 
