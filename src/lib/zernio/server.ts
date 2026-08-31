@@ -201,6 +201,47 @@ function secureUrl(value: unknown) {
   }
 }
 
+function isBlockedMediaHostname(hostname: string) {
+  const normalized = hostname.toLowerCase().replace(/\.$/, '')
+  return normalized === 'localhost' || normalized.endsWith('.localhost') ||
+    normalized === '0.0.0.0' || normalized === '::1' ||
+    /^127\./.test(normalized) || /^10\./.test(normalized) ||
+    /^192\.168\./.test(normalized) || /^169\.254\./.test(normalized) ||
+    /^172\.(1[6-9]|2\d|3[0-1])\./.test(normalized)
+}
+
+/** Downloads an inbound Zernio attachment according to its platform contract. */
+export async function downloadZernioInboundMedia(urlValue: string, channel: ZernioChannel) {
+  const url = new URL(urlValue)
+  if (url.protocol !== 'https:' || isBlockedMediaHostname(url.hostname)) {
+    throw new Error('La URL de medio entrante de Zernio no es segura.')
+  }
+
+  const base = new URL(apiUrl())
+  const authenticatedWhatsAppMedia = channel === 'whatsapp'
+  if (authenticatedWhatsAppMedia) {
+    const apiPath = base.pathname.replace(/\/$/, '')
+    if (url.origin !== base.origin || !url.pathname.startsWith(`${apiPath}/whatsapp/media/`)) {
+      throw new Error('La URL de medio de WhatsApp no pertenece a Zernio.')
+    }
+  }
+
+  const response = await fetch(url, {
+    headers: authenticatedWhatsAppMedia ? { Authorization: `Bearer ${apiKey()}` } : undefined,
+    redirect: 'error',
+    signal: AbortSignal.timeout(15_000),
+  })
+  if (!response.ok) throw new Error(`No se pudo descargar el medio de Zernio (${response.status}).`)
+  const declaredLength = Number(response.headers.get('content-length'))
+  const maxBytes = 15 * 1024 * 1024
+  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+    throw new Error('El medio de Zernio supera el máximo de 15 MB para análisis.')
+  }
+  const bytes = Buffer.from(await response.arrayBuffer())
+  if (bytes.length > maxBytes) throw new Error('El medio de Zernio supera el máximo de 15 MB para análisis.')
+  return { bytes, mimeType: response.headers.get('content-type') || null }
+}
+
 /** Read the customer avatar maintained by Zernio's unified inbox. */
 export async function getZernioParticipantPicture(conversationId: string, zernioAccountId: string) {
   const query = new URLSearchParams({ accountId: zernioAccountId })

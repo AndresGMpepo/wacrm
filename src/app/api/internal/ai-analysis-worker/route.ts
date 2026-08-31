@@ -6,7 +6,8 @@ import { logAiUsage } from '@/lib/ai/usage'
 import { supabaseAdmin } from '@/lib/ai/admin-client'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { downloadMedia, getMediaUrl } from '@/lib/whatsapp/meta-api'
-import { describeImageWithOpenAi, transcribeAudioWithOpenAi } from '@/lib/ai/media-analysis'
+import { downloadZernioInboundMedia, type ZernioChannel } from '@/lib/zernio/server'
+import { describeImageWithOpenAi, downloadPublicMedia, transcribeAudioWithOpenAi } from '@/lib/ai/media-analysis'
 import { aiRequestTimeoutMs } from '@/lib/ai/defaults'
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
 import { syncGoogleCalendarChanges } from '@/lib/appointments/google-calendar'
@@ -16,7 +17,7 @@ import { alertCommitmentOverdue, alertStaleProspect, sendDailyNexoMemoryDigest }
 export const maxDuration = 60
 
 type Job = { id: string; account_id: string; conversation_id: string; conversation: { contact_id: string } | { contact_id: string }[] | null }
-type MediaJob = Job & { message_id: string; kind: 'image' | 'voice_note' }
+type MediaJob = { id: string; account_id: string; conversation_id: string; message_id: string; kind: 'image' | 'voice_note'; conversation: { channel_type: string | null } | { channel_type: string | null }[] | null }
 
 function startOfDay() { const d = new Date(); d.setHours(0, 0, 0, 0); return d.toISOString() }
 function startOfMonth() { const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); return d.toISOString() }
@@ -254,7 +255,7 @@ async function processCallFollowUps(db: ReturnType<typeof supabaseAdmin>) {
 async function processMediaJobs(db: ReturnType<typeof supabaseAdmin>) {
   const { data: jobs, error } = await db
     .from('ai_media_analysis_jobs')
-    .select('id, account_id, conversation_id, message_id, kind')
+    .select('id, account_id, conversation_id, message_id, kind, conversation:conversations(channel_type)')
     .eq('status', 'queued')
     .order('created_at')
     .limit(3)
@@ -287,9 +288,45 @@ async function processMediaJobs(db: ReturnType<typeof supabaseAdmin>) {
         .eq('id', job.message_id).eq('conversation_id', job.conversation_id).maybeSingle()
       const match = typeof message?.media_url === 'string' ? message.media_url.match(/^\/api\/whatsapp\/media\/([^/?#]+)$/) : null
       const storagePath = chatMediaStoragePath(message?.media_url)
-      if (!message || message.sender_type !== 'customer' || (!match?.[1] && !storagePath)) {
+      const conversation = Array.isArray(job.conversation) ? job.conversation[0] : job.conversation
+      const channelType = conversation?.channel_type
+      const zernioChannel = channelType?.startsWith('zernio_')
+        ? channelType.slice('zernio_'.length) as ZernioChannel
+        : null
+      const directCdnChannel = zernioChannel || (channelType === 'facebook' || channelType === 'instagram' ? channelType : null)
+      if (!message || message.sender_type !== 'customer' || (!match?.[1] && !storagePath && !directCdnChannel)) {
         await finishMediaJob(db, job, 'skipped_unsupported', 'El medio ya no está disponible para análisis.', 'skipped')
         skipped++; continue
+      }
+      if (zernioChannel && ['whatsapp', 'facebook', 'instagram'].includes(zernioChannel)) {
+        const downloaded = await downloadZernioInboundMedia(message.media_url!, zernioChannel)
+        const mimeType = downloaded.mimeType || (job.kind === 'image' ? 'image/jpeg' : 'audio/ogg')
+        const value = job.kind === 'image'
+          ? await describeImageWithOpenAi({ apiKey: config.apiKey, model: config.imageAnalysisModel ?? 'gpt-4.1-mini', bytes: downloaded.bytes, mimeType, timeoutMs: aiRequestTimeoutMs() })
+          : await transcribeAudioWithOpenAi({ apiKey: config.apiKey, model: config.voiceTranscriptionModel ?? 'gpt-4o-mini-transcribe', bytes: downloaded.bytes, mimeType, timeoutMs: aiRequestTimeoutMs() })
+        const messagePatch = job.kind === 'image'
+          ? { media_analysis_status: 'completed', media_description: value, media_transcript: null, media_analyzed_at: new Date().toISOString(), media_analysis_error: null }
+          : { media_analysis_status: 'completed', media_transcript: value, media_description: null, media_analyzed_at: new Date().toISOString(), media_analysis_error: null }
+        const { error: messageError } = await db.from('messages').update(messagePatch).eq('id', job.message_id)
+        if (messageError) throw messageError
+        await db.from('ai_media_analysis_jobs').update({ status: 'completed', error_message: null }).eq('id', job.id)
+        await db.rpc('queue_ai_analysis_job', { p_account_id: job.account_id, p_conversation_id: job.conversation_id, p_trigger: 'manual', p_delay: '0 minutes' })
+        completed++; continue
+      }
+      if (directCdnChannel) {
+        const downloaded = await downloadPublicMedia(message.media_url!)
+        const mimeType = downloaded.mimeType || (job.kind === 'image' ? 'image/jpeg' : 'audio/ogg')
+        const value = job.kind === 'image'
+          ? await describeImageWithOpenAi({ apiKey: config.apiKey, model: config.imageAnalysisModel ?? 'gpt-4.1-mini', bytes: downloaded.bytes, mimeType, timeoutMs: aiRequestTimeoutMs() })
+          : await transcribeAudioWithOpenAi({ apiKey: config.apiKey, model: config.voiceTranscriptionModel ?? 'gpt-4o-mini-transcribe', bytes: downloaded.bytes, mimeType, timeoutMs: aiRequestTimeoutMs() })
+        const messagePatch = job.kind === 'image'
+          ? { media_analysis_status: 'completed', media_description: value, media_transcript: null, media_analyzed_at: new Date().toISOString(), media_analysis_error: null }
+          : { media_analysis_status: 'completed', media_transcript: value, media_description: null, media_analyzed_at: new Date().toISOString(), media_analysis_error: null }
+        const { error: messageError } = await db.from('messages').update(messagePatch).eq('id', job.message_id)
+        if (messageError) throw messageError
+        await db.from('ai_media_analysis_jobs').update({ status: 'completed', error_message: null }).eq('id', job.id)
+        await db.rpc('queue_ai_analysis_job', { p_account_id: job.account_id, p_conversation_id: job.conversation_id, p_trigger: 'manual', p_delay: '0 minutes' })
+        completed++; continue
       }
       if (storagePath) {
         const { data: blob, error: storageError } = await db.storage.from('chat-media').download(storagePath)

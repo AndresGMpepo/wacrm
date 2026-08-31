@@ -8,6 +8,15 @@ const MAX_MEDIA_BYTES = 15 * 1024 * 1024
 const IMAGE_ANALYSIS_MODEL = process.env.OPENAI_IMAGE_MODEL || 'gpt-4.1-mini'
 const AUDIO_TRANSCRIPTION_MODEL = process.env.OPENAI_TRANSCRIPTION_MODEL || 'gpt-4o-mini-transcribe'
 
+function isBlockedMediaHostname(hostname: string) {
+  const normalized = hostname.toLowerCase().replace(/\.$/, '')
+  return normalized === 'localhost' || normalized.endsWith('.localhost') ||
+    normalized === '0.0.0.0' || normalized === '::1' ||
+    /^127\./.test(normalized) || /^10\./.test(normalized) ||
+    /^192\.168\./.test(normalized) || /^169\.254\./.test(normalized) ||
+    /^172\.(1[6-9]|2\d|3[0-1])\./.test(normalized)
+}
+
 function textFromChatCompletion(data: unknown): string {
   const value = data as { choices?: Array<{ message?: { content?: string | Array<{ text?: string }> } }> }
   const content = value.choices?.[0]?.message?.content
@@ -22,6 +31,28 @@ function assertSize(bytes: Buffer) {
   if (bytes.length > MAX_MEDIA_BYTES) {
     throw new AiError('El archivo supera el máximo de 15 MB para análisis.', { code: 'media_too_large', status: 400 })
   }
+}
+
+/** Download a direct CDN attachment from a trusted connected channel. */
+export async function downloadPublicMedia(urlValue: string): Promise<{ bytes: Buffer; mimeType: string | null }> {
+  const url = new URL(urlValue)
+  if (url.protocol !== 'https:' || isBlockedMediaHostname(url.hostname)) {
+    throw new AiError('La URL del medio no es segura.', { code: 'unsupported_media_url', status: 400 })
+  }
+  let response: Response
+  try {
+    response = await fetch(url, { redirect: 'error', signal: AbortSignal.timeout(15_000) })
+  } catch (error) {
+    throw new AiError(error instanceof Error ? error.message : 'No se pudo descargar el medio.', { code: 'network_error' })
+  }
+  if (!response.ok) throw new AiError(`No se pudo descargar el medio (${response.status}).`, { code: 'provider_error', status: response.status })
+  const length = Number(response.headers.get('content-length'))
+  if (Number.isFinite(length) && length > MAX_MEDIA_BYTES) {
+    throw new AiError('El archivo supera el máximo de 15 MB para análisis.', { code: 'media_too_large', status: 400 })
+  }
+  const bytes = Buffer.from(await response.arrayBuffer())
+  assertSize(bytes)
+  return { bytes, mimeType: response.headers.get('content-type') }
 }
 
 export async function describeImageWithOpenAi(args: {

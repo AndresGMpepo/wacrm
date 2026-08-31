@@ -37,6 +37,9 @@ const MASKED_KEY = '••••••••••••••••';
 // Radix Select can't use an empty-string item value, so the "leave
 // unassigned" choice gets a sentinel that maps to null in the payload.
 const HANDOFF_QUEUE = '__queue__';
+const ANALYSIS_MODEL_IDS = ['gpt-5-mini', 'gpt-4.1-mini'];
+const IMAGE_MODEL_IDS = ['gpt-4.1-mini', 'gpt-5-mini'];
+const TRANSCRIPTION_MODEL_IDS = ['gpt-4o-mini-transcribe', 'gpt-4o-transcribe'];
 
 export function AiConfig() {
   const { accountId, accountRole, profileLoading } = useAuth();
@@ -507,49 +510,43 @@ export function AiConfig() {
           <CardContent className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="ai-analysis-model">Análisis, memoria, sentimiento y QA</Label>
-              <Input
-                id="ai-analysis-model"
-                list="ai-text-model-options"
-                value={analysisModel}
-                onChange={(e) => setAnalysisModel(e.target.value)}
-                disabled={disabled}
-              />
+              <Select value={ANALYSIS_MODEL_IDS.includes(analysisModel) ? analysisModel : '__custom__'} onValueChange={(value) => setAnalysisModel(value === '__custom__' ? '' : value ?? 'gpt-5-mini')} disabled={disabled}>
+                <SelectTrigger id="ai-analysis-model" className="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="gpt-5-mini">gpt-5-mini — recomendado</SelectItem>
+                  <SelectItem value="gpt-4.1-mini">gpt-4.1-mini — menor costo</SelectItem>
+                  <SelectItem value="__custom__">Otro modelo…</SelectItem>
+                </SelectContent>
+              </Select>
+              {!ANALYSIS_MODEL_IDS.includes(analysisModel) && <Input value={analysisModel} onChange={(e) => setAnalysisModel(e.target.value)} placeholder="ID del modelo personalizado" disabled={disabled} />}
               <p className="text-xs text-muted-foreground">Recomendado: gpt-5-mini.</p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="ai-image-model">Descripción de imágenes</Label>
-              <Input
-                id="ai-image-model"
-                list="ai-vision-model-options"
-                value={imageAnalysisModel}
-                onChange={(e) => setImageAnalysisModel(e.target.value)}
-                disabled={disabled}
-              />
+              <Select value={IMAGE_MODEL_IDS.includes(imageAnalysisModel) ? imageAnalysisModel : '__custom__'} onValueChange={(value) => setImageAnalysisModel(value === '__custom__' ? '' : value ?? 'gpt-4.1-mini')} disabled={disabled}>
+                <SelectTrigger id="ai-image-model" className="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="gpt-4.1-mini">gpt-4.1-mini — recomendado</SelectItem>
+                  <SelectItem value="gpt-5-mini">gpt-5-mini — mayor razonamiento</SelectItem>
+                  <SelectItem value="__custom__">Otro modelo…</SelectItem>
+                </SelectContent>
+              </Select>
+              {!IMAGE_MODEL_IDS.includes(imageAnalysisModel) && <Input value={imageAnalysisModel} onChange={(e) => setImageAnalysisModel(e.target.value)} placeholder="ID del modelo personalizado" disabled={disabled} />}
               <p className="text-xs text-muted-foreground">Recomendado: gpt-4.1-mini.</p>
             </div>
             <div className="space-y-2 sm:col-span-2">
               <Label htmlFor="ai-transcription-model">Transcripción de notas de voz</Label>
-              <Input
-                id="ai-transcription-model"
-                list="ai-transcription-model-options"
-                value={voiceTranscriptionModel}
-                onChange={(e) => setVoiceTranscriptionModel(e.target.value)}
-                disabled={disabled}
-              />
+              <Select value={TRANSCRIPTION_MODEL_IDS.includes(voiceTranscriptionModel) ? voiceTranscriptionModel : '__custom__'} onValueChange={(value) => setVoiceTranscriptionModel(value === '__custom__' ? '' : value ?? 'gpt-4o-mini-transcribe')} disabled={disabled}>
+                <SelectTrigger id="ai-transcription-model" className="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="gpt-4o-mini-transcribe">gpt-4o-mini-transcribe — recomendado</SelectItem>
+                  <SelectItem value="gpt-4o-transcribe">gpt-4o-transcribe — mayor precisión</SelectItem>
+                  <SelectItem value="__custom__">Otro modelo…</SelectItem>
+                </SelectContent>
+              </Select>
+              {!TRANSCRIPTION_MODEL_IDS.includes(voiceTranscriptionModel) && <Input value={voiceTranscriptionModel} onChange={(e) => setVoiceTranscriptionModel(e.target.value)} placeholder="ID del modelo personalizado" disabled={disabled} />}
               <p className="text-xs text-muted-foreground">Para notas de voz en español, gpt-4o-mini-transcribe ofrece el mejor costo-beneficio. Usa gpt-4o-transcribe si necesitas priorizar precisión.</p>
             </div>
-            <datalist id="ai-text-model-options">
-              <option value="gpt-5-mini" />
-              <option value="gpt-4.1-mini" />
-            </datalist>
-            <datalist id="ai-vision-model-options">
-              <option value="gpt-4.1-mini" />
-              <option value="gpt-5-mini" />
-            </datalist>
-            <datalist id="ai-transcription-model-options">
-              <option value="gpt-4o-mini-transcribe" />
-              <option value="gpt-4o-transcribe" />
-            </datalist>
           </CardContent>
         </Card>
 
