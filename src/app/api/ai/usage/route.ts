@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { requireRole, toErrorResponse } from '@/lib/auth/account'
 import { daysAgoStart, lastNDayKeys, localDayKey } from '@/lib/dashboard/date-utils'
+import { supabaseAdmin } from '@/lib/ai/admin-client'
 
 // Rows are aggregated in-process over a bounded window. An active
 // account writes a handful of rows per conversation, so 30 days sits
@@ -12,7 +13,7 @@ const DEFAULT_WINDOW_DAYS = 30
 
 interface UsageRow {
   created_at: string
-  mode: 'auto_reply' | 'draft' | 'analysis' | 'report'
+  mode: 'auto_reply' | 'draft' | 'analysis' | 'report' | 'call_summary'
   provider: string
   model: string
   prompt_tokens: number
@@ -30,7 +31,11 @@ interface UsageRow {
  */
 export async function GET(request: Request) {
   try {
-    const { supabase, accountId } = await requireRole('admin')
+    const { accountId } = await requireRole('admin')
+    // The role has already been enforced above. Use the server client for
+    // billing-class aggregates so this dashboard never depends on a browser
+    // session's RLS refresh state.
+    const supabase = supabaseAdmin()
 
     const url = new URL(request.url)
     const rawDays = Number(url.searchParams.get('days'))
@@ -84,6 +89,7 @@ export async function GET(request: Request) {
       draft: { calls: 0, tokens: 0 },
       analysis: { calls: 0, tokens: 0 },
       report: { calls: 0, tokens: 0 },
+      call_summary: { calls: 0, tokens: 0 },
     }
     const modelMap = new Map<
       string,

@@ -1656,7 +1656,7 @@
     },
     "aiConfig": {
       "title": "Agent setup",
-      "description": "Bring your own OpenAI or Anthropic key. wacrm calls the provider directly with your key — no per-seat AI fees, and your data stays yours. This powers AI-drafted replies in the inbox, the auto-reply bot, and the Playground.",
+      "description": "Use your own OpenAI or Anthropic key. The application calls the provider directly with your key; there are no per-user AI fees, and your data stays yours. This enables inbox drafts, auto-replies, and the testing area.",
       "adminOnlyConfig": "Only admins and owners can change the AI configuration.",
       "loadFailed": "Failed to load AI configuration",
       "providerAndKey": "Provider & key",
@@ -1693,6 +1693,13 @@
       "saveFailed": "Failed to save.",
       "removeSuccess": "AI configuration removed.",
       "removeFailed": "Failed to remove."
+    },
+    "agentsPage": {
+      "title": "AI Agent",
+      "description": "Configure and test your AI key, then review usage before enabling customer replies.",
+      "playground": "Testing",
+      "setup": "Setup",
+      "usage": "Usage"
     },
     "aiKnowledge": {
       "loadFailed": "Failed to load knowledge base",

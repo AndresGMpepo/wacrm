@@ -1644,7 +1644,7 @@
     },
     "aiConfig": {
       "title": "Configuración del Agente IA",
-      "description": "Trae tu propia clave de OpenAI o Anthropic. wacrm hace la llamada al proveedor directamente — no hay cobros adicionales por IA por asiento, y tus datos siguen siendo tuyos. Esto impulsa las respuestas redactadas por IA en la bandeja de entrada, el bot de auto-respuesta, y el Entorno de Pruebas (Playground).",
+      "description": "Usa tu propia clave de OpenAI o Anthropic. La aplicación llama directamente al proveedor con tu clave; no hay cargos de IA por usuario y tus datos siguen siendo tuyos. Esto habilita borradores en la bandeja de entrada, respuestas automáticas y el entorno de pruebas.",
       "adminOnlyConfig": "Solo los administradores y propietarios pueden cambiar la configuración de la IA.",
       "loadFailed": "Error al cargar la configuración de la IA",
       "providerAndKey": "Proveedor y clave",
@@ -1681,6 +1681,13 @@
       "saveFailed": "Fallo al guardar.",
       "removeSuccess": "Configuración de IA eliminada.",
       "removeFailed": "Error al eliminar."
+    },
+    "agentsPage": {
+      "title": "Agente de IA",
+      "description": "Configura tu clave de IA, pruébala y revisa el uso antes de activar respuestas para clientes.",
+      "playground": "Pruebas",
+      "setup": "Configuración",
+      "usage": "Uso"
     },
     "aiKnowledge": {
       "loadFailed": "Error al cargar la base de conocimientos",

@@ -1656,7 +1656,7 @@
     },
     "aiConfig": {
       "title": "에이전트 설정",
-      "description": "직접 발급받은 OpenAI 또는 Anthropic 키를 사용하세요. wacrm은 회원님의 키로 공급자에 직접 요청하므로 좌석당 AI 비용이 없고 데이터도 온전히 회원님의 것입니다. 인박스의 AI 답장 초안, 자동 응답 봇, 플레이그라운드에 사용됩니다.",
+      "description": "직접 발급받은 OpenAI 또는 Anthropic 키를 사용하세요. 애플리케이션이 회원님의 키로 공급자에 직접 요청하므로 사용자별 AI 비용이 없고 데이터도 회원님의 것입니다. 받은 편지함 초안, 자동 응답 및 테스트 영역에 사용됩니다.",
       "adminOnlyConfig": "관리자와 소유자만 AI 설정을 변경할 수 있습니다.",
       "loadFailed": "AI 설정을 불러오지 못했습니다",
       "providerAndKey": "공급자 & 키",
@@ -1693,6 +1693,13 @@
       "saveFailed": "저장하지 못했습니다.",
       "removeSuccess": "AI 설정이 제거되었습니다.",
       "removeFailed": "제거하지 못했습니다."
+    },
+    "agentsPage": {
+      "title": "AI 에이전트",
+      "description": "고객 답변을 활성화하기 전에 AI 키를 설정하고 테스트한 후 사용량을 확인하세요.",
+      "playground": "테스트",
+      "setup": "설정",
+      "usage": "사용량"
     },
     "aiKnowledge": {
       "loadFailed": "지식베이스를 불러오지 못했습니다",

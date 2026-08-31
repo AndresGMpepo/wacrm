@@ -7,7 +7,10 @@ function monthStart() { const date = new Date(); date.setDate(1); date.setHours(
 
 export async function GET() {
   try {
-    const { supabase, accountId } = await requireRole('admin')
+    const { accountId } = await requireRole('admin')
+    // The role check above authorizes access; the server client makes the
+    // operational dashboard resilient to stale/missing client RLS claims.
+    const supabase = supabaseAdmin()
     const [jobsResult, policyResult, dailyResult, monthlyResult] = await Promise.all([
       supabase.from('ai_analysis_jobs').select('id, conversation_id, trigger, status, scheduled_at, attempts, error_message, updated_at').eq('account_id', accountId).order('updated_at', { ascending: false }).limit(20),
       supabase.from('ai_configs').select('conversation_analysis_enabled, analysis_daily_limit, analysis_monthly_limit').eq('account_id', accountId).maybeSingle(),
