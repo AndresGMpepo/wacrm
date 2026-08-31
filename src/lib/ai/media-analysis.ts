@@ -3,10 +3,10 @@ import { AiError } from './types'
 const OPENAI_CHAT_URL = 'https://api.openai.com/v1/chat/completions'
 const OPENAI_TRANSCRIPT_URL = 'https://api.openai.com/v1/audio/transcriptions'
 const MAX_MEDIA_BYTES = 15 * 1024 * 1024
-// Kept independent from the chat model selected in Settings. An account may
-// choose a text-only chat model, while GPT-4.1 mini reliably accepts image
-// input through Chat Completions using the very same OpenAI API key.
-const IMAGE_ANALYSIS_MODEL = 'gpt-4.1-mini'
+// Media models are independent from the account's chat model. This avoids
+// breaking image/audio processing when an account chooses another text model.
+const IMAGE_ANALYSIS_MODEL = process.env.OPENAI_IMAGE_MODEL || 'gpt-4.1-mini'
+const AUDIO_TRANSCRIPTION_MODEL = process.env.OPENAI_TRANSCRIPTION_MODEL || 'gpt-4o-mini-transcribe'
 
 function textFromChatCompletion(data: unknown): string {
   const value = data as { choices?: Array<{ message?: { content?: string | Array<{ text?: string }> } }> }
@@ -60,7 +60,7 @@ export async function transcribeAudioWithOpenAi(args: {
   assertSize(args.bytes)
   const extension = args.mimeType.includes('ogg') ? 'ogg' : args.mimeType.includes('mpeg') ? 'mp3' : args.mimeType.includes('wav') ? 'wav' : 'webm'
   const form = new FormData()
-  form.set('model', 'gpt-4o-mini-transcribe')
+  form.set('model', AUDIO_TRANSCRIPTION_MODEL)
   form.set('language', 'es')
   form.set('file', new Blob([new Uint8Array(args.bytes)], { type: args.mimeType || 'audio/ogg' }), `voice-note.${extension}`)
   let response: Response
