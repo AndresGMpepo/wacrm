@@ -29,6 +29,9 @@ export const HANDOFF_SENTINEL = '[[HANDOFF]]'
  *  bounds token spend on the caller's own key. */
 export const MAX_OUTPUT_TOKENS = 1024
 
+/** Minimum cost-control allowance before a conversation is paused for the day. */
+export const MIN_DAILY_ANALYSES_PER_CONVERSATION = 8
+
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
 const DEFAULT_CONTEXT_MESSAGE_LIMIT = 20
 

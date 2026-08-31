@@ -8,8 +8,15 @@ import { logAiUsage } from '@/lib/ai/usage'
 import { supabaseAdmin } from '@/lib/ai/admin-client'
 import { AiError } from '@/lib/ai/types'
 import { applyContactMemory, parseMemoryExtraction } from '@/lib/ai/memory'
+import { MIN_DAILY_ANALYSES_PER_CONVERSATION } from '@/lib/ai/defaults'
 
 type Sentiment = 'positive' | 'neutral' | 'negative' | 'mixed'
+
+function startOfDay() {
+  const date = new Date()
+  date.setHours(0, 0, 0, 0)
+  return date.toISOString()
+}
 
 type Analysis = {
   summary: string
@@ -87,7 +94,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ conversati
   }
 }
 
-export async function POST(request: Request, { params }: { params: Promise<{ conversationId: string }> }) {
+export async function POST(_: Request, { params }: { params: Promise<{ conversationId: string }> }) {
   try {
     const { supabase, accountId, userId } = await requireRole('agent')
     const { conversationId } = await params
@@ -107,23 +114,29 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
       return NextResponse.json({ error: 'No hay mensajes de texto para analizar.' }, { status: 400 })
     }
 
-    if (new URL(request.url).searchParams.get('background') === '1') {
-      const admin = supabaseAdmin()
-      const { error } = await admin.rpc('queue_ai_analysis_job', {
-        p_account_id: accountId,
-        p_conversation_id: conversationId,
-        p_trigger: 'manual',
-        p_delay: '0 minutes',
-      })
-      if (error) throw error
-      return NextResponse.json({ queued: true }, { status: 202 })
-    }
-
     const { data: qaPolicy } = await supabase
       .from('ai_configs')
-      .select('qa_scoring_enabled, qa_scoring_criteria')
+      .select('qa_scoring_enabled, qa_scoring_criteria, analysis_max_per_conversation')
       .eq('account_id', accountId)
       .maybeSingle()
+    const conversationLimit = Math.max(
+      MIN_DAILY_ANALYSES_PER_CONVERSATION,
+      Number(qaPolicy?.analysis_max_per_conversation) || MIN_DAILY_ANALYSES_PER_CONVERSATION,
+    )
+    const { count: conversationCount, error: usageError } = await supabase
+      .from('ai_usage_log')
+      .select('id', { count: 'exact', head: true })
+      .eq('account_id', accountId)
+      .eq('conversation_id', conversationId)
+      .eq('mode', 'analysis')
+      .gte('created_at', startOfDay())
+    if (usageError) throw usageError
+    if ((conversationCount ?? 0) >= conversationLimit) {
+      return NextResponse.json({
+        error: `El límite diario de análisis para esta conversación fue alcanzado (${Math.min(conversationCount ?? 0, conversationLimit)}/${conversationLimit}).`,
+        code: 'analysis_conversation_limit',
+      }, { status: 429 })
+    }
     const qaEnabled = qaPolicy?.qa_scoring_enabled === true
     const systemPrompt = [
       'Analiza esta conversación de atención al cliente. Responde únicamente JSON válido, sin markdown.',

@@ -9,6 +9,7 @@ import { encrypt, decrypt } from '@/lib/whatsapp/encryption'
 import { validateAiCredentials } from '@/lib/ai/validate'
 import { embedTexts } from '@/lib/ai/embeddings'
 import { AiError, type AiProvider } from '@/lib/ai/types'
+import { MIN_DAILY_ANALYSES_PER_CONVERSATION } from '@/lib/ai/defaults'
 
 function bad(message: string) {
   return NextResponse.json({ error: message }, { status: 400 })
@@ -72,6 +73,10 @@ export async function GET() {
       has_key: !!api_key,
       has_embeddings_key: !!embeddings_api_key,
       ...safe,
+      analysis_max_per_conversation: Math.max(
+        MIN_DAILY_ANALYSES_PER_CONVERSATION,
+        Number(safe.analysis_max_per_conversation) || MIN_DAILY_ANALYSES_PER_CONVERSATION,
+      ),
     })
   } catch (err) {
     return toErrorResponse(err)
@@ -127,7 +132,10 @@ export async function POST(request: Request) {
     }
     const analysisDailyLimit = boundedNumber(body.analysis_daily_limit, 100, 10_000)
     const analysisMonthlyLimit = boundedNumber(body.analysis_monthly_limit, 1_000, 100_000)
-    const analysisMaxPerConversation = boundedNumber(body.analysis_max_per_conversation, 6, 100)
+    const analysisMaxPerConversation = Math.max(
+      MIN_DAILY_ANALYSES_PER_CONVERSATION,
+      boundedNumber(body.analysis_max_per_conversation, MIN_DAILY_ANALYSES_PER_CONVERSATION, 100),
+    )
     const analysisImagesEnabled = body.analysis_images_enabled === true
     const analysisVoiceNotesEnabled = body.analysis_voice_notes_enabled === true
     const mediaAnalysisDailyLimit = boundedNumber(body.media_analysis_daily_limit, 100, 10_000)

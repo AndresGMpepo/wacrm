@@ -8,7 +8,7 @@ import { decrypt } from '@/lib/whatsapp/encryption'
 import { downloadMedia, getMediaUrl } from '@/lib/whatsapp/meta-api'
 import { downloadZernioInboundMedia, type ZernioChannel } from '@/lib/zernio/server'
 import { describeImageWithOpenAi, downloadPublicMedia, transcribeAudioWithOpenAi } from '@/lib/ai/media-analysis'
-import { aiRequestTimeoutMs } from '@/lib/ai/defaults'
+import { MIN_DAILY_ANALYSES_PER_CONVERSATION, aiRequestTimeoutMs } from '@/lib/ai/defaults'
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
 import { syncGoogleCalendarChanges } from '@/lib/appointments/google-calendar'
 import { applyContactMemory, parseMemoryExtraction } from '@/lib/ai/memory'
@@ -85,12 +85,16 @@ export async function POST(request: Request) {
       if (!policy) {
         await db.from('ai_analysis_jobs').update({ status: 'skipped_limit', error_message: 'No hay una política de análisis configurada para esta cuenta.' }).eq('id', job.id); skipped++; continue
       }
+      const conversationLimit = Math.max(
+        MIN_DAILY_ANALYSES_PER_CONVERSATION,
+        Number(policy.analysis_max_per_conversation) || MIN_DAILY_ANALYSES_PER_CONVERSATION,
+      )
       const limitReason = dailyCount >= policy.analysis_daily_limit
         ? `Límite diario alcanzado (${dailyCount}/${policy.analysis_daily_limit}).`
         : monthlyCount >= policy.analysis_monthly_limit
           ? `Límite mensual alcanzado (${monthlyCount}/${policy.analysis_monthly_limit}).`
-          : conversationCount >= policy.analysis_max_per_conversation
-            ? `Máximo diario por conversación alcanzado (${conversationCount}/${policy.analysis_max_per_conversation}).`
+          : conversationCount >= conversationLimit
+            ? `El límite diario de análisis para esta conversación fue alcanzado (${Math.min(conversationCount, conversationLimit)}/${conversationLimit}).`
             : null
       if (limitReason) {
         await db.from('ai_analysis_jobs').update({ status: 'skipped_limit', error_message: limitReason }).eq('id', job.id); skipped++; continue

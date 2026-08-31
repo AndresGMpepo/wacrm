@@ -35,7 +35,7 @@ async function readApiResponse(response: Response) {
     throw new Error(`El servidor devolviÃ³ una pÃ¡gina inesperada (HTTP ${response.status}). Revisa el registro del servidor.`)
   }
   try {
-    return JSON.parse(body) as { analysis?: Analysis | null; error?: string; queued?: boolean }
+    return JSON.parse(body) as { analysis?: Analysis | null; error?: string }
   } catch {
     throw new Error(`El servidor devolviÃ³ una respuesta invÃ¡lida (HTTP ${response.status}).`)
   }
@@ -63,31 +63,9 @@ export function ConversationIntelligence({ conversationId }: { conversationId: s
   const analyze = async () => {
     setRunning(true)
     try {
-      const previousAnalyzedAt = analysis?.analyzed_at ?? null
-      const response = await fetch(`/api/ai/conversation-analysis/${conversationId}?background=1`, { method: 'POST' })
+      const response = await fetch(`/api/ai/conversation-analysis/${conversationId}`, { method: 'POST' })
       const data = await readApiResponse(response)
       if (!response.ok) throw new Error(data.error ?? 'No se pudo analizar la conversación.')
-      if (data.queued) {
-        setExpanded(true)
-        toast.success('Análisis en proceso')
-        for (let attempt = 0; attempt < 40; attempt += 1) {
-          await new Promise((resolve) => setTimeout(resolve, 2_000))
-          try {
-            const statusResponse = await fetch(`/api/ai/conversation-analysis/${conversationId}`, { cache: 'no-store' })
-            const statusData = await readApiResponse(statusResponse)
-            const nextAnalysis = statusData.analysis ?? null
-            if (statusResponse.ok && nextAnalysis?.analyzed_at && nextAnalysis.analyzed_at !== previousAnalyzedAt) {
-              setAnalysis(nextAnalysis)
-              toast.success('Análisis actualizado')
-              return
-            }
-          } catch {
-            // A transient refresh failure must not cancel the queued analysis.
-          }
-        }
-        toast.info('El análisis continúa en segundo plano. Se mostrará al volver a abrir el chat.')
-        return
-      }
       setAnalysis(data.analysis ?? null)
       setExpanded(true)
       toast.success('Análisis actualizado')
