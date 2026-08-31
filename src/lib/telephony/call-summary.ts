@@ -45,8 +45,9 @@ function parseCallAnalysis(raw: string): CallAnalysis | null {
 export async function analyzeCall(db: SupabaseClient, accountId: string, transcript: string): Promise<CallAnalysis | null> {
   const config = await loadAiConfig(db, accountId)
   if (!config) return null
+  const analysisConfig = { ...config, model: config.analysisModel ?? config.model }
   const { text, usage } = await generateText({
-    config,
+    config: analysisConfig,
     systemPrompt: SYSTEM_PROMPT,
     messages: [{ role: 'user', content: transcript.slice(0, 12_000) }],
   })
@@ -55,7 +56,7 @@ export async function analyzeCall(db: SupabaseClient, accountId: string, transcr
     conversationId: null,
     mode: 'call_summary',
     provider: config.provider,
-    model: config.model,
+    model: analysisConfig.model,
     usage,
   })
   return parseCallAnalysis(text)

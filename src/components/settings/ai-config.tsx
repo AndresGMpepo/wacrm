@@ -51,6 +51,9 @@ export function AiConfig() {
   const [configured, setConfigured] = useState(false);
   const [provider, setProvider] = useState<AiProvider>('openai');
   const [model, setModel] = useState(AI_PROVIDER_DEFAULT_MODEL.openai);
+  const [analysisModel, setAnalysisModel] = useState(AI_PROVIDER_DEFAULT_MODEL.openai);
+  const [imageAnalysisModel, setImageAnalysisModel] = useState('gpt-4.1-mini');
+  const [voiceTranscriptionModel, setVoiceTranscriptionModel] = useState('gpt-4o-mini-transcribe');
   const [apiKey, setApiKey] = useState('');
   const [keyEdited, setKeyEdited] = useState(false);
   const [showKey, setShowKey] = useState(false);
@@ -97,6 +100,9 @@ export function AiConfig() {
         setConfigured(true);
         setProvider(data.provider);
         setModel(data.model);
+        setAnalysisModel(data.analysis_model ?? data.model);
+        setImageAnalysisModel(data.image_analysis_model ?? 'gpt-4.1-mini');
+        setVoiceTranscriptionModel(data.voice_transcription_model ?? 'gpt-4o-mini-transcribe');
         setSystemPrompt(data.system_prompt ?? '');
         setIsActive(data.is_active);
         setAutoReplyEnabled(data.auto_reply_enabled);
@@ -147,6 +153,9 @@ export function AiConfig() {
   const buildBody = () => ({
     provider,
     model: model.trim(),
+    analysis_model: analysisModel.trim() || null,
+    image_analysis_model: imageAnalysisModel.trim() || null,
+    voice_transcription_model: voiceTranscriptionModel.trim() || null,
     api_key: keyPayload(),
     embeddings_api_key: embeddingsKeyPayload(),
     system_prompt: systemPrompt.trim() || null,
@@ -288,7 +297,7 @@ export function AiConfig() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="ai-model">{t('model')}</Label>
+                <Label htmlFor="ai-model">Modelo para respuestas del agente</Label>
                 <Input
                   id="ai-model"
                   value={model}
@@ -485,6 +494,62 @@ export function AiConfig() {
                 </SelectContent>
               </Select>
             </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Modelos por función</CardTitle>
+            <CardDescription>
+              Elige el equilibrio entre calidad y costo para cada tarea. Puedes seleccionar una recomendación o escribir un ID de modelo autorizado en tu cuenta de OpenAI.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="ai-analysis-model">Análisis, memoria, sentimiento y QA</Label>
+              <Input
+                id="ai-analysis-model"
+                list="ai-text-model-options"
+                value={analysisModel}
+                onChange={(e) => setAnalysisModel(e.target.value)}
+                disabled={disabled}
+              />
+              <p className="text-xs text-muted-foreground">Recomendado: gpt-5-mini.</p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="ai-image-model">Descripción de imágenes</Label>
+              <Input
+                id="ai-image-model"
+                list="ai-vision-model-options"
+                value={imageAnalysisModel}
+                onChange={(e) => setImageAnalysisModel(e.target.value)}
+                disabled={disabled}
+              />
+              <p className="text-xs text-muted-foreground">Recomendado: gpt-4.1-mini.</p>
+            </div>
+            <div className="space-y-2 sm:col-span-2">
+              <Label htmlFor="ai-transcription-model">Transcripción de notas de voz</Label>
+              <Input
+                id="ai-transcription-model"
+                list="ai-transcription-model-options"
+                value={voiceTranscriptionModel}
+                onChange={(e) => setVoiceTranscriptionModel(e.target.value)}
+                disabled={disabled}
+              />
+              <p className="text-xs text-muted-foreground">Para notas de voz en español, gpt-4o-mini-transcribe ofrece el mejor costo-beneficio. Usa gpt-4o-transcribe si necesitas priorizar precisión.</p>
+            </div>
+            <datalist id="ai-text-model-options">
+              <option value="gpt-5-mini" />
+              <option value="gpt-4.1-mini" />
+            </datalist>
+            <datalist id="ai-vision-model-options">
+              <option value="gpt-4.1-mini" />
+              <option value="gpt-5-mini" />
+            </datalist>
+            <datalist id="ai-transcription-model-options">
+              <option value="gpt-4o-mini-transcribe" />
+              <option value="gpt-4o-transcribe" />
+            </datalist>
           </CardContent>
         </Card>
 

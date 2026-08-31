@@ -127,7 +127,8 @@ export async function POST(_: Request, { params }: { params: Promise<{ conversat
       config.systemPrompt ? `Contexto del negocio: ${config.systemPrompt}` : '',
       'Incluye también memoria del cliente (Nexo Memory): "customer_stage":"..." (p.ej. prospecto, cotización, propuesta, cliente), "risk_level":"low|medium|high", "opportunity_score":0-100, "interests":[{"text":"...","confidence":0-1}], "objections":[{"text":"...","confidence":0-1}], "commitments":[{"description":"...","owner":"agent|customer","due_date":"YYYY-MM-DD|null"}], "important_facts":["..."] (hechos nuevos y relevantes, no saludos ni trivialidades). Omite cualquier campo del que no tengas evidencia clara.',
     ].filter(Boolean).join('\n\n')
-    const result = await generateText({ config, systemPrompt, messages })
+    const analysisConfig = { ...config, model: config.analysisModel ?? config.model }
+    const result = await generateText({ config: analysisConfig, systemPrompt, messages })
     const match = result.text.match(/\{[\s\S]*\}/)
     if (!match) throw new AiError('The AI did not return a valid analysis.', { code: 'invalid_analysis' })
     const rawValue = JSON.parse(match[0]) as Record<string, unknown>
@@ -142,7 +143,7 @@ export async function POST(_: Request, { params }: { params: Promise<{ conversat
         source: 'whatsapp',
         status: 'completed',
         ...analysis,
-        model: config.model,
+        model: analysisConfig.model,
         analyzed_message_count: messages.length,
         analyzed_at: new Date().toISOString(),
         error_message: null,
@@ -150,7 +151,7 @@ export async function POST(_: Request, { params }: { params: Promise<{ conversat
       .select('summary, sentiment, sentiment_score, next_best_action, reasons, qa_score, qa_empathy_score, qa_objection_handling_score, qa_script_adherence_score, qa_summary, qa_findings, status, analyzed_message_count, analyzed_at')
       .single()
     if (error) throw error
-    void logAiUsage(admin, { accountId, conversationId, mode: 'analysis', provider: config.provider, model: config.model, usage: result.usage })
+    void logAiUsage(admin, { accountId, conversationId, mode: 'analysis', provider: config.provider, model: analysisConfig.model, usage: result.usage })
     if (conversation.contact_id) {
       await applyContactMemory(admin, { accountId, contactId: conversation.contact_id, source: { type: 'conversation', id: conversationId } }, analysis, parseMemoryExtraction(rawValue)).catch((memoryError) => {
         console.error('[nexo-memory] Failed to apply memory extraction:', memoryError)

@@ -41,6 +41,9 @@ describe('loadAiConfig requireActive', () => {
     expect(config).not.toBeNull()
     expect(config!.provider).toBe('openai')
     expect(config!.apiKey).toBe('plain:enc-key')
+    expect(config!.analysisModel).toBe('gpt-x')
+    expect(config!.imageAnalysisModel).toBe('gpt-4.1-mini')
+    expect(config!.voiceTranscriptionModel).toBe('gpt-4o-mini-transcribe')
   })
 
   it('returns null when there is no row', async () => {

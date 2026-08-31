@@ -5,6 +5,9 @@ import type { AiConfig } from './types'
 interface AiConfigRow {
   provider: 'openai' | 'anthropic'
   model: string
+  analysis_model: string | null
+  image_analysis_model: string | null
+  voice_transcription_model: string | null
   api_key: string
   system_prompt: string | null
   is_active: boolean
@@ -15,7 +18,7 @@ interface AiConfigRow {
 }
 
 const CONFIG_COLUMNS =
-  'provider, model, api_key, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, embeddings_api_key'
+  'provider, model, analysis_model, image_analysis_model, voice_transcription_model, api_key, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, embeddings_api_key'
 
 /**
  * Load and decrypt the account's AI config for *use* (draft or
@@ -72,6 +75,11 @@ export async function loadAiConfig(
   return {
     provider: row.provider,
     model: row.model,
+    // Existing rows keep working after the additive migration even before an
+    // administrator saves the new routing fields.
+    analysisModel: row.analysis_model?.trim() || row.model,
+    imageAnalysisModel: row.image_analysis_model?.trim() || 'gpt-4.1-mini',
+    voiceTranscriptionModel: row.voice_transcription_model?.trim() || 'gpt-4o-mini-transcribe',
     apiKey: decrypt(row.api_key),
     systemPrompt: row.system_prompt,
     isActive: row.is_active,

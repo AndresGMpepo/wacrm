@@ -15,7 +15,14 @@ export type AiProvider = 'openai' | 'anthropic'
  */
 export interface AiConfig {
   provider: AiProvider
+  /** General model used for agent drafts and automatic replies. */
   model: string
+  /** Optional model for conversation/call analysis, memory and sentiment. */
+  analysisModel?: string
+  /** Optional OpenAI vision model for inbound image descriptions. */
+  imageAnalysisModel?: string
+  /** Optional OpenAI audio-transcription model for voice notes. */
+  voiceTranscriptionModel?: string
   apiKey: string
   systemPrompt: string | null
   isActive: boolean

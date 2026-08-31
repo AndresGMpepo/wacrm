@@ -26,6 +26,7 @@ function assertSize(bytes: Buffer) {
 
 export async function describeImageWithOpenAi(args: {
   apiKey: string
+  model: string
   bytes: Buffer
   mimeType: string
   timeoutMs: number
@@ -38,7 +39,7 @@ export async function describeImageWithOpenAi(args: {
       method: 'POST',
       headers: { Authorization: `Bearer ${args.apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: IMAGE_ANALYSIS_MODEL,
+        model: args.model || IMAGE_ANALYSIS_MODEL,
         messages: [{ role: 'system', content: 'Describe la imagen de forma concisa y factual para el contexto de atención al cliente. No infieras datos sensibles ni identidad.' }, { role: 'user', content: [{ type: 'text', text: 'Describe esta imagen para incluirla en el resumen de la conversación.' }, { type: 'image_url', image_url: { url: dataUrl } }] }],
         max_completion_tokens: 300,
       }),
@@ -53,6 +54,7 @@ export async function describeImageWithOpenAi(args: {
 
 export async function transcribeAudioWithOpenAi(args: {
   apiKey: string
+  model: string
   bytes: Buffer
   mimeType: string
   timeoutMs: number
@@ -60,7 +62,7 @@ export async function transcribeAudioWithOpenAi(args: {
   assertSize(args.bytes)
   const extension = args.mimeType.includes('ogg') ? 'ogg' : args.mimeType.includes('mpeg') ? 'mp3' : args.mimeType.includes('wav') ? 'wav' : 'webm'
   const form = new FormData()
-  form.set('model', AUDIO_TRANSCRIPTION_MODEL)
+  form.set('model', args.model || AUDIO_TRANSCRIPTION_MODEL)
   form.set('language', 'es')
   form.set('file', new Blob([new Uint8Array(args.bytes)], { type: args.mimeType || 'audio/ogg' }), `voice-note.${extension}`)
   let response: Response
