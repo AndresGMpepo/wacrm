@@ -37,8 +37,8 @@ const MASKED_KEY = '••••••••••••••••';
 // Radix Select can't use an empty-string item value, so the "leave
 // unassigned" choice gets a sentinel that maps to null in the payload.
 const HANDOFF_QUEUE = '__queue__';
-const ANALYSIS_MODEL_IDS = ['gpt-5-mini', 'gpt-4.1-mini'];
-const IMAGE_MODEL_IDS = ['gpt-4.1-mini', 'gpt-5-mini'];
+const ANALYSIS_MODEL_IDS = ['gpt-5.4-mini', 'gpt-4.1-mini'];
+const IMAGE_MODEL_IDS = ['gpt-4.1-mini', 'gpt-5.4-mini'];
 const TRANSCRIPTION_MODEL_IDS = ['gpt-4o-mini-transcribe', 'gpt-4o-transcribe'];
 
 export function AiConfig() {
@@ -510,16 +510,16 @@ export function AiConfig() {
           <CardContent className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="ai-analysis-model">Análisis, memoria, sentimiento y QA</Label>
-              <Select value={ANALYSIS_MODEL_IDS.includes(analysisModel) ? analysisModel : '__custom__'} onValueChange={(value) => setAnalysisModel(value === '__custom__' ? '' : value ?? 'gpt-5-mini')} disabled={disabled}>
+              <Select value={ANALYSIS_MODEL_IDS.includes(analysisModel) ? analysisModel : '__custom__'} onValueChange={(value) => setAnalysisModel(value === '__custom__' ? '' : value ?? 'gpt-5.4-mini')} disabled={disabled}>
                 <SelectTrigger id="ai-analysis-model" className="w-full"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="gpt-5-mini">gpt-5-mini — recomendado</SelectItem>
+                  <SelectItem value="gpt-5.4-mini">gpt-5.4-mini — recomendado y estable</SelectItem>
                   <SelectItem value="gpt-4.1-mini">gpt-4.1-mini — menor costo</SelectItem>
                   <SelectItem value="__custom__">Otro modelo…</SelectItem>
                 </SelectContent>
               </Select>
               {!ANALYSIS_MODEL_IDS.includes(analysisModel) && <Input value={analysisModel} onChange={(e) => setAnalysisModel(e.target.value)} placeholder="ID del modelo personalizado" disabled={disabled} />}
-              <p className="text-xs text-muted-foreground">Recomendado: gpt-5-mini.</p>
+              <p className="text-xs text-muted-foreground">Recomendado para análisis inmediato: gpt-5.4-mini.</p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="ai-image-model">Descripción de imágenes</Label>
@@ -527,7 +527,7 @@ export function AiConfig() {
                 <SelectTrigger id="ai-image-model" className="w-full"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="gpt-4.1-mini">gpt-4.1-mini — recomendado</SelectItem>
-                  <SelectItem value="gpt-5-mini">gpt-5-mini — mayor razonamiento</SelectItem>
+                  <SelectItem value="gpt-5.4-mini">gpt-5.4-mini — mayor razonamiento</SelectItem>
                   <SelectItem value="__custom__">Otro modelo…</SelectItem>
                 </SelectContent>
               </Select>

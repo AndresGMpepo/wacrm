@@ -32,12 +32,12 @@ const sentimentMeta = {
 async function readApiResponse(response: Response) {
   const body = await response.text()
   if (!response.headers.get('content-type')?.includes('application/json')) {
-    throw new Error(`El servidor devolviÃ³ una pÃ¡gina inesperada (HTTP ${response.status}). Revisa el registro del servidor.`)
+    throw new Error(`El servidor devolvió una página inesperada (HTTP ${response.status}). Revisa el registro del servidor.`)
   }
   try {
     return JSON.parse(body) as { analysis?: Analysis | null; error?: string }
   } catch {
-    throw new Error(`El servidor devolviÃ³ una respuesta invÃ¡lida (HTTP ${response.status}).`)
+    throw new Error(`El servidor devolvió una respuesta inválida (HTTP ${response.status}).`)
   }
 }
 
