@@ -14,6 +14,16 @@ function bad(message: string) {
   return NextResponse.json({ error: message }, { status: 400 })
 }
 
+const CONFIG_COLUMNS =
+  'provider, model, analysis_model, image_analysis_model, voice_transcription_model, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, conversation_analysis_enabled, analysis_on_customer_message, analysis_on_transfer, analysis_on_close, analysis_daily_limit, analysis_monthly_limit, analysis_max_per_conversation, analysis_images_enabled, analysis_voice_notes_enabled, media_analysis_daily_limit, qa_scoring_enabled, qa_scoring_criteria, api_key, embeddings_api_key'
+
+const LEGACY_CONFIG_COLUMNS =
+  'provider, model, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, conversation_analysis_enabled, analysis_on_customer_message, analysis_on_transfer, analysis_on_close, analysis_daily_limit, analysis_monthly_limit, analysis_max_per_conversation, analysis_images_enabled, analysis_voice_notes_enabled, media_analysis_daily_limit, qa_scoring_enabled, qa_scoring_criteria, api_key, embeddings_api_key'
+
+function isMissingModelColumn(error: { code?: string; message?: string }) {
+  return error.code === '42703' || /(?:analysis_model|image_analysis_model|voice_transcription_model)/i.test(error.message ?? '')
+}
+
 /**
  * GET /api/ai/config
  *
@@ -25,15 +35,25 @@ export async function GET() {
   try {
     const { supabase, accountId } = await getCurrentAccount()
 
-    const { data, error } = await supabase
+    const primary = await supabase
       .from('ai_configs')
       // `api_key` is selected only to derive `has_key` — it is stripped
       // out below and never returned to the client.
-      .select(
-        'provider, model, analysis_model, image_analysis_model, voice_transcription_model, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, conversation_analysis_enabled, analysis_on_customer_message, analysis_on_transfer, analysis_on_close, analysis_daily_limit, analysis_monthly_limit, analysis_max_per_conversation, analysis_images_enabled, analysis_voice_notes_enabled, media_analysis_daily_limit, qa_scoring_enabled, qa_scoring_criteria, api_key, embeddings_api_key',
-      )
+      .select(CONFIG_COLUMNS)
       .eq('account_id', accountId)
       .maybeSingle()
+    let data: Record<string, unknown> | null = primary.data
+    let error = primary.error
+
+    if (error && isMissingModelColumn(error)) {
+      const fallback = await supabase
+        .from('ai_configs')
+        .select(LEGACY_CONFIG_COLUMNS)
+        .eq('account_id', accountId)
+        .maybeSingle()
+      data = fallback.data
+      error = fallback.error
+    }
 
     if (error) {
       console.error('[ai/config GET] fetch error:', error)
@@ -256,11 +276,19 @@ export async function POST(request: Request) {
       shared.embeddings_api_key = null
     }
 
+    const writeValues = encryptedKey ? { ...shared, api_key: encryptedKey } : shared
+    const legacyWriteValues = Object.fromEntries(
+      Object.entries(writeValues).filter(([key]) => !['analysis_model', 'image_analysis_model', 'voice_transcription_model'].includes(key)),
+    )
     if (existing) {
-      const { error: upErr } = await supabase
+      let { error: upErr } = await supabase
         .from('ai_configs')
-        .update(encryptedKey ? { ...shared, api_key: encryptedKey } : shared)
+        .update(writeValues)
         .eq('account_id', accountId)
+      if (upErr && isMissingModelColumn(upErr)) {
+        const fallback = await supabase.from('ai_configs').update(legacyWriteValues).eq('account_id', accountId)
+        upErr = fallback.error
+      }
       if (upErr) {
         console.error('[ai/config POST] update error:', upErr)
         return NextResponse.json(
@@ -269,12 +297,20 @@ export async function POST(request: Request) {
         )
       }
     } else {
-      const { error: insErr } = await supabase.from('ai_configs').insert({
+      const insertValues = {
         account_id: accountId,
         created_by: userId,
         api_key: encryptedKey, // guaranteed non-null: rawKey required when no existing row
         ...shared,
-      })
+      }
+      let { error: insErr } = await supabase.from('ai_configs').insert(insertValues)
+      if (insErr && isMissingModelColumn(insErr)) {
+        const legacyInsertValues = Object.fromEntries(
+          Object.entries(insertValues).filter(([key]) => !['analysis_model', 'image_analysis_model', 'voice_transcription_model'].includes(key)),
+        )
+        const fallback = await supabase.from('ai_configs').insert(legacyInsertValues)
+        insErr = fallback.error
+      }
       if (insErr) {
         console.error('[ai/config POST] insert error:', insErr)
         return NextResponse.json(

@@ -29,6 +29,18 @@ const sentimentMeta = {
   mixed: { label: 'Mixto', icon: MessageCircleQuestion, className: 'text-amber-500' },
 } as const
 
+async function readApiResponse(response: Response) {
+  const body = await response.text()
+  if (!response.headers.get('content-type')?.includes('application/json')) {
+    throw new Error(`El servidor devolviÃ³ una pÃ¡gina inesperada (HTTP ${response.status}). Revisa el registro del servidor.`)
+  }
+  try {
+    return JSON.parse(body) as { analysis?: Analysis | null; error?: string }
+  } catch {
+    throw new Error(`El servidor devolviÃ³ una respuesta invÃ¡lida (HTTP ${response.status}).`)
+  }
+}
+
 export function ConversationIntelligence({ conversationId }: { conversationId: string }) {
   const [analysis, setAnalysis] = useState<Analysis | null>(null)
   const [loading, setLoading] = useState(true)
@@ -39,8 +51,8 @@ export function ConversationIntelligence({ conversationId }: { conversationId: s
     setLoading(true)
     try {
       const response = await fetch(`/api/ai/conversation-analysis/${conversationId}`)
-      const data = await response.json()
-      if (response.ok) setAnalysis(data.analysis)
+      const data = await readApiResponse(response)
+      if (response.ok) setAnalysis(data.analysis ?? null)
     } finally {
       setLoading(false)
     }
@@ -52,9 +64,9 @@ export function ConversationIntelligence({ conversationId }: { conversationId: s
     setRunning(true)
     try {
       const response = await fetch(`/api/ai/conversation-analysis/${conversationId}`, { method: 'POST' })
-      const data = await response.json()
+      const data = await readApiResponse(response)
       if (!response.ok) throw new Error(data.error ?? 'No se pudo analizar la conversación.')
-      setAnalysis(data.analysis)
+      setAnalysis(data.analysis ?? null)
       setExpanded(true)
       toast.success('Análisis actualizado')
     } catch (error) {

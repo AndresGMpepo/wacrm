@@ -5,9 +5,9 @@ import type { AiConfig } from './types'
 interface AiConfigRow {
   provider: 'openai' | 'anthropic'
   model: string
-  analysis_model: string | null
-  image_analysis_model: string | null
-  voice_transcription_model: string | null
+  analysis_model?: string | null
+  image_analysis_model?: string | null
+  voice_transcription_model?: string | null
   api_key: string
   system_prompt: string | null
   is_active: boolean
@@ -19,6 +19,16 @@ interface AiConfigRow {
 
 const CONFIG_COLUMNS =
   'provider, model, analysis_model, image_analysis_model, voice_transcription_model, api_key, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, embeddings_api_key'
+
+// Keep AI operational while a rolling deployment is waiting for migration 101.
+// The dedicated model columns are additive, so the existing general model is a
+// safe fallback until the database schema catches up.
+const LEGACY_CONFIG_COLUMNS =
+  'provider, model, api_key, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, embeddings_api_key'
+
+function isMissingModelColumn(error: { code?: string; message?: string }) {
+  return error.code === '42703' || /(?:analysis_model|image_analysis_model|voice_transcription_model)/i.test(error.message ?? '')
+}
 
 /**
  * Load and decrypt the account's AI config for *use* (draft or
@@ -37,11 +47,24 @@ export async function loadAiConfig(
   opts: { requireActive?: boolean } = {},
 ): Promise<AiConfig | null> {
   const { requireActive = true } = opts
-  const { data, error } = await db
+  const primary = await db
     .from('ai_configs')
     .select(CONFIG_COLUMNS)
     .eq('account_id', accountId)
     .maybeSingle()
+  let data = primary.data as AiConfigRow | null
+  let error = primary.error
+
+  if (error && isMissingModelColumn(error)) {
+    console.warn('[ai config] Migration 101 is pending; using the general AI model until it is applied.')
+    const fallback = await db
+      .from('ai_configs')
+      .select(LEGACY_CONFIG_COLUMNS)
+      .eq('account_id', accountId)
+      .maybeSingle()
+    data = fallback.data as AiConfigRow | null
+    error = fallback.error
+  }
 
   if (error) throw error
   if (!data) return null
