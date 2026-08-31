@@ -87,7 +87,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ conversati
   }
 }
 
-export async function POST(_: Request, { params }: { params: Promise<{ conversationId: string }> }) {
+export async function POST(request: Request, { params }: { params: Promise<{ conversationId: string }> }) {
   try {
     const { supabase, accountId, userId } = await requireRole('agent')
     const { conversationId } = await params
@@ -105,6 +105,18 @@ export async function POST(_: Request, { params }: { params: Promise<{ conversat
     const messages = await buildConversationContext(supabase, conversationId)
     if (!messages.length) {
       return NextResponse.json({ error: 'No hay mensajes de texto para analizar.' }, { status: 400 })
+    }
+
+    if (new URL(request.url).searchParams.get('background') === '1') {
+      const admin = supabaseAdmin()
+      const { error } = await admin.rpc('queue_ai_analysis_job', {
+        p_account_id: accountId,
+        p_conversation_id: conversationId,
+        p_trigger: 'manual',
+        p_delay: '0 minutes',
+      })
+      if (error) throw error
+      return NextResponse.json({ queued: true }, { status: 202 })
     }
 
     const { data: qaPolicy } = await supabase

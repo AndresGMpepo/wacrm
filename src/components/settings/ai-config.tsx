@@ -135,7 +135,7 @@ export function AiConfig() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     if (!accountId || loadedAccountIdRef.current === accountId) return;
@@ -571,7 +571,7 @@ export function AiConfig() {
             <div className="grid gap-4 sm:grid-cols-3">
               <div className="space-y-2"><Label>Límite diario de análisis</Label><Input type="number" min={1} max={10000} value={analysisDailyLimit} onChange={(e) => setAnalysisDailyLimit(Number(e.target.value) || 1)} disabled={disabled || !conversationAnalysisEnabled} /><p className="text-xs text-muted-foreground">Cantidad total de ejecuciones IA para toda la cuenta por día.</p></div>
               <div className="space-y-2"><Label>Límite mensual de análisis</Label><Input type="number" min={1} max={100000} value={analysisMonthlyLimit} onChange={(e) => setAnalysisMonthlyLimit(Number(e.target.value) || 1)} disabled={disabled || !conversationAnalysisEnabled} /><p className="text-xs text-muted-foreground">Cantidad total de ejecuciones IA para toda la cuenta por mes.</p></div>
-              <div className="space-y-2"><Label>Máximo de análisis por conversación</Label><Input type="number" min={1} max={100} value={analysisMaxPerConversation} onChange={(e) => setAnalysisMaxPerConversation(Number(e.target.value) || 1)} disabled={disabled || !conversationAnalysisEnabled} /><p className="text-xs text-muted-foreground">Veces que una conversación puede reanalizarse; no es el número de mensajes.</p></div>
+              <div className="space-y-2"><Label>Máximo diario de análisis por conversación</Label><Input type="number" min={1} max={100} value={analysisMaxPerConversation} onChange={(e) => setAnalysisMaxPerConversation(Number(e.target.value) || 1)} disabled={disabled || !conversationAnalysisEnabled} /><p className="text-xs text-muted-foreground">Veces que una conversación puede reanalizarse cada día; no es el número de mensajes.</p></div>
             </div>
             <div className="space-y-3 rounded-md border border-border p-3">
               <div>

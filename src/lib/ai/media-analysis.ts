@@ -33,6 +33,18 @@ function assertSize(bytes: Buffer) {
   }
 }
 
+export function audioExtensionForMimeType(mimeType: string): string {
+  const normalized = mimeType.toLowerCase().split(';', 1)[0].trim()
+  if (normalized.includes('ogg')) return 'ogg'
+  if (normalized.includes('mpeg')) return 'mp3'
+  if (normalized.includes('mpga')) return 'mpga'
+  if (normalized.includes('mp4')) return 'mp4'
+  if (normalized.includes('m4a')) return 'm4a'
+  if (normalized.includes('wav')) return 'wav'
+  if (normalized.includes('webm')) return 'webm'
+  return 'webm'
+}
+
 /** Download a direct CDN attachment from a trusted connected channel. */
 export async function downloadPublicMedia(urlValue: string): Promise<{ bytes: Buffer; mimeType: string | null }> {
   const url = new URL(urlValue)
@@ -91,7 +103,7 @@ export async function transcribeAudioWithOpenAi(args: {
   timeoutMs: number
 }): Promise<string> {
   assertSize(args.bytes)
-  const extension = args.mimeType.includes('ogg') ? 'ogg' : args.mimeType.includes('mpeg') ? 'mp3' : args.mimeType.includes('wav') ? 'wav' : 'webm'
+  const extension = audioExtensionForMimeType(args.mimeType)
   const form = new FormData()
   form.set('model', args.model || AUDIO_TRANSCRIPTION_MODEL)
   form.set('language', 'es')
@@ -102,7 +114,11 @@ export async function transcribeAudioWithOpenAi(args: {
   } catch (error) {
     throw new AiError(error instanceof Error ? error.message : 'No se pudo transcribir la nota de voz.', { code: 'network_error' })
   }
-  if (!response.ok) throw new AiError(`OpenAI rechazó la transcripción (${response.status}).`, { code: 'provider_error', status: response.status })
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null
+    const detail = payload?.error?.message?.trim().slice(0, 300)
+    throw new AiError(`OpenAI rechazó la transcripción (${response.status})${detail ? `: ${detail}` : '.'}`, { code: 'provider_error', status: response.status })
+  }
   const data = await response.json().catch(() => null) as { text?: string } | null
   if (!data?.text?.trim()) throw new AiError('OpenAI no devolvió una transcripción.', { code: 'empty_response' })
   return data.text.trim().slice(0, 10000)

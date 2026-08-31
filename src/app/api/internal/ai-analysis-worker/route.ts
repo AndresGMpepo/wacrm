@@ -76,7 +76,7 @@ export async function POST(request: Request) {
       const [daily, monthly, perConversation] = await Promise.all([
         db.from('ai_usage_log').select('id', { count: 'exact', head: true }).eq('account_id', job.account_id).eq('mode', 'analysis').gte('created_at', startOfDay()),
         db.from('ai_usage_log').select('id', { count: 'exact', head: true }).eq('account_id', job.account_id).eq('mode', 'analysis').gte('created_at', startOfMonth()),
-        db.from('ai_usage_log').select('id', { count: 'exact', head: true }).eq('conversation_id', job.conversation_id).eq('mode', 'analysis'),
+        db.from('ai_usage_log').select('id', { count: 'exact', head: true }).eq('conversation_id', job.conversation_id).eq('mode', 'analysis').gte('created_at', startOfDay()),
       ])
       const { data: policy } = await db.from('ai_configs').select('analysis_daily_limit, analysis_monthly_limit, analysis_max_per_conversation, qa_scoring_enabled, qa_scoring_criteria').eq('account_id', job.account_id).single()
       const dailyCount = daily.count ?? 0
@@ -90,7 +90,7 @@ export async function POST(request: Request) {
         : monthlyCount >= policy.analysis_monthly_limit
           ? `Límite mensual alcanzado (${monthlyCount}/${policy.analysis_monthly_limit}).`
           : conversationCount >= policy.analysis_max_per_conversation
-            ? `Máximo por conversación alcanzado (${conversationCount}/${policy.analysis_max_per_conversation}).`
+            ? `Máximo diario por conversación alcanzado (${conversationCount}/${policy.analysis_max_per_conversation}).`
             : null
       if (limitReason) {
         await db.from('ai_analysis_jobs').update({ status: 'skipped_limit', error_message: limitReason }).eq('id', job.id); skipped++; continue
