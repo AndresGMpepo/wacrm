@@ -252,6 +252,28 @@ export async function getZernioParticipantPicture(conversationId: string, zernio
   return secureUrl(data.participantPicture ?? data.participant_picture)
 }
 
+/**
+ * Documented, stable way to resolve an inbound Zernio attachment to a
+ * working media URL: https://docs.zernio.com/messages/get-message-attachment
+ * Webhook payloads never carry a `refreshUrl` (that's REST-only), so a
+ * webhook-driven integration must rebuild this call from
+ * conversationId + platformMessageId + attachment index + accountId.
+ * `format=json` returns `{ url }` directly fetchable (no bearer needed);
+ * the default `format=redirect` is for a browser session, not for us.
+ */
+export async function resolveZernioAttachmentUrl(
+  conversationId: string,
+  zernioAccountId: string,
+  platformMessageId: string,
+  index = 0,
+) {
+  const query = new URLSearchParams({ accountId: zernioAccountId, format: 'json' })
+  const payload = await zernioFetch(`/inbox/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(platformMessageId)}/attachments/${index}?${query.toString()}`)
+  const url = secureUrl(payload.url)
+  if (!url) throw new Error('Zernio no devolvió una URL de medio válida.')
+  return url
+}
+
 export async function sendZernioText(conversationId: string, zernioAccountId: string, text: string) {
   const payload = await zernioFetch(`/inbox/conversations/${encodeURIComponent(conversationId)}/messages`, {
     method: 'POST',

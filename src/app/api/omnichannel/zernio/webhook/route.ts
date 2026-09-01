@@ -202,11 +202,16 @@ export async function POST(request: Request) {
       const conversation = record(event.conversation ?? incoming.conversation)
       const account = record(event.account ?? incoming.account)
       const post = record(event.post)
+      // `conversation.participantId`/`participantName` (documented shape:
+      // https://docs.zernio.com/messages/get-inbox-conversation) is the
+      // primary contact identity for DM platforms — no nested
+      // contact/customer/participant object exists there. Kept as a
+      // fallback below in case an older/nested shape is ever delivered.
       const participantSource = conversation.contact ?? conversation.customer ?? conversation.participant
       const participant = record(participantSource)
       const sender = record(incoming.sender ?? event.sender ?? participantSource ?? comment.author)
-      const externalUserId = text(sender.id, sender._id, sender.userId, participant.id, participant._id, comment.author_id, comment.authorId, conversation.customerId, conversation.contactId, event.senderId)
-      const externalMessageId = text(incoming.id, incoming._id, event.messageId, event.id)
+      const externalUserId = text(conversation.participantId, incoming.senderId, sender.id, sender._id, sender.userId, participant.id, participant._id, comment.author_id, comment.authorId, conversation.customerId, conversation.contactId, event.senderId)
+      const externalMessageId = text(incoming.platformMessageId, incoming.id, incoming._id, event.messageId, event.id)
       const externalEventId = text(event.id, request.headers.get('x-zernio-event-id'), externalMessageId)
       const externalConversationId = text(
         conversation.id,
@@ -215,8 +220,11 @@ export async function POST(request: Request) {
         event.conversationId,
         eventType === 'comment.received' && externalUserId ? `comment:${text(post.id, post._id, event.postId)}:${externalUserId}` : '',
       )
-      const channel = channelFrom(account.platform ?? account.channel ?? account.type ?? event.channel ?? event.platform ?? incoming.channel ?? conversation.channel ?? payload.channel)
-      const zernioAccountId = text(account.id, account._id, event.accountId, event.account_id, incoming.accountId, conversation.accountId, payload.accountId)
+      const channel = channelFrom(account.platform ?? account.channel ?? account.type ?? conversation.platform ?? event.channel ?? event.platform ?? incoming.platform ?? incoming.channel ?? conversation.channel ?? payload.channel)
+      // Zernio's webhook docs name this field `account.accountId` explicitly
+      // (see the "Resolve message attachment" guide); `.id`/`._id` kept as a
+      // fallback for the generic accounts-list shape.
+      const zernioAccountId = text(account.accountId, account.id, account._id, incoming.accountId, event.accountId, event.account_id, conversation.accountId, payload.accountId)
       if (!externalEventId || !externalConversationId || !channel || !zernioAccountId || (eventType !== 'reaction.received' && !externalUserId)) continue
 
       const { data: connector, error: connectorError } = await db
@@ -278,11 +286,17 @@ export async function POST(request: Request) {
       }
 
       const attachment = extractZernioMedia(record(incoming))
-      const content = normalizeMetaText(text(incoming.text, incoming.content, incoming.body, comment.message, comment.text, event.text), attachment?.caption)
+      // `message.message` is the documented text field for message.received
+      // (https://docs.zernio.com/webhooks/inbox) — checked first; the rest
+      // are fallbacks for the comment.received shape / older payloads.
+      const content = normalizeMetaText(text(incoming.message, incoming.text, incoming.content, incoming.body, comment.message, comment.text, event.text), attachment?.caption)
       const auditUserId = await resolveAuditUserId(db, typed.account_id)
-      const contactName = text(sender.name, sender.displayName, sender.fullName, comment.author_name, comment.authorName, participant.name)
+      const contactName = text(conversation.participantName, incoming.senderName, sender.name, sender.displayName, sender.fullName, comment.author_name, comment.authorName, participant.name)
       const contactEmail = text(sender.email, participant.email, incoming.email, comment.author_email, comment.authorEmail)
-      const contactPhone = text(sender.phone, participant.phone, incoming.phone, comment.author_phone, comment.authorPhone)
+      // WhatsApp has no separate "phone" field on the sender/conversation —
+      // the platform's own contact identity (senderId/participantId) IS the
+      // E.164 phone number, so that's the phone-dedupe key on this channel.
+      const contactPhone = text(sender.phone, participant.phone, incoming.phone, comment.author_phone, comment.authorPhone, channel === 'whatsapp' ? externalUserId : '')
       const webhookAvatarUrl = safeHttpsUrl(
         sender.avatarUrl ?? sender.avatar_url ?? sender.profilePicture ?? sender.profile_picture ?? sender.profileImage ?? sender.profile_image ?? sender.profilePhoto ?? sender.profile_photo ?? sender.picture ?? sender.pictureUrl ?? sender.picture_url ?? sender.imageUrl ?? sender.image_url ?? sender.photoUrl ?? sender.photo_url ??
         participant.avatarUrl ?? participant.avatar_url ?? participant.profilePicture ?? participant.profile_picture ?? participant.profileImage ?? participant.profile_image ?? participant.profilePhoto ?? participant.profile_photo ?? participant.picture ?? participant.pictureUrl ?? participant.picture_url ?? participant.imageUrl ?? participant.image_url ?? participant.photoUrl ?? participant.photo_url,
