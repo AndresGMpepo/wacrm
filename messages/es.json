@@ -40,6 +40,8 @@
     "roleAgent": "Agente",
     "roleViewer": "Espectador",
     "closeMenu": "Cerrar menú",
+    "collapseMenu": "Contraer menú",
+    "expandMenu": "Expandir menú",
     "defaultUser": "Usuario",
     "defaultAvatar": "Avatar",
     "menuProfile": "Perfil",

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
+import { emitNotificationsChanged } from '@/lib/notifications/events';
 import type { Notification } from '@/types';
 
 /** Global listener for notification rows addressed to the signed-in user. */
@@ -89,6 +90,7 @@ export function IncomingMessageAlert() {
     const showNotification = (notification: Notification) => {
       if (observedNotificationIds.has(notification.id)) return;
       observedNotificationIds.add(notification.id);
+      emitNotificationsChanged();
 
       if (
         notification.type !== 'incoming_message' &&

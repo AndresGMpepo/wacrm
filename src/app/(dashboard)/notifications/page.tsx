@@ -19,6 +19,7 @@ import { formatDistanceToNow } from 'date-fns';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { emitNotificationsChanged } from '@/lib/notifications/events';
 
 // Icon per notification type. Only one type exists today
 // (conversation_assigned) but this keeps future types a one-line add.
@@ -117,6 +118,7 @@ export default function NotificationsPage() {
         .update({ read_at: new Date().toISOString() })
         .eq('id', id)
         .is('read_at', null);
+      emitNotificationsChanged();
       if (updateErr) {
         toast.error('Failed to mark notification as read');
         load();
@@ -154,6 +156,7 @@ export default function NotificationsPage() {
       .update({ read_at: now })
       .is('read_at', null);
     setMarkingAll(false);
+    emitNotificationsChanged();
     if (updateErr) {
       toast.error('Failed to mark all as read');
       load();

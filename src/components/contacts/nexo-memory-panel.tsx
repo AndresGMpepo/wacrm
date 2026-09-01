@@ -6,6 +6,7 @@ import { ArrowUpRight, Brain, CheckCircle2, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { createClient } from '@/lib/supabase/client';
 
 type Memory = {
   current_summary: string | null;
@@ -138,6 +139,25 @@ export function NexoMemoryPanel({
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Live refresh: an analysis run against ANY of this contact's
+  // conversations (across channels) updates the same contact_memory row, so
+  // this must resubscribe whenever the viewer switches to a different
+  // contact — without this, switching from an Instagram to a WhatsApp
+  // conversation of the same contact showed stale memory until reload.
+  useEffect(() => {
+    const supabase = createClient();
+    const channel = supabase
+      .channel(`nexo-memory:${contactId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'contact_memory', filter: `contact_id=eq.${contactId}` }, () => void load())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'contact_memory_events', filter: `contact_id=eq.${contactId}` }, () => void load())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'contact_facts', filter: `contact_id=eq.${contactId}` }, () => void load())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'contact_commitments', filter: `contact_id=eq.${contactId}` }, () => void load())
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [contactId, load]);
 
   async function markCommitmentDone(commitmentId: string) {
     try {

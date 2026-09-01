@@ -133,6 +133,29 @@ function formatDuration(seconds: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
+/**
+ * WhatsApp's Cloud API (and every provider built on top of it, incl.
+ * Zernio) only accepts JPEG/PNG for image messages — WebP is silently
+ * rejected at send time even though browsers happily produce/save it
+ * (screenshots, images saved from the web). Convert client-side so
+ * picking a WebP file doesn't end in a failed send with a confusing error.
+ */
+async function convertWebpToJpeg(file: File): Promise<File> {
+  const bitmap = await createImageBitmap(file);
+  const canvas = document.createElement("canvas");
+  canvas.width = bitmap.width;
+  canvas.height = bitmap.height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return file;
+  ctx.drawImage(bitmap, 0, 0);
+  const blob: Blob | null = await new Promise((resolve) =>
+    canvas.toBlob((result) => resolve(result), "image/jpeg", 0.92)
+  );
+  if (!blob) return file;
+  const newName = file.name.replace(/\.\w+$/, "") + ".jpg";
+  return new File([blob], newName, { type: "image/jpeg" });
+}
+
 /** Worker used for the WhatsApp Ogg/Opus recording path. */
 const OPUS_ENCODER_PATH = "/opus/encoderWorker.min.js";
 
@@ -399,6 +422,16 @@ export function MessageComposer({
   // Upload a captured file to chat-media and stage it as a draft.
   const stageUpload = useCallback(
     async (kind: ComposerMediaKind, file: File) => {
+      // WhatsApp doesn't accept WebP for image messages — convert before
+      // the size check since the re-encoded JPEG's size differs.
+      if (kind === "image" && file.type === "image/webp") {
+        try {
+          file = await convertWebpToJpeg(file);
+        } catch {
+          toast.error("No se pudo convertir la imagen WebP a JPEG.");
+          return;
+        }
+      }
       // Per-kind ceiling mirrors Meta's caps (image 5 MB, etc.) so we
       // reject before upload rather than orphaning an object that Meta
       // would then refuse at send.

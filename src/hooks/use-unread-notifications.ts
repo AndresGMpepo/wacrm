@@ -2,62 +2,65 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import type { Notification } from "@/types";
+import { NOTIFICATIONS_CHANGED_EVENT } from "@/lib/notifications/events";
+import { useAuth } from "@/hooks/use-auth";
 
 /**
  * Count of unread notifications for the current user. Used by the
  * sidebar to surface a badge on the Notifications nav entry.
  *
- * RLS on `notifications` already scopes every read to `auth.uid() =
- * user_id`, so no explicit filter is needed here — same pattern as
- * `useTotalUnread` for conversations.
+ * Combines a Realtime subscription (fast path) with a plain refetch
+ * triggered by `NOTIFICATIONS_CHANGED_EVENT` (dispatched by
+ * IncomingMessageAlert, which already has a proven poll+Realtime dual path)
+ * and a visibility-change refetch, so the badge doesn't get stuck if this
+ * subscription alone misses an event.
  */
 export function useUnreadNotifications(): number {
+  const { user } = useAuth();
   const [count, setCount] = useState(0);
 
   useEffect(() => {
+    if (!user) return;
     const supabase = createClient();
     let cancelled = false;
 
-    (async () => {
+    const refetchCount = async () => {
       // head:true skips fetching rows — we only need the `count`
       // supabase-js returns alongside the (empty) response body.
       const { count: unreadCount, error } = await supabase
         .from("notifications")
         .select("*", { count: "exact", head: true })
+        .eq("user_id", user.id)
         .is("read_at", null);
       if (cancelled || error) return;
       setCount(unreadCount ?? 0);
-    })();
+    };
+
+    void refetchCount();
+
+    const onNotificationsChanged = () => void refetchCount();
+    window.addEventListener(NOTIFICATIONS_CHANGED_EVENT, onNotificationsChanged);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void refetchCount();
+    };
+    document.addEventListener("visibilitychange", onVisible);
 
     const channel = supabase
-      .channel("notifications-unread-count")
+      .channel(`notifications-unread-count:${user.id}`)
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "notifications" },
-        (payload) => {
-          if (payload.eventType === "INSERT") {
-            const row = payload.new as Notification;
-            if (!row.read_at) setCount((n) => n + 1);
-          } else if (payload.eventType === "UPDATE") {
-            // Updates here only ever set read_at (marking a notification
-            // read). Derive purely from the new row so we don't rely on
-            // payload.old columns, which require REPLICA IDENTITY FULL.
-            const newRow = payload.new as Notification;
-            if (newRow.read_at) setCount((n) => Math.max(0, n - 1));
-          } else if (payload.eventType === "DELETE") {
-            const oldRow = payload.old as Partial<Notification>;
-            if (!oldRow.read_at) setCount((n) => Math.max(0, n - 1));
-          }
-        },
+        { event: "*", schema: "public", table: "notifications", filter: `user_id=eq.${user.id}` },
+        () => void refetchCount(),
       )
       .subscribe();
 
     return () => {
       cancelled = true;
+      window.removeEventListener(NOTIFICATIONS_CHANGED_EVENT, onNotificationsChanged);
+      document.removeEventListener("visibilitychange", onVisible);
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [user]);
 
   return count;
 }

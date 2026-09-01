@@ -6,7 +6,6 @@ import { useAuth } from "@/hooks/use-auth";
 import { displayContactPhone } from "@/lib/contacts/contact-identity";
 import type { Contact, Deal, ContactNote, Tag } from "@/types";
 import {
-  Phone,
   Mail,
   Copy,
   Check,
@@ -151,6 +150,23 @@ export function ContactSidebar({ contact, conversationId, internalNotesOpenSigna
     fetchContactData();
   }, [fetchContactData]);
 
+  // Live refresh: an analysis run against one of this contact's other
+  // conversations (e.g. Instagram) must reflect here immediately, without
+  // waiting for a page reload, when viewing a different conversation (e.g.
+  // WhatsApp) of the SAME contact.
+  useEffect(() => {
+    if (!contact) return;
+    const supabase = createClient();
+    const channel = supabase
+      .channel(`contact-history:${contact.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations', filter: `contact_id=eq.${contact.id}` }, () => void fetchContactData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'ai_conversation_analyses' }, () => void fetchContactData())
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [contact, fetchContactData]);
+
   const handleCopyPhone = useCallback(async () => {
     const phone = displayContactPhone(contact?.phone);
     if (!phone) return;
@@ -213,7 +229,7 @@ export function ContactSidebar({ contact, conversationId, internalNotesOpenSigna
 
   return (
     <div className="flex h-full w-80 flex-col border-l border-border bg-card">
-      <ScrollArea className="flex-1">
+      <ScrollArea className="min-h-0 flex-1">
         <div className="p-4">
           {/* Contact Info */}
           <div className="flex flex-col items-center text-center">
@@ -239,21 +255,29 @@ export function ContactSidebar({ contact, conversationId, internalNotesOpenSigna
           {/* Phone */}
           <div className="mt-4 space-y-2">
             {contactPhone ? (
-              <>
-                <button onClick={() => void telephony.call(contactPhone)} disabled={!telephony.connected} className="flex w-full items-center gap-2 rounded-lg bg-primary/10 px-3 py-2 text-sm font-medium text-primary transition-colors hover:bg-primary/20 disabled:opacity-50"><PhoneCall className="h-4 w-4" /><span>Llamar por softphone</span></button>
+              <div className="flex w-full items-center gap-1 rounded-lg px-1 py-1 text-sm text-muted-foreground">
+                <button
+                  type="button"
+                  onClick={() => void telephony.call(contactPhone)}
+                  disabled={!telephony.connected}
+                  title="Llamar por softphone"
+                  aria-label="Llamar por softphone"
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary transition-colors hover:bg-primary/20 disabled:opacity-50"
+                >
+                  <PhoneCall className="h-4 w-4" />
+                </button>
                 <button
                   onClick={handleCopyPhone}
-                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted"
+                  className="flex flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-muted"
                 >
-                  <Phone className="h-4 w-4 text-muted-foreground" />
-                  <span className="flex-1 text-left">{contactPhone}</span>
+                  <span className="flex-1 truncate">{contactPhone}</span>
                   {copied ? (
                     <Check className="h-3 w-3 text-primary" />
                   ) : (
                     <Copy className="h-3 w-3 text-muted-foreground" />
                   )}
                 </button>
-              </>
+              </div>
             ) : null}
 
             {contact.email && (
