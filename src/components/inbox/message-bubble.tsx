@@ -35,6 +35,25 @@ interface MessageBubbleProps {
   reactions?: MessageReaction[];
   currentUserId?: string;
   onToggleReaction?: (emoji: string) => void;
+  /** Conversation's channel_type — drives the Zernio media proxy below. */
+  channelType?: string | null;
+}
+
+/**
+ * A Zernio-connected WhatsApp conversation stores the raw Zernio CDN
+ * URL in `media_url`. Unlike the native WhatsApp proxy path
+ * (`/api/whatsapp/media/...`), that CDN requires a server-side bearer
+ * token to download — a plain `<img>`/`<audio>` src can't attach it,
+ * so the browser gets an unauthenticated 401/403 and the bubble shows
+ * a broken image / "unavailable" audio. Route those through our own
+ * authenticated same-origin proxy instead; Facebook/Instagram Zernio
+ * media stays public and is left untouched.
+ */
+function resolveMediaSrc(message: Message, channelType?: string | null): string | undefined {
+  if (channelType === "zernio_whatsapp" && message.media_url?.startsWith("http")) {
+    return `/api/omnichannel/zernio/media/${message.id}`;
+  }
+  return message.media_url;
 }
 
 function StatusIcon({ status }: { status: Message["status"] }) {
@@ -83,7 +102,7 @@ function MediaImage({ url, alt }: { url: string; alt: string }) {
     if (!url) return;
 
     // Proxy URLs need auth fetch to create blob URL
-    if (url.startsWith("/api/whatsapp/media/")) {
+    if (url.startsWith("/api/whatsapp/media/") || url.startsWith("/api/omnichannel/zernio/media/")) {
       try {
         const res = await fetch(url);
         if (!res.ok) throw new Error("Failed to load media");
@@ -170,7 +189,8 @@ function MediaImage({ url, alt }: { url: string; alt: string }) {
   );
 }
 
-function MessageContent({ message, t }: { message: Message, t: ReturnType<typeof useTranslations> }) {
+function MessageContent({ message, t, channelType }: { message: Message, t: ReturnType<typeof useTranslations>, channelType?: string | null }) {
+  const mediaSrc = resolveMediaSrc(message, channelType);
   switch (message.content_type) {
     case "text":
       return (
@@ -182,8 +202,8 @@ function MessageContent({ message, t }: { message: Message, t: ReturnType<typeof
     case "image":
       return (
         <div>
-          {message.media_url ? (
-            <MediaImage url={message.media_url} alt="Shared image" />
+          {mediaSrc ? (
+            <MediaImage url={mediaSrc} alt="Shared image" />
           ) : (
             <MediaUnavailable label={t("photo")} t={t} />
           )}
@@ -199,11 +219,11 @@ function MessageContent({ message, t }: { message: Message, t: ReturnType<typeof
     case "video":
       return (
         <div>
-          {message.media_url ? (
+          {mediaSrc ? (
             <MediaWithFallback label={t("video")} t={t}>
               {(onError) => (
                 <video
-                  src={message.media_url!}
+                  src={mediaSrc}
                   controls
                   className="max-h-64 max-w-60 rounded-lg"
                   onError={onError}
@@ -224,10 +244,10 @@ function MessageContent({ message, t }: { message: Message, t: ReturnType<typeof
     case "audio":
       return (
         <div>
-          {message.media_url ? (
+          {mediaSrc ? (
             <MediaWithFallback label={t("audio")} t={t}>
               {(onError) => (
-                <audio src={message.media_url!} controls className="max-w-60" onError={onError} />
+                <audio src={mediaSrc} controls className="max-w-60" onError={onError} />
               )}
             </MediaWithFallback>
           ) : (
@@ -238,12 +258,12 @@ function MessageContent({ message, t }: { message: Message, t: ReturnType<typeof
       );
 
     case "document":
-      if (!message.media_url) {
+      if (!mediaSrc) {
         return <MediaUnavailable label={message.content_text || t("document")} t={t} />;
       }
       return (
         <a
-          href={message.media_url}
+          href={mediaSrc}
           target="_blank"
           rel="noopener noreferrer"
           className="flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-2 text-sm hover:bg-muted"
@@ -336,6 +356,7 @@ export function MessageBubble({
   reactions,
   currentUserId,
   onToggleReaction,
+  channelType,
 }: MessageBubbleProps) {
   const t = useTranslations("Inbox.bubble");
 
@@ -366,7 +387,7 @@ export function MessageBubble({
             onPrimary={isAgent}
           />
         )}
-        <MessageContent message={message} t={t} />
+        <MessageContent message={message} t={t} channelType={channelType} />
         <div
           className={cn(
             "mt-1 flex items-center gap-1",

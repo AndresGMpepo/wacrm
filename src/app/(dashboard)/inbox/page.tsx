@@ -234,41 +234,25 @@ function InboxPageInner() {
     return () => window.removeEventListener('nexoomni:inbox-incoming', onIncomingNotification);
   }, [hydrateConversation]);
 
-  // Check WhatsApp connection status on mount
+  // Check WhatsApp connection status on mount. Delegated to a server
+  // route (rather than querying Supabase directly) because
+  // `omnichannel_connectors` — the Zernio guided-connect path — is
+  // admin-only under RLS; a non-admin agent's session couldn't see it,
+  // so the banner falsely claimed "not connected" for Zernio-only
+  // accounts even though the thread above shows messages fine.
   useEffect(() => {
     const checkConnection = async () => {
-      const supabase = createClient();
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      const user = session?.user;
-
-      if (!user) return;
-
-      // whatsapp_config is one-row-per-account post-multi-user, so
-      // the previous `.eq('user_id', user.id)` would miss the row
-      // for any teammate who didn't personally save the config —
-      // the "WhatsApp not connected" banner would show in the
-      // shared inbox even though the admin had it configured.
-      // Resolve account_id via the profile and query by that.
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("account_id")
-        .eq("user_id", user.id)
-        .maybeSingle();
-      const accountId = profile?.account_id as string | undefined;
-      if (!accountId) {
+      try {
+        const res = await fetch("/api/inbox/whatsapp-status", { cache: "no-store" });
+        if (!res.ok) {
+          setWhatsappConnected(false);
+          return;
+        }
+        const body = (await res.json()) as { connected?: boolean };
+        setWhatsappConnected(Boolean(body.connected));
+      } catch {
         setWhatsappConnected(false);
-        return;
       }
-
-      const { data } = await supabase
-        .from("whatsapp_config")
-        .select("status")
-        .eq("account_id", accountId)
-        .maybeSingle();
-
-      setWhatsappConnected(data?.status === "connected");
     };
 
     checkConnection();

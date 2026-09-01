@@ -1169,6 +1169,7 @@ export function MessageThread({
                           reactions={msgReactions}
                           currentUserId={user?.id}
                           onToggleReaction={handlePillToggle}
+                          channelType={conversation.channel_type}
                         />
                       </MessageActions>
                     );
