@@ -1,7 +1,6 @@
 import { NextResponse, after } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption'
-import { getMediaUrl, downloadMedia } from '@/lib/whatsapp/meta-api'
 import { normalizePhone } from '@/lib/whatsapp/phone-utils'
 import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe'
 import { verifyMetaWebhookSignature } from '@/lib/whatsapp/webhook-signature'
@@ -283,19 +282,6 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
       }
 
       const config = configRows[0]
-      let decryptedAccessToken: string
-      try {
-        decryptedAccessToken = decrypt(config.access_token)
-      } catch (error) {
-        // The webhook is acknowledged before this background work runs. Make
-        // a key mismatch explicit in the container log instead of silently
-        // dropping every inbound message for this account.
-        console.error(
-          '[whatsapp/webhook] Stored access token cannot be decrypted. Keep ENCRYPTION_KEY identical across deployments, then re-save the WhatsApp connection.',
-          { accountId: config.account_id, phoneNumberId, error: error instanceof Error ? error.message : 'unknown' }
-        )
-        continue
-      }
 
       for (let i = 0; i < value.messages.length; i++) {
         const message = value.messages[i]
@@ -311,7 +297,6 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
           // inserts that need it for NOT NULL FK compliance. Always
           // the admin who saved the WhatsApp config.
           config.user_id,
-          decryptedAccessToken,
           config.queue_id ?? null
         )
       }
@@ -588,7 +573,6 @@ async function processMessage(
   // (contacts, conversations). Always the admin who saved the
   // WhatsApp config; the choice is arbitrary post-017 but stable.
   configOwnerUserId: string,
-  accessToken: string,
   queueId: string | null
 ) {
   const senderPhone = normalizePhone(message.from)
@@ -649,7 +633,7 @@ async function processMessage(
 
   // Parse message content based on type
   const { contentText, mediaUrl, mediaType, interactiveReplyId } =
-    await parseMessageContent(message, accessToken)
+    parseMessageContent(message)
 
   // Resolve swipe-reply context if present. A missing parent is fine —
   // we just store NULL and the UI renders the message without a quote.
@@ -870,10 +854,9 @@ async function processMessage(
   })
 }
 
-async function parseMessageContent(
-  message: WhatsAppMessage,
-  accessToken: string
-): Promise<{
+function parseMessageContent(
+  message: WhatsAppMessage
+): {
   contentText: string | null
   mediaUrl: string | null
   mediaType: string | null
@@ -885,25 +868,8 @@ async function parseMessageContent(
    * tap with the right affordance. Null for everything else.
    */
   interactiveReplyId: string | null
-}> {
-  // getMediaUrl signature is (mediaId, accessToken) — earlier code had
-  // the args swapped, so every verification hit an invalid Meta URL and
-  // fell through to the catch block, leaving mediaUrl as null. That's
-  // why images showed up as empty bubbles in the inbox.
-  const verifyAndBuildUrl = async (
-    mediaId: string
-  ): Promise<string | null> => {
-    try {
-      await getMediaUrl({ mediaId, accessToken })
-      return `/api/whatsapp/media/${mediaId}`
-    } catch (error) {
-      console.error(
-        `Failed to verify media ${mediaId} with Meta:`,
-        error instanceof Error ? error.message : error
-      )
-      return null
-    }
-  }
+} {
+  const buildMediaUrl = (mediaId: string) => `/api/whatsapp/media/${mediaId}`
 
   // Default shape — each case overrides only the fields it cares about.
   // Keeps the new `interactiveReplyId` field DRY across every return site.
@@ -923,7 +889,7 @@ async function parseMessageContent(
         return {
           ...empty,
           contentText: message.image.caption || null,
-          mediaUrl: await verifyAndBuildUrl(message.image.id),
+          mediaUrl: buildMediaUrl(message.image.id),
           mediaType: message.image.mime_type,
         }
       }
@@ -934,7 +900,7 @@ async function parseMessageContent(
         return {
           ...empty,
           contentText: message.video.caption || null,
-          mediaUrl: await verifyAndBuildUrl(message.video.id),
+          mediaUrl: buildMediaUrl(message.video.id),
           mediaType: message.video.mime_type,
         }
       }
@@ -946,7 +912,7 @@ async function parseMessageContent(
           ...empty,
           contentText:
             message.document.caption || message.document.filename || null,
-          mediaUrl: await verifyAndBuildUrl(message.document.id),
+          mediaUrl: buildMediaUrl(message.document.id),
           mediaType: message.document.mime_type,
         }
       }
@@ -956,7 +922,7 @@ async function parseMessageContent(
       if (message.audio?.id) {
         return {
           ...empty,
-          mediaUrl: await verifyAndBuildUrl(message.audio.id),
+          mediaUrl: buildMediaUrl(message.audio.id),
           mediaType: message.audio.mime_type,
         }
       }
@@ -969,7 +935,7 @@ async function parseMessageContent(
       if (message.sticker?.id) {
         return {
           ...empty,
-          mediaUrl: await verifyAndBuildUrl(message.sticker.id),
+          mediaUrl: buildMediaUrl(message.sticker.id),
           mediaType: message.sticker.mime_type,
         }
       }

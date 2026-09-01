@@ -116,11 +116,11 @@ export function extractZernioMedia(value: Record<string, unknown>): MetaAttachme
   const candidates = flattenZernioRecords(value)
   let textOnly: MetaAttachment | undefined
   for (const recordValue of candidates) {
-    const mimeType = asText(recordValue.mime_type ?? recordValue.mimeType ?? recordValue.mime ?? recordValue.content_type)
-    const url = safeUrl(recordValue.url ?? recordValue.href ?? recordValue.link ?? recordValue.file_url ?? recordValue.media_url)
+    const mimeType = asText(recordValue.mime_type ?? recordValue.mimeType ?? recordValue.mime ?? recordValue.content_type ?? recordValue.contentType)
+    const url = safeUrl(recordValue.url ?? recordValue.href ?? recordValue.link ?? recordValue.file_url ?? recordValue.fileUrl ?? recordValue.media_url ?? recordValue.mediaUrl ?? recordValue.download_url ?? recordValue.downloadUrl ?? recordValue.attachment_url ?? recordValue.attachmentUrl)
     const caption = asText(recordValue.caption ?? recordValue.text ?? recordValue.body ?? recordValue.message ?? recordValue.description)
-    const fileName = asText(recordValue.filename ?? recordValue.name ?? recordValue.file_name)
-    const type = asText(recordValue.type ?? recordValue.kind ?? recordValue.mediaType ?? recordValue.mimeType)
+    const fileName = asText(recordValue.filename ?? recordValue.name ?? recordValue.file_name ?? recordValue.fileName)
+    const type = asText(recordValue.type ?? recordValue.kind ?? recordValue.media_type ?? recordValue.mediaType ?? recordValue.attachment_type ?? recordValue.attachmentType ?? recordValue.mimeType)
     const normalizedType = (type ?? 'document').toLowerCase()
     const knownType = normalizedType.includes('image') ? 'image'
       : normalizedType.includes('video') ? 'video'
@@ -143,14 +143,14 @@ export function extractZernioMedia(value: Record<string, unknown>): MetaAttachme
 
   if (textOnly) return textOnly
 
-  const directUrl = safeUrl(value.url ?? value.href ?? value.link)
+  const directUrl = safeUrl(value.url ?? value.href ?? value.link ?? value.media_url ?? value.mediaUrl ?? value.file_url ?? value.fileUrl ?? value.download_url ?? value.downloadUrl ?? value.attachment_url ?? value.attachmentUrl)
   if (directUrl || asText(value.caption) || asText(value.mime_type) || asText(value.filename)) {
     return {
       kind: 'document',
       url: directUrl,
-      mimeType: asText(value.mime_type) ?? asText(value.mimeType),
+      mimeType: asText(value.mime_type) ?? asText(value.mimeType) ?? asText(value.content_type) ?? asText(value.contentType),
       caption: asText(value.caption),
-      fileName: asText(value.filename) ?? asText(value.name),
+      fileName: asText(value.filename) ?? asText(value.name) ?? asText(value.file_name) ?? asText(value.fileName),
     }
   }
 

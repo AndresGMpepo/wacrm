@@ -95,6 +95,27 @@ describe('extractZernioMedia', () => {
       fileName: undefined,
     })
   })
+
+  it('accepts camelCase Zernio media fields from connected WhatsApp payloads', () => {
+    const media = extractZernioMedia({
+      message: {
+        attachment: {
+          attachmentType: 'audio',
+          mediaUrl: 'https://zernio.com/api/v1/whatsapp/media/media-123',
+          contentType: 'audio/ogg',
+          fileName: 'voice-note.ogg',
+        },
+      },
+    })
+
+    expect(media).toStrictEqual({
+      kind: 'audio',
+      url: 'https://zernio.com/api/v1/whatsapp/media/media-123',
+      mimeType: 'audio/ogg',
+      caption: undefined,
+      fileName: 'voice-note.ogg',
+    })
+  })
 })
 
 describe('extractZernioReaction', () => {
