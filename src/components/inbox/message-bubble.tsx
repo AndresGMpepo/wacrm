@@ -4,7 +4,7 @@
 // Next Image cannot optimize either without weakening the existing media flow.
 /* eslint-disable @next/next/no-img-element */
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import type { Message, MessageReaction } from "@/types";
 import {
@@ -61,6 +61,16 @@ function MediaUnavailable({ label, t }: { label: string, t: ReturnType<typeof us
       <span>{t("unavailable", { label })}</span>
     </div>
   );
+}
+
+/** Wraps a media element so a failed fetch (expired/invalid WhatsApp
+ *  access token, revoked media, etc.) shows a clear message instead of
+ *  the browser's blank/broken player — audio and video had no failure
+ *  state at all before this, unlike images. */
+function MediaWithFallback({ label, t, children }: { label: string; t: ReturnType<typeof useTranslations>; children: (onError: () => void) => ReactNode }) {
+  const [error, setError] = useState(false);
+  if (error) return <MediaUnavailable label={label} t={t} />;
+  return <>{children(() => setError(true))}</>;
 }
 
 function MediaImage({ url, alt }: { url: string; alt: string }) {
@@ -190,11 +200,16 @@ function MessageContent({ message, t }: { message: Message, t: ReturnType<typeof
       return (
         <div>
           {message.media_url ? (
-            <video
-              src={message.media_url}
-              controls
-              className="max-h-64 max-w-60 rounded-lg"
-            />
+            <MediaWithFallback label={t("video")} t={t}>
+              {(onError) => (
+                <video
+                  src={message.media_url!}
+                  controls
+                  className="max-h-64 max-w-60 rounded-lg"
+                  onError={onError}
+                />
+              )}
+            </MediaWithFallback>
           ) : (
             <MediaUnavailable label={t("video")} t={t} />
           )}
@@ -210,7 +225,11 @@ function MessageContent({ message, t }: { message: Message, t: ReturnType<typeof
       return (
         <div>
           {message.media_url ? (
-            <audio src={message.media_url} controls className="max-w-60" />
+            <MediaWithFallback label={t("audio")} t={t}>
+              {(onError) => (
+                <audio src={message.media_url!} controls className="max-w-60" onError={onError} />
+              )}
+            </MediaWithFallback>
           ) : (
             <MediaUnavailable label={t("audio")} t={t} />
           )}
