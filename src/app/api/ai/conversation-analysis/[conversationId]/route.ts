@@ -109,6 +109,23 @@ export async function POST(_: Request, { params }: { params: Promise<{ conversat
     if (!config) {
       return NextResponse.json({ error: 'Configura y activa la IA antes de analizar conversaciones.' }, { status: 400 })
     }
+    // Analyzing while an image/voice note is still being described/
+    // transcribed locks in a summary that ignores that message's content —
+    // block and let the agent retry once media analysis finishes (it also
+    // auto-retriggers this analysis itself, see ai-analysis-worker).
+    const { count: pendingMediaCount } = await supabase
+      .from('messages')
+      .select('id', { count: 'exact', head: true })
+      .eq('conversation_id', conversationId)
+      .eq('sender_type', 'customer')
+      .not('media_url', 'is', null)
+      .in('media_analysis_status', ['queued', 'processing'])
+    if ((pendingMediaCount ?? 0) > 0) {
+      return NextResponse.json({
+        error: 'Hay una imagen o nota de voz aún en análisis. Espera a que termine para tener el contexto completo.',
+        code: 'media_analysis_pending',
+      }, { status: 409 })
+    }
     const messages = await buildConversationContext(supabase, conversationId)
     if (!messages.length) {
       return NextResponse.json({ error: 'No hay mensajes de texto para analizar.' }, { status: 400 })

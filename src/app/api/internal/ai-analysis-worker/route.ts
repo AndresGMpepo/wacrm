@@ -16,7 +16,7 @@ import { alertCommitmentOverdue, alertStaleProspect, sendDailyNexoMemoryDigest }
 
 export const maxDuration = 60
 
-type Job = { id: string; account_id: string; conversation_id: string; conversation: { contact_id: string } | { contact_id: string }[] | null }
+type Job = { id: string; account_id: string; conversation_id: string; attempts: number; conversation: { contact_id: string } | { contact_id: string }[] | null }
 type MediaJob = { id: string; account_id: string; conversation_id: string; message_id: string; kind: 'image' | 'voice_note'; conversation: { channel_type: string | null } | { channel_type: string | null }[] | null }
 
 function startOfDay() { const d = new Date(); d.setHours(0, 0, 0, 0); return d.toISOString() }
@@ -64,12 +64,35 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
   const db = supabaseAdmin()
-  const { data: jobs, error } = await db.from('ai_analysis_jobs').select('id, account_id, conversation_id, conversation:conversations(contact_id)').eq('status', 'queued').lte('scheduled_at', new Date().toISOString()).order('scheduled_at').limit(5)
+  // Media (image/voice-note) analysis runs first so any job that completes
+  // within this same tick is already reflected in `messages` before the
+  // conversation-analysis loop below builds its context — reduces the
+  // "analyzed before the transcript existed" window from a full cron cycle
+  // to zero when both finish in the same pass.
+  const mediaResult = await processMediaJobs(db)
+  const { data: jobs, error } = await db.from('ai_analysis_jobs').select('id, account_id, conversation_id, attempts, conversation:conversations(contact_id)').eq('status', 'queued').lte('scheduled_at', new Date().toISOString()).order('scheduled_at').limit(5)
   if (error) return NextResponse.json({ error: 'Could not load jobs' }, { status: 500 })
   let completed = 0; let skipped = 0; let failed = 0
   for (const job of (jobs ?? []) as Job[]) {
     const { data: claimed } = await db.from('ai_analysis_jobs').update({ status: 'processing', attempts: 1 }).eq('id', job.id).eq('status', 'queued').select('id').maybeSingle()
     if (!claimed) continue
+    // Don't lock in an analysis built on incomplete context: if this
+    // conversation has a customer image/voice note still being described/
+    // transcribed, push the job back a few minutes instead of analyzing
+    // text-only — the media job's own completion re-queues analysis anyway
+    // (see processMediaJobs), so this just avoids a wrong summary being
+    // shown to agents in the meantime. Capped attempts so a media job that
+    // never finishes (stuck/failed) doesn't stall analysis forever.
+    const pendingMediaAttemptsCap = 4
+    if (job.attempts < pendingMediaAttemptsCap) {
+      const { count: pendingMediaCount } = await db.from('messages').select('id', { count: 'exact', head: true })
+        .eq('conversation_id', job.conversation_id).eq('sender_type', 'customer').not('media_url', 'is', null)
+        .in('media_analysis_status', ['queued', 'processing'])
+      if ((pendingMediaCount ?? 0) > 0) {
+        await db.from('ai_analysis_jobs').update({ status: 'queued', scheduled_at: new Date(Date.now() + 2 * 60_000).toISOString(), attempts: job.attempts + 1 }).eq('id', job.id)
+        skipped++; continue
+      }
+    }
     try {
       const config = await loadAiConfig(db, job.account_id)
       if (!config) throw new Error('La IA no está activa.')
@@ -142,7 +165,6 @@ export async function POST(request: Request) {
       failed++
     }
   }
-  const mediaResult = await processMediaJobs(db)
   const followUps = await processCallFollowUps(db)
   const overdueCommitments = await markOverdueCommitments(db)
   const staleProspects = await alertStaleProspects(db)
