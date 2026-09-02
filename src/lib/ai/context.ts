@@ -35,8 +35,11 @@ export async function buildConversationContext(
   const rows = ((data ?? []) as DbMessage[]).reverse()
   return rows
     .map((m) => {
+      // Zernio-sourced media messages with no real caption store the
+      // literal "no text" placeholder in content_text — treat that the
+      // same as "no text" so it doesn't shadow the media analysis below.
       const text = m.content_text?.trim()
-      if (text) return { role: m.sender_type === 'customer' ? 'user' as const : 'assistant' as const, content: text }
+      if (text && text !== '[Mensaje sin texto]') return { role: m.sender_type === 'customer' ? 'user' as const : 'assistant' as const, content: text }
       if (m.media_transcript?.trim()) return { role: m.sender_type === 'customer' ? 'user' as const : 'assistant' as const, content: `[Nota de voz transcrita: ${m.media_transcript.trim()}]` }
       if (m.media_description?.trim()) return { role: m.sender_type === 'customer' ? 'user' as const : 'assistant' as const, content: `[Imagen recibida: ${m.media_description.trim()}]` }
       return null

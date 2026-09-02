@@ -92,6 +92,26 @@ function MediaWithFallback({ label, t, children }: { label: string; t: ReturnTyp
   return <>{children(() => setError(true))}</>;
 }
 
+// Authenticated media proxies (native WhatsApp + Zernio) require a blob
+// fetch instead of a plain <img src>. Caching the resulting blob URL by
+// source URL means leaving the inbox and coming back (a remount, not a
+// full page reload) reuses it instead of re-fetching + re-decoding every
+// image again, which was the main cause of the page feeling slow.
+const mediaBlobUrlCache = new Map<string, string>();
+const MEDIA_BLOB_CACHE_LIMIT = 150;
+
+function cacheMediaBlobUrl(url: string, blobUrl: string) {
+  if (mediaBlobUrlCache.size >= MEDIA_BLOB_CACHE_LIMIT) {
+    const oldestKey = mediaBlobUrlCache.keys().next().value;
+    if (oldestKey) {
+      const oldestUrl = mediaBlobUrlCache.get(oldestKey);
+      if (oldestUrl) URL.revokeObjectURL(oldestUrl);
+      mediaBlobUrlCache.delete(oldestKey);
+    }
+  }
+  mediaBlobUrlCache.set(url, blobUrl);
+}
+
 function MediaImage({ url, alt }: { url: string; alt: string }) {
   const [src, setSrc] = useState<string | null>(null);
   const [error, setError] = useState(false);
@@ -103,11 +123,18 @@ function MediaImage({ url, alt }: { url: string; alt: string }) {
 
     // Proxy URLs need auth fetch to create blob URL
     if (url.startsWith("/api/whatsapp/media/") || url.startsWith("/api/omnichannel/zernio/media/")) {
+      const cached = mediaBlobUrlCache.get(url);
+      if (cached) {
+        setSrc(cached);
+        setLoading(false);
+        return;
+      }
       try {
         const res = await fetch(url);
         if (!res.ok) throw new Error("Failed to load media");
         const blob = await res.blob();
         const blobUrl = URL.createObjectURL(blob);
+        cacheMediaBlobUrl(url, blobUrl);
         setSrc(blobUrl);
       } catch {
         setError(true);
@@ -122,12 +149,8 @@ function MediaImage({ url, alt }: { url: string; alt: string }) {
 
   useEffect(() => {
     loadImage();
-    return () => {
-      if (src?.startsWith("blob:")) {
-        URL.revokeObjectURL(src);
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // No blob revoke on cleanup: the URL is now cache-owned and may still
+    // be in use by a later remount or another instance of the same image.
   }, [loadImage]);
 
   if (error) {
@@ -191,6 +214,10 @@ function MediaImage({ url, alt }: { url: string; alt: string }) {
 
 function MessageContent({ message, t, channelType }: { message: Message, t: ReturnType<typeof useTranslations>, channelType?: string | null }) {
   const mediaSrc = resolveMediaSrc(message, channelType);
+  // Zernio-sourced messages with no real caption/filename store the
+  // literal "no text" placeholder as content_text — never show that as
+  // if it were an actual caption.
+  const caption = message.content_text && message.content_text !== "[Mensaje sin texto]" ? message.content_text : null;
   switch (message.content_type) {
     case "text":
       return (
@@ -207,9 +234,9 @@ function MessageContent({ message, t, channelType }: { message: Message, t: Retu
           ) : (
             <MediaUnavailable label={t("photo")} t={t} />
           )}
-          {message.content_text && (
+          {caption && (
             <p className="mt-1 whitespace-pre-wrap break-words text-sm">
-              {message.content_text}
+              {caption}
             </p>
           )}
           <MediaInsight label="Descripción de imagen" value={message.media_description} status={message.media_analysis_status} />
@@ -233,9 +260,9 @@ function MessageContent({ message, t, channelType }: { message: Message, t: Retu
           ) : (
             <MediaUnavailable label={t("video")} t={t} />
           )}
-          {message.content_text && (
+          {caption && (
             <p className="mt-1 whitespace-pre-wrap break-words text-sm">
-              {message.content_text}
+              {caption}
             </p>
           )}
         </div>
@@ -261,9 +288,7 @@ function MessageContent({ message, t, channelType }: { message: Message, t: Retu
       // Older Zernio-sourced rows may have the generic "no text" placeholder
       // as content_text instead of the real filename — don't show that as
       // the document's label.
-      const documentLabel = message.content_text && message.content_text !== "[Mensaje sin texto]"
-        ? message.content_text
-        : t("document");
+      const documentLabel = caption || t("document");
       if (!mediaSrc) {
         return <MediaUnavailable label={documentLabel} t={t} />;
       }

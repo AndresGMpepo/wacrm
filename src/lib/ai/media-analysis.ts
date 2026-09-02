@@ -24,7 +24,7 @@ function textFromChatCompletion(data: unknown): string {
     ? content
     : Array.isArray(content) ? content.map((part) => part.text ?? '').join('') : ''
   if (!text.trim()) throw new AiError('OpenAI did not return an image description.', { code: 'empty_response' })
-  return text.trim().slice(0, 2500)
+  return text.trim().slice(0, 300)
 }
 
 function assertSize(bytes: Buffer) {
@@ -83,8 +83,12 @@ export async function describeImageWithOpenAi(args: {
       headers: { Authorization: `Bearer ${args.apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: args.model || IMAGE_ANALYSIS_MODEL,
-        messages: [{ role: 'system', content: 'Describe la imagen de forma concisa y factual para el contexto de atención al cliente. No infieras datos sensibles ni identidad.' }, { role: 'user', content: [{ type: 'text', text: 'Describe esta imagen para incluirla en el resumen de la conversación.' }, { type: 'image_url', image_url: { url: dataUrl } }] }],
-        max_completion_tokens: 300,
+        // Short and fast on purpose: this blocks conversation analysis
+        // until it finishes (see ai-analysis-worker), so a long, verbose
+        // description directly slows down every other AI feature waiting
+        // on it. One concise sentence is enough context for the summary.
+        messages: [{ role: 'system', content: 'Describe la imagen en UNA sola oración breve (máximo 25 palabras), factual, para el contexto de atención al cliente. No infieras datos sensibles ni identidad.' }, { role: 'user', content: [{ type: 'text', text: 'Describe brevemente esta imagen en una oración.' }, { type: 'image_url', image_url: { url: dataUrl } }] }],
+        max_completion_tokens: 80,
       }),
       signal: AbortSignal.timeout(args.timeoutMs),
     })
