@@ -336,7 +336,11 @@ export async function POST(request: Request) {
 
       const now = new Date().toISOString()
       const messageId = `zernio:${typed.id}:${externalMessageId || externalEventId}`
-      const platformMessageId = text(incoming.platformMessageId, incoming.platform_message_id, incoming.nativeMessageId, incoming.externalMessageId)
+      // List Messages docs: the `id` field IS "the platform message id" —
+      // this is what the attachment-resolve endpoint's messageId path
+      // param expects. Falls back to whatever resolved externalMessageId
+      // above (same candidate chain plus incoming.id/_id).
+      const platformMessageId = text(incoming.platformMessageId, incoming.platform_message_id, incoming.nativeMessageId, incoming.externalMessageId, externalMessageId)
       const contentType = attachment && attachment.kind !== 'text' ? attachment.kind : 'text'
       const mediaUrl = attachment?.url ?? null
       const { error: messageError } = await db.from('messages').insert({

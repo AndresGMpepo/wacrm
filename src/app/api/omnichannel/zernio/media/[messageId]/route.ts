@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { requireRole, toErrorResponse } from '@/lib/auth/account'
-import { downloadZernioInboundMedia, resolveZernioAttachmentUrl, type ZernioChannel } from '@/lib/zernio/server'
+import { downloadZernioInboundMedia, extractZernioPlatformMessageId, resolveZernioAttachmentUrl, type ZernioChannel } from '@/lib/zernio/server'
 
 function admin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -30,7 +30,7 @@ export async function GET(
 
     const { data: message, error } = await supabase
       .from('messages')
-      .select('media_url, platform_message_id, conversation:conversations!inner(account_id, channel_type, external_session_id, connector_id)')
+      .select('media_url, message_id, platform_message_id, conversation:conversations!inner(account_id, channel_type, external_session_id, connector_id)')
       .eq('id', messageId)
       .single()
 
@@ -65,19 +65,29 @@ export async function GET(
 
     let bytes: Buffer
     let mimeType: string | null
-    if (zernioAccountId && conversation.external_session_id && message.platform_message_id) {
-      const freshUrl = await resolveZernioAttachmentUrl(
-        conversation.external_session_id,
-        zernioAccountId,
-        message.platform_message_id,
-      )
-      const res = await fetch(freshUrl, { redirect: 'error', signal: AbortSignal.timeout(15_000) })
-      if (!res.ok) throw new Error(`No se pudo descargar el medio de Zernio (${res.status}).`)
-      bytes = Buffer.from(await res.arrayBuffer())
-      mimeType = res.headers.get('content-type')
+    // Our own internal message_id doubles as a fallback source for the
+    // platform message id (rows saved before that column was populated
+    // reliably) — parsed via the same helper reactions/sends already use.
+    const platformMessageId = message.platform_message_id || extractZernioPlatformMessageId(message.message_id)
+    let resolved: { bytes: Buffer; mimeType: string | null } | null = null
+    if (zernioAccountId && conversation.external_session_id && platformMessageId) {
+      try {
+        const freshUrl = await resolveZernioAttachmentUrl(
+          conversation.external_session_id,
+          zernioAccountId,
+          platformMessageId,
+        )
+        const res = await fetch(freshUrl, { redirect: 'error', signal: AbortSignal.timeout(15_000) })
+        if (!res.ok) throw new Error(`No se pudo descargar el medio de Zernio (${res.status}).`)
+        resolved = { bytes: Buffer.from(await res.arrayBuffer()), mimeType: res.headers.get('content-type') }
+      } catch (resolveError) {
+        console.error('[zernio media proxy] resolve-attachment failed, falling back:', resolveError instanceof Error ? resolveError.message : resolveError)
+      }
+    }
+    if (resolved) {
+      bytes = resolved.bytes
+      mimeType = resolved.mimeType
     } else {
-      // Fallback for older rows saved before platform_message_id was
-      // reliably populated.
       const downloaded = await downloadZernioInboundMedia(message.media_url, zernioChannel)
       bytes = downloaded.bytes
       mimeType = downloaded.mimeType
