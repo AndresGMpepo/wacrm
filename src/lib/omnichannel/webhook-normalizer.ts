@@ -120,9 +120,15 @@ export function extractZernioMedia(value: Record<string, unknown>): MetaAttachme
     const url = safeUrl(recordValue.url ?? recordValue.href ?? recordValue.link ?? recordValue.file_url ?? recordValue.fileUrl ?? recordValue.media_url ?? recordValue.mediaUrl ?? recordValue.download_url ?? recordValue.downloadUrl ?? recordValue.attachment_url ?? recordValue.attachmentUrl)
     const caption = asText(recordValue.caption ?? recordValue.text ?? recordValue.body ?? recordValue.message ?? recordValue.description)
     const fileName = asText(recordValue.filename ?? recordValue.name ?? recordValue.file_name ?? recordValue.fileName)
-    const type = asText(recordValue.type ?? recordValue.kind ?? recordValue.media_type ?? recordValue.mediaType ?? recordValue.attachment_type ?? recordValue.attachmentType ?? recordValue.mimeType)
-    const normalizedType = (type ?? 'document').toLowerCase()
-    const knownType = normalizedType.includes('image') ? 'image'
+    const type = asText(recordValue.type ?? recordValue.originalType ?? recordValue.kind ?? recordValue.media_type ?? recordValue.mediaType ?? recordValue.attachment_type ?? recordValue.attachmentType ?? recordValue.mimeType)
+    // Fall back to the MIME type when there's no usable type/kind field —
+    // stickers and GIFs are often reported with an unrecognized type name
+    // but a plain "image/webp" / "image/gif" mimeType.
+    const normalizedType = (type ?? mimeType ?? 'document').toLowerCase()
+    // WhatsApp/Messenger report stickers and GIFs under their own type
+    // names (not "image") — both render fine as <img>, so map them there
+    // instead of falling through to the generic document icon.
+    const knownType = normalizedType.includes('image') || normalizedType.includes('sticker') || normalizedType.includes('gif') ? 'image'
       : normalizedType.includes('video') ? 'video'
       : normalizedType.includes('audio') || normalizedType.includes('voice') ? 'audio'
       : normalizedType.includes('document') || normalizedType.includes('file') || normalizedType.includes('pdf') ? 'document'

@@ -288,8 +288,11 @@ export async function POST(request: Request) {
       const attachment = extractZernioMedia(record(incoming))
       // `message.message` is the documented text field for message.received
       // (https://docs.zernio.com/webhooks/inbox) — checked first; the rest
-      // are fallbacks for the comment.received shape / older payloads.
-      const content = normalizeMetaText(text(incoming.message, incoming.text, incoming.content, incoming.body, comment.message, comment.text, event.text), attachment?.caption)
+      // are fallbacks for the comment.received shape / older payloads. A
+      // document/sticker with no caption falls back to its filename (mirrors
+      // the native WhatsApp webhook's content_text convention) instead of the
+      // generic placeholder, so the bubble shows something useful.
+      const content = normalizeMetaText(text(incoming.message, incoming.text, incoming.content, incoming.body, comment.message, comment.text, event.text), attachment?.caption || attachment?.fileName)
       const auditUserId = await resolveAuditUserId(db, typed.account_id)
       const contactName = text(conversation.participantName, incoming.senderName, sender.name, sender.displayName, sender.fullName, comment.author_name, comment.authorName, participant.name)
       const contactEmail = text(sender.email, participant.email, incoming.email, comment.author_email, comment.authorEmail)

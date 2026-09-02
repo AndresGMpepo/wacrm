@@ -257,9 +257,15 @@ function MessageContent({ message, t, channelType }: { message: Message, t: Retu
         </div>
       );
 
-    case "document":
+    case "document": {
+      // Older Zernio-sourced rows may have the generic "no text" placeholder
+      // as content_text instead of the real filename — don't show that as
+      // the document's label.
+      const documentLabel = message.content_text && message.content_text !== "[Mensaje sin texto]"
+        ? message.content_text
+        : t("document");
       if (!mediaSrc) {
-        return <MediaUnavailable label={message.content_text || t("document")} t={t} />;
+        return <MediaUnavailable label={documentLabel} t={t} />;
       }
       return (
         <a
@@ -270,10 +276,11 @@ function MessageContent({ message, t, channelType }: { message: Message, t: Retu
         >
           <FileText className="h-5 w-5 shrink-0 text-muted-foreground" />
           <span className="truncate">
-            {message.content_text || t("document")}
+            {documentLabel}
           </span>
         </a>
       );
+    }
 
     case "template":
       return (
