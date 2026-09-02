@@ -132,7 +132,10 @@ function emptyButton(type: TemplateButton['type']): TemplateButton {
  * session, a proxy timeout, or a server crash can all hand back an HTML
  * page instead. `res.json()` on that throws a raw "Unexpected token '<'"
  * SyntaxError, which is meaningless to the user. Read as text first so a
- * parse failure can report the HTTP status instead.
+ * parse failure can report the HTTP status AND a snippet of the actual
+ * body — logged to the console (F12) so the real culprit (Traefik's own
+ * 502 page vs. a Next.js crash page vs. something else) is visible
+ * instead of guessed at.
  */
 async function parseApiResponse(res: Response): Promise<Record<string, unknown>> {
   const text = await res.text();
@@ -140,8 +143,9 @@ async function parseApiResponse(res: Response): Promise<Record<string, unknown>>
   try {
     return JSON.parse(text);
   } catch {
+    console.error(`[templates] Non-JSON response (HTTP ${res.status}):`, text.slice(0, 1000));
     throw new Error(
-      `El servidor respondió de forma inesperada (HTTP ${res.status}). Si tu sesión expiró, recarga la página e inicia sesión de nuevo; si persiste, es un error del servidor.`,
+      `El servidor respondió de forma inesperada (HTTP ${res.status}). Abre la consola del navegador (F12) para ver el cuerpo exacto de la respuesta — eso indica si el error viene del proxy o de la aplicación.`,
     );
   }
 }
