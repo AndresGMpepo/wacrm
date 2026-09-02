@@ -350,6 +350,24 @@ export async function removeZernioReaction(conversationId: string, messageId: st
   return true
 }
 
+/**
+ * Disconnects a connected account on Zernio's side:
+ * https://docs.zernio.com/accounts/delete-account
+ * Called when an admin removes a connector from our Settings UI, so the
+ * WhatsApp/Facebook/Instagram account doesn't stay linked in Zernio after
+ * the user believes they've disconnected it. Never throws — the caller
+ * always proceeds with the local row removal regardless of this result,
+ * so a Zernio-side failure surfaces as a warning, not a blocked action.
+ */
+export async function disconnectZernioAccount(zernioAccountId: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    await zernioFetch(`/accounts/${encodeURIComponent(zernioAccountId)}`, { method: 'DELETE' })
+    return { ok: true }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : 'Error desconocido' }
+  }
+}
+
 /** Verify only when the installation explicitly configures a webhook secret. */
 export function verifyZernioSignature(raw: string, signature: string | null) {
   const secret = process.env.ZERNIO_WEBHOOK_SECRET?.trim()

@@ -108,6 +108,15 @@ function InboxPageInner() {
   // elsewhere.
   const autoSelectedForDeepLinkRef = useRef<string | null>(null);
 
+  // Tracks the conversation id a manual click just selected, while the
+  // ?c= URL update (router.replace, async) hasn't landed in
+  // `searchParams` yet. Without this, the deep-link sync effect below
+  // sees `activeConversation.id !== deepLinkConvId` during that window
+  // and "corrects" the selection back to the stale URL value — the
+  // conversation appears to switch, then snaps back to the previous
+  // chat until a full reload.
+  const manualSelectionRef = useRef<string | null>(null);
+
   // Tracks conversations whose hydrate fetch is currently in flight. The
   // conv-INSERT and the first-message-INSERT events both call into
   // hydrateConversation; the dedupe here keeps it at one refetch per
@@ -188,7 +197,18 @@ function InboxPageInner() {
   // ConversationList's initial fetch effect to run again. Resolve the target
   // here so every `?c=` link opens its thread, including closed or older ones.
   useEffect(() => {
-    if (!deepLinkConvId || activeConversation?.id === deepLinkConvId) return;
+    if (!deepLinkConvId) return;
+    if (activeConversation?.id === deepLinkConvId) {
+      // URL and state now agree — if that's because our own manual
+      // selection's router.replace just landed, clear the guard so a
+      // later genuine deep link (e.g. a notification click) isn't
+      // blocked by it.
+      if (manualSelectionRef.current === deepLinkConvId) manualSelectionRef.current = null;
+      return;
+    }
+    // A manual selection is still waiting on its URL update — don't let
+    // this effect revert it back to the previous thread.
+    if (manualSelectionRef.current && manualSelectionRef.current === activeConversation?.id) return;
     let cancelled = false;
 
     void (async () => {
@@ -540,6 +560,7 @@ function InboxPageInner() {
       // sees `ref !== deepLinkConvId`, fires a second time, and
       // clobbers the messages MessageThread just fetched.
       autoSelectedForDeepLinkRef.current = conv.id;
+      manualSelectionRef.current = conv.id;
       // Reflect the selection in the URL so a refresh lands the user
       // back in the same thread, and so copy-paste links work. Use
       // replace() to avoid polluting browser history with every click.

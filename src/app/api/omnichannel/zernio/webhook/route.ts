@@ -175,6 +175,41 @@ async function registerReceipt(
   throw error
 }
 
+/**
+ * Keeps our connector row in sync when Zernio reports a connect/disconnect
+ * that didn't originate from our own Settings UI — e.g. a phone-side
+ * WhatsApp Business app disconnect, or the user managing the connection
+ * directly in Zernio's dashboard. Without this, NexoOmni can keep showing
+ * a connector as usable long after Zernio (and Meta) have dropped it.
+ * https://docs.zernio.com/webhooks/accounts
+ */
+async function handleAccountLifecycleEvent(
+  db: ReturnType<typeof admin>,
+  eventType: 'account.connected' | 'account.disconnected',
+  account: Json,
+) {
+  const zernioAccountId = text(account.accountId, account.id, account._id)
+  const channel = channelFrom(account.platform ?? account.channel ?? account.type)
+  if (!zernioAccountId || !channel) return
+  const now = new Date().toISOString()
+  try {
+    if (eventType === 'account.connected') {
+      await db.from('omnichannel_connectors')
+        .update({ status: 'configured', last_error: null, updated_at: now })
+        .eq('provider', `zernio_${channel}`)
+        .eq('zernio_account_id', zernioAccountId)
+      return
+    }
+    const reason = text(account.reason, account.disconnectionType) || 'Desconectado desde Zernio/Meta.'
+    await db.from('omnichannel_connectors')
+      .update({ status: 'error', last_error: reason, updated_at: now })
+      .eq('provider', `zernio_${channel}`)
+      .eq('zernio_account_id', zernioAccountId)
+  } catch (error) {
+    console.error('[zernio] account lifecycle sync failed:', error)
+  }
+}
+
 export async function POST(request: Request) {
   const raw = await request.text()
   const signature = request.headers.get('x-zernio-signature') ?? request.headers.get('x-late-signature')
@@ -193,6 +228,11 @@ export async function POST(request: Request) {
   try {
     for (const event of entries(payload)) {
       const eventType = text(event.event, payload.event)
+
+      if (eventType === 'account.connected' || eventType === 'account.disconnected') {
+        await handleAccountLifecycleEvent(db, eventType, record(event.account))
+        continue
+      }
       if (eventType !== 'message.received' && eventType !== 'comment.received' && eventType !== 'reaction.received') continue
 
       const message = record(event.message)
@@ -286,6 +326,7 @@ export async function POST(request: Request) {
       }
 
       const attachment = extractZernioMedia(record(incoming))
+      try {
       // `message.message` is the documented text field for message.received
       // (https://docs.zernio.com/webhooks/inbox) — checked first; the rest
       // are fallbacks for the comment.received shape / older payloads. A
@@ -394,6 +435,14 @@ export async function POST(request: Request) {
       if (created) await dispatchWebhookEvent(db, typed.account_id, 'conversation.created', { conversation_id: conversationRow.id, contact_id: contactId, channel_type: typed.provider, connector_id: typed.id })
       await dispatchWebhookEvent(db, typed.account_id, 'message.received', { conversation_id: conversationRow.id, contact_id: contactId, message_id: messageId, channel_type: typed.provider, content_type: contentType, text: content, media_url: mediaUrl })
       await db.from('zernio_webhook_receipts').update({ outcome: 'processed', detail: 'Mensaje del canal conectado agregado.', processed_at: now }).eq('connector_id', typed.id).eq('external_message_id', externalEventId)
+      } catch (eventError) {
+        // One poisoned event (e.g. a stale contact row colliding on a
+        // unique constraint) must not abort the rest of the batch nor
+        // make Zernio retry-and-fail this same payload forever.
+        console.error('[zernio] message event failed, skipping:', eventError)
+        await db.from('zernio_webhook_receipts').update({ outcome: 'failed', detail: eventError instanceof Error ? eventError.message.slice(0, 500) : 'Error desconocido', processed_at: new Date().toISOString() })
+          .eq('connector_id', typed.id).eq('external_message_id', externalEventId)
+      }
     }
     return NextResponse.json({ ok: true })
   } catch (error) {

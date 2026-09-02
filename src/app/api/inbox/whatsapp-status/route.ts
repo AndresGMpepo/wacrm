@@ -27,7 +27,11 @@ export async function GET() {
 
     const [{ data: nativeConfig }, { data: zernioConnector }] = await Promise.all([
       db.from('whatsapp_config').select('status').eq('account_id', accountId).maybeSingle(),
-      db.from('omnichannel_connectors').select('id').eq('account_id', accountId).eq('provider', 'zernio_whatsapp').eq('status', 'active').limit(1).maybeSingle(),
+      // 'configured' is a genuinely-connected connector that just hasn't
+      // received its first inbound message yet (only then does the
+      // webhook flip it to 'active') — only 'paused'/'error' mean the
+      // number isn't actually usable.
+      db.from('omnichannel_connectors').select('id').eq('account_id', accountId).eq('provider', 'zernio_whatsapp').in('status', ['configured', 'active']).limit(1).maybeSingle(),
     ])
 
     return NextResponse.json({

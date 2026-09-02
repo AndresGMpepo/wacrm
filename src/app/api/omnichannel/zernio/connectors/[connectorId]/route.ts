@@ -3,6 +3,7 @@ import { createClient as createAdminClient } from '@supabase/supabase-js'
 
 import { requireEntitlement } from '@/lib/account/entitlements'
 import { toErrorResponse } from '@/lib/auth/account'
+import { disconnectZernioAccount } from '@/lib/zernio/server'
 
 const PROVIDERS = ['zernio_whatsapp', 'zernio_facebook', 'zernio_instagram']
 
@@ -33,10 +34,28 @@ export async function DELETE(_request: NextRequest, { params }: { params: Promis
   try {
     const { connectorId } = await params
     const { accountId } = await requireEntitlement('social_messaging', 'admin')
-    const { error } = await admin().from('omnichannel_connectors')
+    const db = admin()
+
+    // Removing the row here without also telling Zernio leaves the
+    // WhatsApp/Facebook/Instagram account connected on their side —
+    // NexoOmni shows "disconnected" while Zernio (and Meta) still think
+    // it's live, and a later reconnect can then collide with it.
+    const { data: connector } = await db.from('omnichannel_connectors')
+      .select('zernio_account_id')
+      .eq('id', connectorId).eq('account_id', accountId).in('provider', PROVIDERS)
+      .maybeSingle()
+    let warning: string | undefined
+    if (connector?.zernio_account_id) {
+      const result = await disconnectZernioAccount(connector.zernio_account_id)
+      if (!result.ok) {
+        warning = `Se eliminó la conexión en NexoOmni, pero no se pudo confirmar la desconexión en Zernio: ${result.error}. Verifica manualmente en el panel de Zernio.`
+      }
+    }
+
+    const { error } = await db.from('omnichannel_connectors')
       .delete().eq('id', connectorId).eq('account_id', accountId).in('provider', PROVIDERS)
     if (error) throw error
-    return NextResponse.json({ ok: true })
+    return NextResponse.json({ ok: true, warning })
   } catch (error) {
     return toErrorResponse(error)
   }

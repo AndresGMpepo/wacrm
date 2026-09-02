@@ -81,9 +81,13 @@ export function ZernioConnectConfig({ channels }: { channels: Channel[] }) {
         headers: { 'Content-Type': 'application/json' },
         body: isDelete ? undefined : JSON.stringify({ status: action === 'pause' ? 'paused' : 'configured' }),
       })
-      const body = await response.json().catch(() => null) as { error?: string } | null
+      const body = await response.json().catch(() => null) as { error?: string; warning?: string } | null
       if (!response.ok) throw new Error(body?.error ?? 'No se pudo actualizar la conexión.')
-      toast.success(isDelete ? 'Conexión eliminada.' : action === 'pause' ? 'Conexión pausada.' : 'Conexión reactivada.')
+      if (body?.warning) {
+        toast.warning(body.warning)
+      } else {
+        toast.success(isDelete ? 'Conexión eliminada.' : action === 'pause' ? 'Conexión pausada.' : 'Conexión reactivada.')
+      }
       await load()
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'No se pudo actualizar la conexión.')
