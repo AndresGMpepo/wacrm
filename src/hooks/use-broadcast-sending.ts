@@ -462,6 +462,7 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
           .filter((r) => r.contact?.phone)
           .map((r) => ({
             phone: r.contact!.phone as string,
+            contactId: r.contact!.id,
             params: r.contact
               ? resolveVariables(
                   payload.variables,

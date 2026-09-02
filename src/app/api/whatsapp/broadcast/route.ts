@@ -6,6 +6,7 @@ import { decrypt } from '@/lib/whatsapp/encryption'
 import type { SendTimeParams } from '@/lib/whatsapp/template-send-builder'
 import { isMessageTemplate } from '@/lib/whatsapp/template-row-guard'
 import { sendZernioTemplateMessage } from '@/lib/zernio/server'
+import { recordBroadcastMessage } from '@/lib/whatsapp/broadcast-message-log'
 import {
   sanitizePhoneForMeta,
   isValidE164,
@@ -58,6 +59,9 @@ interface NewRecipient {
    * sendTemplateMessage for the merge rules.
    */
   messageParams?: SendTimeParams
+  /** Our contacts.id — used to mirror the send into the inbox so a
+   *  later reply has context. Optional for legacy callers. */
+  contactId?: string
 }
 
 /**
@@ -71,12 +75,13 @@ interface NewRecipient {
 async function sendBroadcastViaZernio(args: {
   supabase: SupabaseClient
   accountId: string
+  userId: string
   connectorId: string
   recipients: NewRecipient[]
   templateName: string
   templateLanguage: string
 }) {
-  const { supabase, accountId, connectorId, recipients, templateName, templateLanguage } = args
+  const { supabase, accountId, userId, connectorId, recipients, templateName, templateLanguage } = args
 
   const { data: connector } = await supabase
     .from('omnichannel_connectors')
@@ -139,6 +144,19 @@ async function sendBroadcastViaZernio(args: {
       })
       results.push({ phone: recipient.phone, status: 'sent', whatsapp_message_id: result.messageId })
       sentCount++
+      if (recipient.contactId) {
+        await recordBroadcastMessage({
+          db: supabase,
+          accountId,
+          userId,
+          contactId: recipient.contactId,
+          channelType: 'zernio_whatsapp',
+          connectorId,
+          externalSessionId: result.conversationId,
+          templateName,
+          whatsappMessageId: result.messageId,
+        })
+      }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
       console.error(`Failed to send Zernio broadcast to ${recipient.phone}:`, errorMessage)
@@ -217,6 +235,7 @@ export async function POST(request: Request) {
       return sendBroadcastViaZernio({
         supabase,
         accountId,
+        userId,
         connectorId,
         recipients,
         templateName: template_name,
@@ -334,6 +353,17 @@ export async function POST(request: Request) {
           whatsapp_message_id: sentMessageId,
         })
         sentCount++
+        if (recipient.contactId) {
+          await recordBroadcastMessage({
+            db: supabase,
+            accountId,
+            userId,
+            contactId: recipient.contactId,
+            channelType: 'whatsapp',
+            templateName: template_name,
+            whatsappMessageId: sentMessageId,
+          })
+        }
       } else {
         console.error(
           `Failed to send broadcast to ${recipient.phone}:`,

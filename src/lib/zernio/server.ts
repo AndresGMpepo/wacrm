@@ -490,7 +490,7 @@ export async function sendZernioTemplateMessage(args: {
   templateName: string
   templateLanguage: string
   templateParams?: string[]
-}): Promise<{ messageId: string }> {
+}): Promise<{ messageId: string; conversationId: string | null }> {
   const response = await zernioFetch('/inbox/conversations', {
     method: 'POST',
     headers: { 'Idempotency-Key': crypto.randomUUID() },
@@ -505,6 +505,6 @@ export async function sendZernioTemplateMessage(args: {
   const data = record(response.data ?? response)
   const messageId = asText(data.messageId)
   if (!messageId) throw new Error('Zernio no devolvió el identificador del mensaje enviado.')
-  return { messageId }
+  return { messageId, conversationId: asText(data.conversationId) || null }
 }
 

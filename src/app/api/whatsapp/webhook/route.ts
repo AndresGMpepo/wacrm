@@ -13,6 +13,7 @@ import {
   isTemplateWebhookField,
 } from '@/lib/whatsapp/template-webhook'
 import { isValidStatusTransition } from '@/lib/whatsapp/recipient-status-ladder'
+import { flagBroadcastReplyIfAny as flagBroadcastReplyIfAnyShared } from '@/lib/whatsapp/broadcast-reply-flag'
 
 // The `after()` callback in POST runs within this route's max duration.
 // Inbound processing can fan out to per-media Meta verification calls, so
@@ -411,38 +412,7 @@ async function flagBroadcastReplyIfAny(
   contactId: string,
   conversationId: string,
 ) {
-  try {
-    // Most recent outbound broadcast in this account that hasn't
-    // been replied to yet. Account-scoped so a shared inbox reply
-    // marks the broadcast as replied regardless of which teammate
-    // sent it.
-    const { data: recs, error } = await supabaseAdmin()
-      .from('broadcast_recipients')
-      .select('id, status, broadcast_id, broadcasts!inner(account_id)')
-      .eq('contact_id', contactId)
-      .eq('broadcasts.account_id', accountId)
-      .in('status', ['sent', 'delivered', 'read'])
-      .order('created_at', { ascending: false })
-      .limit(1)
-
-    if (error || !recs || recs.length === 0) return
-
-    const row = recs[0]
-    const { error: updErr } = await supabaseAdmin()
-      .from('broadcast_recipients')
-      .update({
-        status: 'replied',
-        replied_at: new Date().toISOString(),
-        response_conversation_id: conversationId,
-      })
-      .eq('id', row.id)
-
-    if (updErr) {
-      console.error('Error marking broadcast recipient replied:', updErr)
-    }
-  } catch (err) {
-    console.error('flagBroadcastReplyIfAny failed:', err)
-  }
+  await flagBroadcastReplyIfAnyShared(supabaseAdmin(), accountId, contactId, conversationId)
 }
 
 /**

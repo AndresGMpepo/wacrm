@@ -7,6 +7,7 @@ import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
 import { extractZernioMedia, extractZernioReaction, normalizeMetaText, safeZernioContactName } from '@/lib/omnichannel/webhook-normalizer'
 import { getZernioParticipantPicture, verifyZernioSignature, type ZernioChannel } from '@/lib/zernio/server'
 import { isValidStatusTransition } from '@/lib/whatsapp/recipient-status-ladder'
+import { flagBroadcastReplyIfAny } from '@/lib/whatsapp/broadcast-reply-flag'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 20
@@ -492,6 +493,12 @@ export async function POST(request: Request) {
       }
 
       await db.from('conversations').update({ status: 'open', last_message_text: content, last_message_at: now, unread_count: (conversationRow.unread_count ?? 0) + 1, updated_at: now }).eq('id', conversationRow.id)
+      // Broadcasts only exist for WhatsApp — flip the broadcast_recipients
+      // row to `replied` so a Zernio-connected number's reply rate shows
+      // up the same as a reply on the native (direct Meta) connection.
+      if (typed.provider === 'zernio_whatsapp') {
+        await flagBroadcastReplyIfAny(db, typed.account_id, contactId, conversationRow.id)
+      }
       await db.rpc('auto_assign_inbound_conversation', { p_account_id: typed.account_id, p_conversation_id: conversationRow.id })
       await db.from('omnichannel_connectors').update({ status: 'active', last_event_at: now, last_error: null, updated_at: now }).eq('id', typed.id)
       if (created) await dispatchWebhookEvent(db, typed.account_id, 'conversation.created', { conversation_id: conversationRow.id, contact_id: contactId, channel_type: typed.provider, connector_id: typed.id })
