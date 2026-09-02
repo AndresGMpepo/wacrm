@@ -15,6 +15,7 @@ import {
 import { buildMetaTemplatePayload } from '@/lib/whatsapp/template-components'
 import { ensureImageHeaderHandle } from '@/lib/whatsapp/template-header-handle'
 import { normalizeStatus } from '@/lib/whatsapp/template-status-normalize'
+import { createZernioWhatsAppTemplate } from '@/lib/zernio/server'
 
 /**
  * Shared upsert payload builder — both the Meta-failure path and the
@@ -24,6 +25,7 @@ import { normalizeStatus } from '@/lib/whatsapp/template-status-normalize'
 function buildUpsertRow(
   accountId: string,
   userId: string,
+  connectorId: string | null,
   payload: TemplatePayload,
   extras: {
     status: 'DRAFT' | string
@@ -36,10 +38,10 @@ function buildUpsertRow(
     // of migration 017. Without this an INSERT throws on the
     // not-null constraint.
     account_id: accountId,
-    // Original author — kept as audit only. The unique index is
-    // still on (user_id, name, language) — see the upsert helper
-    // for the cross-teammate dedup follow-up.
     user_id: userId,
+    // NULL = the native (direct Meta) connection; otherwise the
+    // specific Zernio-connected WhatsApp number this template belongs to.
+    connector_id: connectorId,
     name: payload.name,
     category: payload.category,
     language: payload.language,
@@ -61,20 +63,33 @@ function buildUpsertRow(
   }
 }
 
+/**
+ * The unique index moved from a plain (user_id, name, language) column
+ * list to an expression index keyed on account_id + COALESCE(connector_id,
+ * sentinel) + name + language (migration 104) so native and per-Zernio-
+ * number templates can share a name without colliding. PostgREST's
+ * `.upsert(..., { onConflict })` only targets plain column lists, not
+ * expression indexes, so this does an explicit lookup-then-write instead.
+ */
 async function upsertTemplateRow(
   supabase: SupabaseClient,
+  accountId: string,
+  connectorId: string | null,
   row: ReturnType<typeof buildUpsertRow>,
 ) {
-  // TODO(account-sharing): conflict target is still scoped to
-  // user_id. Once a follow-up migration drops the legacy unique
-  // index on (user_id, name, language) and adds (account_id,
-  // name, language), switch `onConflict` here so two teammates
-  // can't shadow each other's same-named template.
-  return supabase
+  let existingQuery = supabase
     .from('message_templates')
-    .upsert(row, { onConflict: 'user_id,name,language' })
-    .select()
-    .single()
+    .select('id')
+    .eq('account_id', accountId)
+    .eq('name', row.name)
+    .eq('language', row.language)
+  existingQuery = connectorId ? existingQuery.eq('connector_id', connectorId) : existingQuery.is('connector_id', null)
+  const { data: existing } = await existingQuery.maybeSingle()
+
+  if (existing?.id) {
+    return supabase.from('message_templates').update(row).eq('id', existing.id).select().single()
+  }
+  return supabase.from('message_templates').insert(row).select().single()
 }
 
 /**
@@ -127,6 +142,8 @@ export async function POST(request: Request) {
       )
     }
 
+    const connectorId = payload.connector_id?.trim() || null
+
     const dryRun =
       process.env.WHATSAPP_TEMPLATES_DRY_RUN === 'true' ||
       process.env.WHATSAPP_TEMPLATES_DRY_RUN === '1'
@@ -137,6 +154,49 @@ export async function POST(request: Request) {
     if (dryRun) {
       metaTemplateId = `dry-run-${crypto.randomUUID()}`
       metaStatus = 'PENDING'
+    } else if (connectorId) {
+      // Zernio-connected WhatsApp number — proxies Meta's own template
+      // API, so the same components builder applies. Resumable-upload
+      // image headers (ensureImageHeaderHandle below) are Meta-Graph-
+      // specific and not wired up for this path yet.
+      if (payload.header_type === 'image' || payload.header_type === 'video' || payload.header_type === 'document') {
+        return NextResponse.json(
+          { error: 'Los encabezados con imagen/video/documento aún no están soportados al crear plantillas vía Zernio. Usa un encabezado de texto o sin encabezado.' },
+          { status: 400 },
+        )
+      }
+      const { data: connector, error: connectorError } = await supabase
+        .from('omnichannel_connectors')
+        .select('zernio_account_id, status')
+        .eq('id', connectorId)
+        .eq('account_id', accountId)
+        .eq('provider', 'zernio_whatsapp')
+        .maybeSingle()
+      if (connectorError || !connector?.zernio_account_id) {
+        return NextResponse.json({ error: 'No se encontró esa conexión de WhatsApp vía Zernio.' }, { status: 400 })
+      }
+      if (connector.status === 'paused') {
+        return NextResponse.json({ error: 'Esa conexión de WhatsApp está pausada.' }, { status: 409 })
+      }
+      const metaPayload = buildMetaTemplatePayload(payload)
+      try {
+        const created = await createZernioWhatsAppTemplate(connector.zernio_account_id, metaPayload)
+        metaTemplateId = created.id
+        metaStatus = created.status
+      } catch (e) {
+        const message = e instanceof Error ? e.message : 'Zernio submit failed.'
+        await upsertTemplateRow(
+          supabase,
+          accountId,
+          connectorId,
+          buildUpsertRow(accountId, userId, connectorId, payload, {
+            status: 'DRAFT',
+            metaTemplateId: null,
+            submissionError: message,
+          }),
+        )
+        return NextResponse.json({ error: message }, { status: 502 })
+      }
     } else {
       const { data: config, error: configError } = await supabase
         .from('whatsapp_config')
@@ -192,7 +252,9 @@ export async function POST(request: Request) {
         // until they fix and re-submit.
         await upsertTemplateRow(
           supabase,
-          buildUpsertRow(accountId, userId, payload, {
+          accountId,
+          connectorId,
+          buildUpsertRow(accountId, userId, connectorId, payload, {
             status: 'DRAFT',
             metaTemplateId: null,
             submissionError: message,
@@ -212,7 +274,9 @@ export async function POST(request: Request) {
 
     const { data: row, error: upsertErr } = await upsertTemplateRow(
       supabase,
-      buildUpsertRow(accountId, userId, payload, {
+      accountId,
+      connectorId,
+      buildUpsertRow(accountId, userId, connectorId, payload, {
         status: normalizeStatus(metaStatus),
         metaTemplateId,
         submissionError: null,

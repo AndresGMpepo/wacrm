@@ -378,3 +378,100 @@ export function verifyZernioSignature(raw: string, signature: string | null) {
   if (received.length !== expected.length) return false
   return crypto.timingSafeEqual(Buffer.from(received), Buffer.from(expected))
 }
+
+// ------------------------------------------------------------
+// WhatsApp templates — Zernio proxies Meta's template API directly,
+// so the request/response shape matches what src/lib/whatsapp already
+// builds/parses for the native (direct Meta) connection.
+// https://docs.zernio.com/platforms/whatsapp/templates
+// ------------------------------------------------------------
+
+export interface ZernioWhatsAppTemplate {
+  id: string
+  name: string
+  status: string
+  category: string
+  language: string
+  components?: unknown[]
+}
+
+export async function listZernioWhatsAppTemplates(zernioAccountId: string): Promise<ZernioWhatsAppTemplate[]> {
+  const payload = await zernioFetch(`/whatsapp/templates?${new URLSearchParams({ accountId: zernioAccountId })}`)
+  const templates = Array.isArray(payload.templates) ? payload.templates : []
+  return templates.flatMap((item): ZernioWhatsAppTemplate[] => {
+    const row = record(item)
+    const id = asText(row.id)
+    const name = asText(row.name)
+    if (!id || !name) return []
+    return [{
+      id,
+      name,
+      status: asText(row.status) || 'PENDING',
+      category: asText(row.category) || 'UTILITY',
+      language: asText(row.language) || 'en_US',
+      components: Array.isArray(row.components) ? row.components : [],
+    }]
+  })
+}
+
+export interface ZernioTemplateSubmitPayload {
+  name: string
+  category: 'MARKETING' | 'UTILITY' | 'AUTHENTICATION'
+  language: string
+  components: unknown[]
+}
+
+export async function createZernioWhatsAppTemplate(
+  zernioAccountId: string,
+  payload: ZernioTemplateSubmitPayload,
+): Promise<{ id: string; status: string }> {
+  const response = await zernioFetch('/whatsapp/templates', {
+    method: 'POST',
+    body: JSON.stringify({ accountId: zernioAccountId, ...payload }),
+  })
+  const template = record(response.template ?? response)
+  const id = asText(template.id)
+  if (!id) throw new Error('Zernio no devolvió el identificador de la plantilla creada.')
+  return { id, status: asText(template.status) || 'PENDING' }
+}
+
+export async function deleteZernioWhatsAppTemplate(zernioAccountId: string, templateId: string): Promise<void> {
+  await zernioFetch(`/whatsapp/templates/${encodeURIComponent(templateId)}?${new URLSearchParams({ accountId: zernioAccountId })}`, { method: 'DELETE' })
+}
+
+// ------------------------------------------------------------
+// Broadcasts — sent one recipient at a time via "Create conversation"
+// (the same endpoint used to open a WhatsApp thread with a template),
+// NOT Zernio's dedicated broadcast/segment API: that API resolves
+// {{n}} placeholders from ZERNIO's own contact fields
+// (variableMapping), which don't carry our contacts' already-resolved
+// per-recipient values. templateParams here is a flat, literal array —
+// the same shape our native (direct Meta) per-recipient send already
+// builds, so both paths share one personalization model.
+// https://docs.zernio.com/messages/create-inbox-conversation
+// ------------------------------------------------------------
+
+export async function sendZernioTemplateMessage(args: {
+  zernioAccountId: string
+  phone: string
+  templateName: string
+  templateLanguage: string
+  templateParams?: string[]
+}): Promise<{ messageId: string }> {
+  const response = await zernioFetch('/inbox/conversations', {
+    method: 'POST',
+    headers: { 'Idempotency-Key': crypto.randomUUID() },
+    body: JSON.stringify({
+      accountId: args.zernioAccountId,
+      participantId: args.phone,
+      templateName: args.templateName,
+      templateLanguage: args.templateLanguage,
+      ...(args.templateParams?.length ? { templateParams: args.templateParams } : {}),
+    }),
+  })
+  const data = record(response.data ?? response)
+  const messageId = asText(data.messageId)
+  if (!messageId) throw new Error('Zernio no devolvió el identificador del mensaje enviado.')
+  return { messageId }
+}
+

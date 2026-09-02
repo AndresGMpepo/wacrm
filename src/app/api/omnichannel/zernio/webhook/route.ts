@@ -6,6 +6,7 @@ import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe'
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
 import { extractZernioMedia, extractZernioReaction, normalizeMetaText, safeZernioContactName } from '@/lib/omnichannel/webhook-normalizer'
 import { getZernioParticipantPicture, verifyZernioSignature, type ZernioChannel } from '@/lib/zernio/server'
+import { isValidStatusTransition } from '@/lib/whatsapp/recipient-status-ladder'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 20
@@ -210,6 +211,46 @@ async function handleAccountLifecycleEvent(
   }
 }
 
+/**
+ * Mirrors an OUTBOUND WhatsApp delivery-status webhook onto
+ * broadcast_recipients — the same mirror the native (direct Meta)
+ * webhook does, so a broadcast sent through a Zernio-connected number
+ * gets the same delivered/read/failed stats. Zernio doesn't emit these
+ * for arbitrary messages we didn't record; only broadcast sends set
+ * `whatsapp_message_id`, so the lookup below naturally scopes itself.
+ * https://docs.zernio.com/webhooks/inbox
+ */
+async function handleOutboundStatusEvent(
+  db: ReturnType<typeof admin>,
+  eventType: 'message.delivered' | 'message.read' | 'message.failed',
+  message: Json,
+  errorInfo: Json,
+) {
+  const platformMessageId = text(message.id, message.platformMessageId, message._id)
+  if (!platformMessageId) return
+  const status = eventType === 'message.delivered' ? 'delivered' : eventType === 'message.read' ? 'read' : 'failed'
+  const now = new Date().toISOString()
+
+  const { data: recipient, error: fetchError } = await db
+    .from('broadcast_recipients')
+    .select('id, status')
+    .eq('whatsapp_message_id', platformMessageId)
+    .maybeSingle()
+  if (fetchError) {
+    console.error('[zernio] could not look up broadcast recipient for status update:', fetchError.message)
+    return
+  }
+  if (!recipient || !isValidStatusTransition(recipient.status, status)) return
+
+  const update: Record<string, unknown> = { status }
+  if (status === 'delivered') update.delivered_at = now
+  if (status === 'read') update.read_at = now
+  if (status === 'failed') update.error_message = text(errorInfo.message, errorInfo.title) || 'Envío fallido reportado por Zernio.'
+
+  const { error: updateError } = await db.from('broadcast_recipients').update(update).eq('id', recipient.id)
+  if (updateError) console.error('[zernio] could not update broadcast recipient status:', updateError.message)
+}
+
 export async function POST(request: Request) {
   const raw = await request.text()
   const signature = request.headers.get('x-zernio-signature') ?? request.headers.get('x-late-signature')
@@ -231,6 +272,10 @@ export async function POST(request: Request) {
 
       if (eventType === 'account.connected' || eventType === 'account.disconnected') {
         await handleAccountLifecycleEvent(db, eventType, record(event.account))
+        continue
+      }
+      if (eventType === 'message.delivered' || eventType === 'message.read' || eventType === 'message.failed') {
+        await handleOutboundStatusEvent(db, eventType, record(event.message), record(event.error))
         continue
       }
       if (eventType !== 'message.received' && eventType !== 'comment.received' && eventType !== 'reaction.received') continue

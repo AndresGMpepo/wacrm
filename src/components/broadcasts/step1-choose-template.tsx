@@ -109,6 +109,11 @@ export function Step1ChooseTemplate({ selectedTemplate, onSelect, onNext, onBack
                 <p className="line-clamp-3 text-xs text-muted-foreground">{template.body_text}</p>
                 <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
                   <span>{template.language ?? 'en_US'}</span>
+                  {template.connector_id && (
+                    <span className="inline-flex items-center rounded-full border border-emerald-600/30 bg-emerald-600/20 px-2 py-0.5 text-emerald-400">
+                      Zernio
+                    </span>
+                  )}
                   {/* Status is omitted on purpose — every template
                       shown here is already filtered to APPROVED,
                       so the chip carried no information. */}

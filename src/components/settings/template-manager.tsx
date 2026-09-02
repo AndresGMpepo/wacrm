@@ -75,6 +75,8 @@ interface TemplateFormData {
   body_samples: string[];
   footer_text: string;
   buttons: TemplateButton[];
+  /** '' = native (direct Meta) connection; otherwise a Zernio connector id. */
+  connector_id: string;
 }
 
 const emptyForm: TemplateFormData = {
@@ -89,6 +91,7 @@ const emptyForm: TemplateFormData = {
   body_samples: [],
   footer_text: '',
   buttons: [],
+  connector_id: '',
 };
 
 const COMMON_LANGUAGE_CODES = [
@@ -131,6 +134,7 @@ export function TemplateManager() {
 
   const [loading, setLoading] = useState(true);
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
+  const [connectors, setConnectors] = useState<{ id: string; displayName: string; status: string }[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -184,8 +188,25 @@ export function TemplateManager() {
       return;
     }
     fetchTemplates(user.id);
+    void fetchConnectors();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authLoading, user?.id]);
+
+  async function fetchConnectors() {
+    try {
+      const res = await fetch('/api/omnichannel/zernio/connectors', { cache: 'no-store' });
+      if (!res.ok) return;
+      const data = await res.json();
+      const rows = Array.isArray(data.connectors) ? data.connectors : [];
+      setConnectors(
+        rows
+          .filter((c: { provider: string; status: string }) => c.provider === 'zernio_whatsapp' && c.status !== 'paused')
+          .map((c: { id: string; displayName: string; status: string }) => ({ id: c.id, displayName: c.displayName, status: c.status })),
+      );
+    } catch {
+      // Non-critical — the channel selector just falls back to native-only.
+    }
+  }
 
   async function fetchTemplates(userId: string) {
     try {
@@ -230,6 +251,7 @@ export function TemplateManager() {
       buttons: form.buttons.length > 0 ? form.buttons : undefined,
       sample_values:
         Object.keys(sample_values).length > 0 ? sample_values : undefined,
+      connector_id: form.connector_id || undefined,
     };
   }
 
@@ -247,6 +269,7 @@ export function TemplateManager() {
       body_samples: template.sample_values?.body ?? [],
       footer_text: template.footer_text ?? '',
       buttons: template.buttons ?? [],
+      connector_id: template.connector_id ?? '',
     });
     setDialogOpen(true);
   }
@@ -538,6 +561,11 @@ export function TemplateManager() {
                           {template.language}
                         </span>
                       )}
+                      {template.connector_id && (
+                        <Badge className="text-xs border bg-emerald-600/20 text-emerald-400 border-emerald-600/30">
+                          {connectors.find((c) => c.id === template.connector_id)?.displayName ?? 'Zernio'}
+                        </Badge>
+                      )}
                       {template.quality_score && (
                         <span
                           className={`text-[10px] uppercase font-medium ${
@@ -673,6 +701,33 @@ export function TemplateManager() {
                   : t('nameHint')}
               </p>
             </div>
+
+            {editingId === null && connectors.length > 0 && (
+              <div className="space-y-2">
+                <Label className="text-muted-foreground">Número de WhatsApp</Label>
+                <Select
+                  value={form.connector_id || 'native'}
+                  onValueChange={(val) => setForm({ ...form, connector_id: val === 'native' ? '' : (val ?? '') })}
+                >
+                  <SelectTrigger className="w-full bg-muted border-border text-foreground">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-popover border-border">
+                    <SelectItem value="native" className="text-popover-foreground focus:bg-muted focus:text-popover-foreground">
+                      WhatsApp directo (Meta)
+                    </SelectItem>
+                    {connectors.map((connector) => (
+                      <SelectItem key={connector.id} value={connector.id} className="text-popover-foreground focus:bg-muted focus:text-popover-foreground">
+                        {connector.displayName} (Zernio)
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-[11px] text-muted-foreground">
+                  La plantilla se crea y se sincroniza en el WABA de este número.
+                </p>
+              </div>
+            )}
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">

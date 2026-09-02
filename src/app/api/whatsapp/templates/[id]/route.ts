@@ -11,6 +11,7 @@ import {
 } from '@/lib/whatsapp/template-validators'
 import { buildMetaTemplatePayload } from '@/lib/whatsapp/template-components'
 import { ensureImageHeaderHandle } from '@/lib/whatsapp/template-header-handle'
+import { deleteZernioWhatsAppTemplate } from '@/lib/zernio/server'
 
 /**
  * Per-template lifecycle endpoint.
@@ -91,12 +92,19 @@ export async function PATCH(
     // meta_template_id and status — fetch explicitly.
     const { data: existing, error: lookupErr } = await supabase
       .from('message_templates')
-      .select('id, name, status, meta_template_id, language')
+      .select('id, name, status, meta_template_id, language, connector_id')
       .eq('id', id)
       .eq('account_id', accountId)
       .maybeSingle()
     if (lookupErr || !existing) {
       return NextResponse.json({ error: 'Template not found.' }, { status: 404 })
+    }
+
+    if (existing.connector_id) {
+      return NextResponse.json(
+        { error: 'Editar plantillas de un número conectado vía Zernio aún no está soportado. Elimínala y créala de nuevo.' },
+        { status: 400 },
+      )
     }
 
     if (!existing.meta_template_id) {
@@ -269,7 +277,7 @@ export async function DELETE(
 
     const { data: existing, error: lookupErr } = await supabase
       .from('message_templates')
-      .select('id, name, meta_template_id')
+      .select('id, name, meta_template_id, connector_id')
       .eq('id', id)
       .eq('account_id', accountId)
       .maybeSingle()
@@ -277,7 +285,26 @@ export async function DELETE(
       return NextResponse.json({ error: 'Template not found.' }, { status: 404 })
     }
 
-    if (existing.meta_template_id && !isDryRun()) {
+    if (existing.meta_template_id && existing.connector_id && !isDryRun()) {
+      const { data: connector } = await supabase
+        .from('omnichannel_connectors')
+        .select('zernio_account_id')
+        .eq('id', existing.connector_id)
+        .eq('account_id', accountId)
+        .maybeSingle()
+      if (!connector?.zernio_account_id) {
+        // Connector already gone — nothing to tell Zernio; fall through
+        // to the local delete below so the row doesn't get stuck.
+        console.warn('[templates] Zernio connector missing on delete, proceeding local-only:', existing.connector_id)
+      } else {
+        try {
+          await deleteZernioWhatsAppTemplate(connector.zernio_account_id, existing.meta_template_id)
+        } catch (e) {
+          const message = e instanceof Error ? e.message : 'Zernio delete failed.'
+          return NextResponse.json({ error: message }, { status: 502 })
+        }
+      }
+    } else if (existing.meta_template_id && !isDryRun()) {
       const { data: config, error: configError } = await supabase
         .from('whatsapp_config')
         .select('*')

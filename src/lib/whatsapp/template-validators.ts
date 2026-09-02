@@ -46,6 +46,8 @@ export interface TemplatePayload {
   footer_text?: string;
   buttons?: TemplateButton[];
   sample_values?: TemplateSampleValues;
+  /** Target a specific Zernio-connected WhatsApp number instead of the native connection. */
+  connector_id?: string | null;
 }
 
 export function validateTemplateName(name: string): void {

@@ -346,6 +346,8 @@ export interface TemplateSampleValues {
 export interface MessageTemplate {
   id: string;
   user_id: string;
+  /** NULL = native (direct Meta) connection; otherwise a Zernio-connected WhatsApp number. */
+  connector_id?: string | null;
   name: string;
   category: 'Marketing' | 'Utility' | 'Authentication';
   language?: string;
@@ -422,6 +424,8 @@ export type RecipientStatus =
 export interface Broadcast {
   id: string;
   user_id: string;
+  /** NULL = native (direct Meta) connection; otherwise a Zernio-connected WhatsApp number. */
+  connector_id?: string | null;
   name: string;
   template_name: string;
   template_language: string;

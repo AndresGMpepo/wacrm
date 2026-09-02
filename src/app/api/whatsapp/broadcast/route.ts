@@ -1,9 +1,11 @@
 import { NextResponse } from 'next/server'
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { requireRole, toErrorResponse } from '@/lib/auth/account'
 import { sendTemplateMessage } from '@/lib/whatsapp/meta-api'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import type { SendTimeParams } from '@/lib/whatsapp/template-send-builder'
 import { isMessageTemplate } from '@/lib/whatsapp/template-row-guard'
+import { sendZernioTemplateMessage } from '@/lib/zernio/server'
 import {
   sanitizePhoneForMeta,
   isValidE164,
@@ -58,6 +60,96 @@ interface NewRecipient {
   messageParams?: SendTimeParams
 }
 
+/**
+ * Broadcast path for a Zernio-connected WhatsApp number. Sends one
+ * "Create conversation" call per recipient (see sendZernioTemplateMessage)
+ * instead of Zernio's dedicated broadcast/segment API, so per-recipient
+ * personalization stays literal values we already resolved — Zernio's
+ * broadcast API only fills placeholders from ITS OWN contact fields
+ * (variableMapping), which don't know about our contacts' data.
+ */
+async function sendBroadcastViaZernio(args: {
+  supabase: SupabaseClient
+  accountId: string
+  connectorId: string
+  recipients: NewRecipient[]
+  templateName: string
+  templateLanguage: string
+}) {
+  const { supabase, accountId, connectorId, recipients, templateName, templateLanguage } = args
+
+  const { data: connector } = await supabase
+    .from('omnichannel_connectors')
+    .select('zernio_account_id, status')
+    .eq('id', connectorId)
+    .eq('account_id', accountId)
+    .eq('provider', 'zernio_whatsapp')
+    .maybeSingle()
+  if (!connector?.zernio_account_id) {
+    return NextResponse.json({ error: 'No se encontró esa conexión de WhatsApp vía Zernio.' }, { status: 400 })
+  }
+  if (connector.status === 'paused') {
+    return NextResponse.json({ error: 'Esa conexión de WhatsApp está pausada.' }, { status: 409 })
+  }
+
+  const { data: templateRow } = await supabase
+    .from('message_templates')
+    .select('status')
+    .eq('account_id', accountId)
+    .eq('connector_id', connectorId)
+    .eq('name', templateName)
+    .eq('language', templateLanguage)
+    .maybeSingle()
+  if (templateRow && templateRow.status !== 'APPROVED') {
+    return NextResponse.json(
+      { error: `Template "${templateName}" is not approved by Meta (status: ${templateRow.status}).` },
+      { status: 400 },
+    )
+  }
+
+  // Only body {{n}} placeholders are supported on this path for now —
+  // header-text and dynamic-URL-button variables need a differently
+  // ordered flat array (header, then body, then buttons) that the
+  // broadcast wizard doesn't build yet.
+  if (recipients.some((r) => r.messageParams?.headerText || r.messageParams?.buttonParams)) {
+    return NextResponse.json(
+      { error: 'Las plantillas con variables en el encabezado o en botones aún no están soportadas al enviar vía Zernio — usa solo variables en el cuerpo.' },
+      { status: 400 },
+    )
+  }
+
+  const results: BroadcastResult[] = []
+  let sentCount = 0
+  let failedCount = 0
+
+  for (const recipient of recipients) {
+    const sanitized = sanitizePhoneForMeta(recipient.phone)
+    if (!isValidE164(sanitized)) {
+      results.push({ phone: recipient.phone, status: 'failed', error: 'Invalid phone number format' })
+      failedCount++
+      continue
+    }
+    try {
+      const result = await sendZernioTemplateMessage({
+        zernioAccountId: connector.zernio_account_id,
+        phone: sanitized,
+        templateName,
+        templateLanguage,
+        templateParams: recipient.messageParams?.body ?? recipient.params ?? [],
+      })
+      results.push({ phone: recipient.phone, status: 'sent', whatsapp_message_id: result.messageId })
+      sentCount++
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+      console.error(`Failed to send Zernio broadcast to ${recipient.phone}:`, errorMessage)
+      results.push({ phone: recipient.phone, status: 'failed', error: errorMessage })
+      failedCount++
+    }
+  }
+
+  return NextResponse.json({ success: true, total: recipients.length, sent: sentCount, failed: failedCount, results })
+}
+
 export async function POST(request: Request) {
   try {
     // Requires the 'agent' role — `canSendMessages` in lib/auth/roles is
@@ -89,6 +181,7 @@ export async function POST(request: Request) {
       template_name,
       template_language,
       template_params,
+      connector_id: connectorId,
     } = body
 
     // Normalize to a list of {phone, params} regardless of shape.
@@ -120,6 +213,17 @@ export async function POST(request: Request) {
       )
     }
 
+    if (connectorId) {
+      return sendBroadcastViaZernio({
+        supabase,
+        accountId,
+        connectorId,
+        recipients,
+        templateName: template_name,
+        templateLanguage: template_language || 'en_US',
+      })
+    }
+
     const { data: config, error: configError } = await supabase
       .from('whatsapp_config')
       .select('*')
@@ -149,6 +253,7 @@ export async function POST(request: Request) {
       .eq('account_id', accountId)
       .eq('name', template_name)
       .eq('language', template_language || 'en_US')
+      .is('connector_id', null)
       .maybeSingle()
     if (rawTemplateRow && !isMessageTemplate(rawTemplateRow)) {
       return NextResponse.json(
