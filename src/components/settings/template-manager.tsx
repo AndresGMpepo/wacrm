@@ -82,7 +82,7 @@ interface TemplateFormData {
 const emptyForm: TemplateFormData = {
   name: '',
   category: 'Marketing',
-  language: 'en_US',
+  language: 'es_MX',
   header_format: 'none',
   header_content: '',
   header_media_url: '',
@@ -94,24 +94,32 @@ const emptyForm: TemplateFormData = {
   connector_id: '',
 };
 
-const COMMON_LANGUAGE_CODES = [
-  'en_US',
-  'en_GB',
-  'en',
-  'es',
-  'es_ES',
-  'es_MX',
-  'fr',
-  'fr_FR',
-  'de',
-  'it',
-  'pt_BR',
-  'pt_PT',
-  'nl',
-  'pl',
-  'ru',
-  'tr',
-  'lt',
+// Fixed choices instead of free text — Meta template language codes are
+// easy to typo (es vs es_ES vs es_MX all mean different WABA-side
+// approvals), and a typo silently creates a template Meta will never
+// match against an existing approved variant. Codes verified against
+// Meta's supported-languages list — no invented codes like "es_419"
+// (not a real Meta template language).
+const TEMPLATE_LANGUAGE_OPTIONS: { code: string; label: string }[] = [
+  { code: 'es_MX', label: 'Español (México)' },
+  { code: 'es', label: 'Español (genérico)' },
+  { code: 'es_ES', label: 'Español (España)' },
+  { code: 'es_AR', label: 'Español (Argentina)' },
+  { code: 'es_CO', label: 'Español (Colombia)' },
+  { code: 'es_CL', label: 'Español (Chile)' },
+  { code: 'es_PE', label: 'Español (Perú)' },
+  { code: 'en_US', label: 'Inglés (EE. UU.)' },
+  { code: 'en_GB', label: 'Inglés (Reino Unido)' },
+  { code: 'en', label: 'Inglés (genérico)' },
+  { code: 'pt_BR', label: 'Portugués (Brasil)' },
+  { code: 'pt_PT', label: 'Portugués (Portugal)' },
+  { code: 'fr', label: 'Francés' },
+  { code: 'de', label: 'Alemán' },
+  { code: 'it', label: 'Italiano' },
+  { code: 'nl', label: 'Neerlandés' },
+  { code: 'pl', label: 'Polaco' },
+  { code: 'ru', label: 'Ruso' },
+  { code: 'tr', label: 'Turco' },
 ];
 
 function emptyButton(type: TemplateButton['type']): TemplateButton {
@@ -261,7 +269,7 @@ export function TemplateManager() {
     return {
       name: form.name.trim(),
       category: form.category,
-      language: form.language.trim() || 'en_US',
+      language: form.language.trim() || 'es_MX',
       header_type: form.header_format === 'none' ? undefined : form.header_format,
       header_content:
         form.header_format === 'text' ? form.header_content.trim() : undefined,
@@ -283,7 +291,7 @@ export function TemplateManager() {
     setForm({
       name: template.name,
       category: template.category,
-      language: template.language || 'en_US',
+      language: template.language || 'es_MX',
       header_format: (template.header_type ?? 'none') as HeaderFormat,
       header_content: template.header_content ?? '',
       header_media_url: template.header_media_url ?? '',
@@ -783,27 +791,28 @@ export function TemplateManager() {
 
               <div className="space-y-2">
                 <Label className="text-muted-foreground">{t('language')}</Label>
-                <Input
-                  list="template-language-codes"
-                  placeholder="en_US"
+                <Select
                   value={form.language}
-                  onChange={(e) =>
-                    setForm({ ...form, language: e.target.value })
-                  }
+                  onValueChange={(val) => setForm({ ...form, language: val ?? form.language })}
                   disabled={editingId !== null}
-                  className="bg-muted border-border text-foreground placeholder:text-muted-foreground disabled:opacity-60 disabled:cursor-not-allowed"
-                />
-                <datalist id="template-language-codes">
-                  {COMMON_LANGUAGE_CODES.map((code) => (
-                    <option key={code} value={code} />
-                  ))}
-                </datalist>
+                >
+                  <SelectTrigger className="w-full bg-muted border-border text-foreground disabled:opacity-60 disabled:cursor-not-allowed">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-popover border-border">
+                    {TEMPLATE_LANGUAGE_OPTIONS.map(({ code, label }) => (
+                      <SelectItem
+                        key={code}
+                        value={code}
+                        className="text-popover-foreground focus:bg-muted focus:text-popover-foreground"
+                      >
+                        {label} ({code})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <p className="text-[11px] text-muted-foreground">
-                  {editingId ? (
-                    t('langFixed')
-                  ) : (
-                    <span>{t.rich('langHint', { code: (chunks) => <code>{chunks}</code> })}</span>
-                  )}
+                  {editingId ? t('langFixed') : null}
                 </p>
               </div>
             </div>
