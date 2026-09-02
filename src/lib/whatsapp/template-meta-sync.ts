@@ -94,10 +94,13 @@ export function metaTemplateToRow(
   t: MetaTemplate,
   tenancy: { account_id: string; user_id: string; connector_id: string | null },
 ) {
-  const body = (t.components ?? []).find((c) => c.type === 'BODY')
-  const header = (t.components ?? []).find((c) => c.type === 'HEADER')
-  const footer = (t.components ?? []).find((c) => c.type === 'FOOTER')
-  const buttons = (t.components ?? []).find((c) => c.type === 'BUTTONS')
+  // Native Meta returns 'BODY'/'HEADER'/... (uppercase); Zernio's own
+  // template API uses lowercase ('body'/'header'/...) for the same
+  // discriminator — match case-insensitively so one parser covers both.
+  const body = (t.components ?? []).find((c) => c.type?.toUpperCase() === 'BODY')
+  const header = (t.components ?? []).find((c) => c.type?.toUpperCase() === 'HEADER')
+  const footer = (t.components ?? []).find((c) => c.type?.toUpperCase() === 'FOOTER')
+  const buttons = (t.components ?? []).find((c) => c.type?.toUpperCase() === 'BUTTONS')
 
   const parsedButtons = parseButtons(buttons?.buttons)
   const sampleValues = extractSampleValues(body, header)

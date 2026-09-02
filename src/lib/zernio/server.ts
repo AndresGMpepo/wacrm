@@ -434,13 +434,33 @@ export interface ZernioTemplateSubmitPayload {
   components: unknown[]
 }
 
+/**
+ * `buildMetaTemplatePayload()` builds components in Meta's own Graph API
+ * casing (`type: 'HEADER' | 'BODY' | ...`, `format: 'TEXT' | 'IMAGE' | ...`)
+ * since that's what the native (direct Meta) submit path sends verbatim.
+ * Zernio's create-template endpoint validates against its own lowercase
+ * discriminator ('header' | 'body' | 'footer' | 'buttons' | ...) and
+ * rejects the uppercase Meta casing outright — lowercase both fields
+ * before sending.
+ */
+function toZernioComponents(components: unknown[]): unknown[] {
+  return components.map((component) => {
+    const c = record(component)
+    return {
+      ...c,
+      ...(typeof c.type === 'string' ? { type: c.type.toLowerCase() } : {}),
+      ...(typeof c.format === 'string' ? { format: c.format.toLowerCase() } : {}),
+    }
+  })
+}
+
 export async function createZernioWhatsAppTemplate(
   zernioAccountId: string,
   payload: ZernioTemplateSubmitPayload,
 ): Promise<{ id: string; status: string }> {
   const response = await zernioFetch('/whatsapp/templates', {
     method: 'POST',
-    body: JSON.stringify({ accountId: zernioAccountId, ...payload }),
+    body: JSON.stringify({ accountId: zernioAccountId, ...payload, components: toZernioComponents(payload.components) }),
   })
   const template = record(response.template ?? response)
   const id = asText(template.id)
