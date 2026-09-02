@@ -99,7 +99,7 @@ async function sendBroadcastViaZernio(args: {
 
   const { data: templateRow } = await supabase
     .from('message_templates')
-    .select('status')
+    .select('status, body_text')
     .eq('account_id', accountId)
     .eq('connector_id', connectorId)
     .eq('name', templateName)
@@ -145,6 +145,7 @@ async function sendBroadcastViaZernio(args: {
       results.push({ phone: recipient.phone, status: 'sent', whatsapp_message_id: result.messageId })
       sentCount++
       if (recipient.contactId) {
+        const bodyParams = recipient.messageParams?.body ?? recipient.params ?? []
         await recordBroadcastMessage({
           db: supabase,
           accountId,
@@ -155,6 +156,8 @@ async function sendBroadcastViaZernio(args: {
           externalSessionId: result.conversationId,
           templateName,
           whatsappMessageId: result.messageId,
+          bodyText: templateRow?.body_text,
+          bodyParams,
         })
       }
     } catch (error) {
@@ -362,6 +365,8 @@ export async function POST(request: Request) {
             channelType: 'whatsapp',
             templateName: template_name,
             whatsappMessageId: sentMessageId,
+            bodyText: templateRow?.body_text,
+            bodyParams: recipient.messageParams?.body ?? recipient.params ?? [],
           })
         }
       } else {

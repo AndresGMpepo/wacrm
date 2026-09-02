@@ -212,7 +212,7 @@ function MediaImage({ url, alt }: { url: string; alt: string }) {
   );
 }
 
-function MessageContent({ message, t, channelType }: { message: Message, t: ReturnType<typeof useTranslations>, channelType?: string | null }) {
+function MessageContent({ message, t, channelType, isAgent }: { message: Message, t: ReturnType<typeof useTranslations>, channelType?: string | null, isAgent: boolean }) {
   const mediaSrc = resolveMediaSrc(message, channelType);
   // Zernio-sourced messages with no real caption/filename store the
   // literal "no text" placeholder as content_text — never show that as
@@ -310,7 +310,12 @@ function MessageContent({ message, t, channelType }: { message: Message, t: Retu
     case "template":
       return (
         <div>
-          <span className="mb-1 inline-flex items-center gap-1 rounded bg-primary/20 px-1.5 py-0.5 text-[10px] font-medium text-primary">
+          <span
+            className={cn(
+              "mb-1 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium",
+              isAgent ? "bg-primary-foreground/20 text-primary-foreground" : "bg-primary/20 text-primary",
+            )}
+          >
             <LayoutTemplate className="h-3 w-3" />
             {t("template")}
           </span>
@@ -419,7 +424,7 @@ export function MessageBubble({
             onPrimary={isAgent}
           />
         )}
-        <MessageContent message={message} t={t} channelType={channelType} />
+        <MessageContent message={message} t={t} channelType={channelType} isAgent={isAgent} />
         <div
           className={cn(
             "mt-1 flex items-center gap-1",

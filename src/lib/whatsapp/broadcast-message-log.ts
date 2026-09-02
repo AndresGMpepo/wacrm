@@ -25,6 +25,18 @@ interface RecordBroadcastMessageArgs {
   externalSessionId?: string | null
   templateName: string
   whatsappMessageId: string
+  /** Approved template body with {{n}} placeholders, when known — used
+   *  to render the actual sent text into content_text. Without it the
+   *  message shows only the "Plantilla" badge with no text. */
+  bodyText?: string | null
+  bodyParams?: string[]
+}
+
+function renderTemplateBody(body: string, params: string[]): string {
+  return body.replace(/\{\{(\d+)\}\}/g, (_, raw) => {
+    const idx = Number(raw) - 1
+    return params[idx] ?? `{{${raw}}}`
+  })
 }
 
 async function lookupConversationId(
@@ -47,7 +59,7 @@ async function lookupConversationId(
 }
 
 export async function recordBroadcastMessage(args: RecordBroadcastMessageArgs): Promise<void> {
-  const { db, accountId, userId, contactId, channelType, connectorId, externalSessionId, templateName, whatsappMessageId } = args
+  const { db, accountId, userId, contactId, channelType, connectorId, externalSessionId, templateName, whatsappMessageId, bodyText, bodyParams } = args
   try {
     const existing = await lookupConversationId(db, accountId, contactId, channelType, connectorId)
     let conversationId = existing?.id
@@ -83,6 +95,7 @@ export async function recordBroadcastMessage(args: RecordBroadcastMessageArgs): 
       conversation_id: conversationId,
       sender_type: 'bot',
       content_type: 'template',
+      content_text: bodyText ? renderTemplateBody(bodyText, bodyParams ?? []) : null,
       template_name: templateName,
       message_id: whatsappMessageId,
       status: 'sent',
