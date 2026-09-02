@@ -18,16 +18,29 @@ function apiKey() {
 
 export async function zernioFetch(path: string, init?: RequestInit) {
   const isFormData = typeof FormData !== 'undefined' && init?.body instanceof FormData
-  const response = await fetch(`${apiUrl()}${path}`, {
-    ...init,
-    cache: 'no-store',
-    headers: {
-      Authorization: `Bearer ${apiKey()}`,
-      Accept: 'application/json',
-      ...(!isFormData && init?.body ? { 'Content-Type': 'application/json' } : {}),
-      ...init?.headers,
-    },
-  })
+  let response: Response
+  try {
+    response = await fetch(`${apiUrl()}${path}`, {
+      ...init,
+      cache: 'no-store',
+      // Without a bound, a slow/unresponsive Zernio API leaves the
+      // request open until the reverse proxy's own upstream timeout
+      // kicks in — the browser then sees an opaque 502 Bad Gateway
+      // HTML page instead of a clear JSON error from us.
+      signal: init?.signal ?? AbortSignal.timeout(20_000),
+      headers: {
+        Authorization: `Bearer ${apiKey()}`,
+        Accept: 'application/json',
+        ...(!isFormData && init?.body ? { 'Content-Type': 'application/json' } : {}),
+        ...init?.headers,
+      },
+    })
+  } catch (error) {
+    if (error instanceof Error && error.name === 'TimeoutError') {
+      throw new Error('Zernio no respondió a tiempo. Intenta de nuevo en unos segundos.')
+    }
+    throw new Error(`No se pudo contactar a Zernio: ${error instanceof Error ? error.message : 'error de red'}`)
+  }
   const body = await response.json().catch(() => null) as Record<string, unknown> | null
   if (!response.ok) {
     const error = body?.error && typeof body.error === 'object' ? body.error as Record<string, unknown> : {}
