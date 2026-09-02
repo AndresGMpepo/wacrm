@@ -127,6 +127,25 @@ function emptyButton(type: TemplateButton['type']): TemplateButton {
   }
 }
 
+/**
+ * A non-2xx response isn't always our own JSON error shape — an expired
+ * session, a proxy timeout, or a server crash can all hand back an HTML
+ * page instead. `res.json()` on that throws a raw "Unexpected token '<'"
+ * SyntaxError, which is meaningless to the user. Read as text first so a
+ * parse failure can report the HTTP status instead.
+ */
+async function parseApiResponse(res: Response): Promise<Record<string, unknown>> {
+  const text = await res.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(
+      `El servidor respondió de forma inesperada (HTTP ${res.status}). Si tu sesión expiró, recarga la página e inicia sesión de nuevo; si persiste, es un error del servidor.`,
+    );
+  }
+}
+
 export function TemplateManager() {
   const t = useTranslations('Settings.templates');
   const supabase = createClient();
@@ -295,10 +314,10 @@ export function TemplateManager() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(buildSubmitPayload()),
       });
-      const data = await res.json();
+      const data = await parseApiResponse(res);
       if (!res.ok) {
         throw new Error(
-          data?.error || `${isEdit ? 'Edit' : 'Submit'} failed (HTTP ${res.status})`,
+          (data?.error as string | undefined) || `${isEdit ? 'Edit' : 'Submit'} failed (HTTP ${res.status})`,
         );
       }
       // Refresh first, then close — re-opening the dialog
@@ -329,14 +348,14 @@ export function TemplateManager() {
     setSyncing(true);
     try {
       const res = await fetch('/api/whatsapp/templates/sync', { method: 'POST' });
-      const data = await res.json();
+      const data = await parseApiResponse(res);
       if (!res.ok) {
-        throw new Error(data?.error || `Sync failed (HTTP ${res.status})`);
+        throw new Error((data?.error as string | undefined) || `Sync failed (HTTP ${res.status})`);
       }
       toast.success(
-        t('toastSyncCount', { total: data.total }) +
+        t('toastSyncCount', { total: data.total as number }) +
           (data.inserted || data.updated
-            ? t('toastSyncDetails', { inserted: data.inserted, updated: data.updated })
+            ? t('toastSyncDetails', { inserted: data.inserted as number, updated: data.updated as number })
             : ''),
       );
       if (Array.isArray(data.errors) && data.errors.length > 0) {
