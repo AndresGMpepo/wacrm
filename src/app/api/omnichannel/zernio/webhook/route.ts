@@ -226,21 +226,38 @@ async function handleOutboundStatusEvent(
   message: Json,
   errorInfo: Json,
 ) {
-  const platformMessageId = text(message.id, message.platformMessageId, message._id)
-  if (!platformMessageId) return
+  // Try every id shape Zernio might use for this message — the one we
+  // stored as `whatsapp_message_id` (Zernio's own message id, returned
+  // by Create conversation) may not be the first field this payload
+  // happens to carry, so match against all of them instead of just
+  // the first non-empty candidate.
+  const candidateIds = [message.id, message.platformMessageId, message.platform_message_id, message._id]
+    .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+  if (candidateIds.length === 0) {
+    console.warn(`[zernio] ${eventType} webhook carried no usable message id — payload:`, JSON.stringify(message).slice(0, 500))
+    return
+  }
   const status = eventType === 'message.delivered' ? 'delivered' : eventType === 'message.read' ? 'read' : 'failed'
   const now = new Date().toISOString()
 
-  const { data: recipient, error: fetchError } = await db
+  const { data: recipients, error: fetchError } = await db
     .from('broadcast_recipients')
     .select('id, status')
-    .eq('whatsapp_message_id', platformMessageId)
-    .maybeSingle()
+    .in('whatsapp_message_id', candidateIds)
+    .limit(1)
   if (fetchError) {
     console.error('[zernio] could not look up broadcast recipient for status update:', fetchError.message)
     return
   }
-  if (!recipient || !isValidStatusTransition(recipient.status, status)) return
+  const recipient = recipients?.[0]
+  if (!recipient) {
+    console.warn(`[zernio] ${eventType} webhook matched no broadcast recipient for ids:`, candidateIds)
+    return
+  }
+  if (!isValidStatusTransition(recipient.status, status)) {
+    console.warn(`[zernio] ${eventType} webhook ignored — invalid transition ${recipient.status} -> ${status} for recipient ${recipient.id}`)
+    return
+  }
 
   const update: Record<string, unknown> = { status }
   if (status === 'delivered') update.delivered_at = now

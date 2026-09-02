@@ -191,6 +191,60 @@ export default function BroadcastDetailPage() {
     fetchData();
   }, [broadcastId]);
 
+  // Live-refresh stats/funnel as recipients move through the delivery
+  // ladder — otherwise the page only ever reflected the counts present
+  // at initial load (which looked "stuck" on sent-only).
+  useEffect(() => {
+    if (!broadcastId) return;
+    const supabase = createClient();
+    const channel = supabase
+      .channel(`broadcast-detail-${broadcastId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'broadcasts',
+          filter: `id=eq.${broadcastId}`,
+        },
+        (payload) => {
+          setBroadcast(payload.new as Broadcast);
+        },
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'broadcast_recipients',
+          filter: `broadcast_id=eq.${broadcastId}`,
+        },
+        (payload) => {
+          if (payload.eventType === 'DELETE') {
+            const deletedId = (payload.old as BroadcastRecipient).id;
+            setRecipients((prev) => prev.filter((r) => r.id !== deletedId));
+            return;
+          }
+          const updated = payload.new as BroadcastRecipient;
+          setRecipients((prev) => {
+            const idx = prev.findIndex((r) => r.id === updated.id);
+            if (idx === -1) return [updated, ...prev];
+            const next = [...prev];
+            // Preserve the joined `contact` from the initial fetch —
+            // Realtime payloads never include joined relations.
+            next[idx] = { ...next[idx], ...updated, contact: next[idx].contact };
+            return next;
+          });
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [broadcastId]);
+
+
   const filteredRecipients = useMemo(
     () =>
       statusFilter === 'all'
