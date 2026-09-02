@@ -27,6 +27,24 @@ interface BroadcastResult {
 }
 
 /**
+ * Meta enforces a per-phone-number 24h messaging tier (250 / 1,000 /
+ * 10,000 / 100,000 / unlimited unique conversations, upgraded automatically
+ * based on quality rating and volume — https://developers.facebook.com/docs/whatsapp/messaging-limits)
+ * and can throttle or degrade a number's quality rating if it looks like
+ * marketing spam is firing in an instant burst. Neither is something we can
+ * query or override from here, so the mitigation is pacing: space sends out
+ * instead of firing the whole recipient list back-to-back. 250ms keeps a
+ * worst-case single-recipient loop under ~4 msg/s, well below Meta's Cloud
+ * API throughput ceiling, while still finishing a few hundred recipients in
+ * well under a minute.
+ */
+const INTER_RECIPIENT_DELAY_MS = 250
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/**
  * Two input shapes are accepted:
  *
  *   NEW (preferred — supports per-recipient variable substitution):
@@ -127,7 +145,8 @@ async function sendBroadcastViaZernio(args: {
   let sentCount = 0
   let failedCount = 0
 
-  for (const recipient of recipients) {
+  for (let i = 0; i < recipients.length; i++) {
+    const recipient = recipients[i]
     const sanitized = sanitizePhoneForMeta(recipient.phone)
     if (!isValidE164(sanitized)) {
       results.push({ phone: recipient.phone, status: 'failed', error: 'Invalid phone number format' })
@@ -166,6 +185,7 @@ async function sendBroadcastViaZernio(args: {
       results.push({ phone: recipient.phone, status: 'failed', error: errorMessage })
       failedCount++
     }
+    if (i < recipients.length - 1) await sleep(INTER_RECIPIENT_DELAY_MS)
   }
 
   return NextResponse.json({ success: true, total: recipients.length, sent: sentCount, failed: failedCount, results })
@@ -303,7 +323,8 @@ export async function POST(request: Request) {
     let sentCount = 0
     let failedCount = 0
 
-    for (const recipient of recipients) {
+    for (let i = 0; i < recipients.length; i++) {
+      const recipient = recipients[i]
       const sanitized = sanitizePhoneForMeta(recipient.phone)
 
       if (!isValidE164(sanitized)) {
@@ -381,6 +402,7 @@ export async function POST(request: Request) {
         })
         failedCount++
       }
+      if (i < recipients.length - 1) await sleep(INTER_RECIPIENT_DELAY_MS)
     }
 
     return NextResponse.json({

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { Broadcast, BroadcastRecipient, RecipientStatus } from '@/types';
@@ -32,6 +32,7 @@ import {
   Download,
   ChevronDown,
   Trash2,
+  RefreshCw,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -158,38 +159,80 @@ export default function BroadcastDetailPage() {
   );
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const fetchData = useCallback(async () => {
+    try {
+      const supabase = createClient();
+
+      const { data: bc, error: bcError } = await supabase
+        .from('broadcasts')
+        .select('*')
+        .eq('id', broadcastId)
+        .single();
+
+      if (bcError) throw bcError;
+      setBroadcast(bc);
+
+      const { data: recs, error: recsError } = await supabase
+        .from('broadcast_recipients')
+        .select('*, contact:contacts(*)')
+        .eq('broadcast_id', broadcastId)
+        .order('created_at', { ascending: false });
+
+      if (recsError) throw recsError;
+      setRecipients(recs ?? []);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('notFound'));
+    } finally {
+      setLoading(false);
+    }
+  }, [broadcastId, t]);
 
   useEffect(() => {
-    async function fetchData() {
-      try {
-        const supabase = createClient();
+    fetchData();
+  }, [fetchData]);
 
-        const { data: bc, error: bcError } = await supabase
-          .from('broadcasts')
-          .select('*')
-          .eq('id', broadcastId)
-          .single();
+  async function handleManualRefresh() {
+    setRefreshing(true);
+    await fetchData();
+    setRefreshing(false);
+  }
 
-        if (bcError) throw bcError;
-        setBroadcast(bc);
+  // Poll as a backstop alongside Realtime — the funnel/table depend on
+  // Zernio/Meta delivery-status webhooks arriving, which isn't
+  // instantaneous and (per migration 105) also depends on Realtime
+  // being enabled in this environment. Paused while the tab is hidden.
+  useEffect(() => {
+    const REFRESH_INTERVAL_MS = 20_000;
+    let timer: ReturnType<typeof setInterval> | null = null;
 
-        const { data: recs, error: recsError } = await supabase
-          .from('broadcast_recipients')
-          .select('*, contact:contacts(*)')
-          .eq('broadcast_id', broadcastId)
-          .order('created_at', { ascending: false });
-
-        if (recsError) throw recsError;
-        setRecipients(recs ?? []);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : t('notFound'));
-      } finally {
-        setLoading(false);
+    function start() {
+      if (timer) return;
+      timer = setInterval(fetchData, REFRESH_INTERVAL_MS);
+    }
+    function stop() {
+      if (!timer) return;
+      clearInterval(timer);
+      timer = null;
+    }
+    function handleVisibilityChange() {
+      if (document.visibilityState === 'hidden') {
+        stop();
+      } else {
+        fetchData();
+        start();
       }
     }
 
-    fetchData();
-  }, [broadcastId]);
+    start();
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      stop();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [fetchData]);
 
   // Live-refresh stats/funnel as recipients move through the delivery
   // ladder — otherwise the page only ever reflected the counts present
@@ -360,48 +403,61 @@ export default function BroadcastDetailPage() {
           </div>
         </div>
 
-        {/* Delete — inline-confirm pattern matches the pipeline-settings
-            "Delete Pipeline" flow. Mid-send broadcasts can't be deleted
-            because orphaning in-flight Meta messages would leave the
-            funnel inconsistent. */}
-        {confirmDelete ? (
-          <div className="flex items-center gap-2 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-sm">
-            <span className="text-red-300">{t('deletePrompt')}</span>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setConfirmDelete(false)}
-              disabled={deleting}
-              className="h-7 border-border bg-transparent text-muted-foreground hover:bg-muted"
-            >
-              {t('cancel')}
-            </Button>
-            <Button
-              size="sm"
-              onClick={handleDelete}
-              disabled={deleting}
-              className="h-7 bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
-            >
-              {deleting ? t('deleting') : t('confirm')}
-            </Button>
-          </div>
-        ) : (
+        <div className="flex items-center gap-2">
           <Button
             variant="outline"
             size="sm"
-            disabled={broadcast.status === 'sending'}
-            onClick={() => setConfirmDelete(true)}
-            title={
-              broadcast.status === 'sending'
-                ? t('cannotDeleteSending')
-                : t('deleteHover')
-            }
-            className="border-red-500/30 bg-transparent text-red-400 hover:bg-red-500/10 disabled:opacity-40"
+            onClick={handleManualRefresh}
+            disabled={refreshing}
+            className="border-border text-muted-foreground hover:bg-muted"
           >
-            <Trash2 className="h-3.5 w-3.5" />
-            {t('delete')}
+            <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+            {t('refresh')}
           </Button>
-        )}
+
+          {/* Delete — inline-confirm pattern matches the pipeline-settings
+              "Delete Pipeline" flow. Mid-send broadcasts can't be deleted
+              because orphaning in-flight Meta messages would leave the
+              funnel inconsistent. */}
+          {confirmDelete ? (
+            <div className="flex items-center gap-2 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-sm">
+              <span className="text-red-300">{t('deletePrompt')}</span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setConfirmDelete(false)}
+                disabled={deleting}
+                className="h-7 border-border bg-transparent text-muted-foreground hover:bg-muted"
+              >
+                {t('cancel')}
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleDelete}
+                disabled={deleting}
+                className="h-7 bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {deleting ? t('deleting') : t('confirm')}
+              </Button>
+            </div>
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={broadcast.status === 'sending'}
+              onClick={() => setConfirmDelete(true)}
+              title={
+                broadcast.status === 'sending'
+                  ? t('cannotDeleteSending')
+                  : t('deleteHover')
+              }
+              className="border-red-500/30 bg-transparent text-red-400 hover:bg-red-500/10 disabled:opacity-40"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              {t('delete')}
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Stats — 6 cards: Total / Sent / Delivered / Read / Replied / Failed */}

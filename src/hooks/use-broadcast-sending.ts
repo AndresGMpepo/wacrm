@@ -55,9 +55,11 @@ interface UseBroadcastSendingReturn {
 }
 
 /**
- * Meta rate-limit buffer. 10 per batch + 1 s pause matches the spec
- * and keeps us comfortably under Meta's per-phone-number messaging
- * rate so a large broadcast never trips the upstream limiter.
+ * Meta rate-limit buffer, layered with the 250ms per-recipient pacing
+ * the API route itself applies (see INTER_RECIPIENT_DELAY_MS in
+ * /api/whatsapp/broadcast) — that route call is one HTTP request per
+ * batch, so batching here just caps how many recipients wait on a
+ * single request/response cycle. https://developers.facebook.com/docs/whatsapp/messaging-limits
  */
 const SEND_BATCH_SIZE = 10;
 const SEND_BATCH_DELAY_MS = 1000;
