@@ -928,6 +928,7 @@
       "activeAria": "Activa",
       "save": "Guardar",
       "saveDraft": "Guardar Borrador",
+      "deleteStep": "Eliminar",
       "untitled": "Automatización sin título",
       "backToAutomations": "Volver a automatizaciones",
       "toasts": {
@@ -951,6 +952,11 @@
         "select": "Selecciona un agente…",
         "placeholder": "Id del agente",
         "unknown": "{id} (agente desconocido)"
+      },
+      "queues": {
+        "select": "Selecciona una cola…",
+        "placeholder": "Id de la cola",
+        "unknown": "{id} (cola desconocida)"
       },
       "pipelines": {
         "pipelineLabel": "Pipeline",
@@ -982,9 +988,21 @@
         "tagLabel": "Etiqueta",
         "modeLabel": "Modo",
         "modes": {
-          "round_robin": "Round-robin (Turnos)",
+          "round_robin": "Automático (reglas de asignación)",
+          "queue": "Cola",
           "specific": "Agente específico"
         },
+        "modeHints": {
+          "round_robin": "Usa la política de asignación de la cuenta (turnos o menos chats abiertos).",
+          "queue": "Mueve la conversación a una cola y la asigna con las reglas y agentes de esa cola.",
+          "specific": "Asigna siempre al mismo agente."
+        },
+        "queueLabel": "Cola",
+        "interactiveTitle": "Mensaje interactivo",
+        "interactiveEdit": "Editar mensaje y botones",
+        "interactiveEmpty": "Aún no hay texto del mensaje",
+        "interactiveCancel": "Cancelar",
+        "interactiveDone": "Listo",
         "agentLabel": "Agente",
         "fieldLabel": "Campo",
         "valueLabel": "Valor",

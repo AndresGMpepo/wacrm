@@ -928,6 +928,7 @@
       "activeAria": "Active",
       "save": "Save",
       "saveDraft": "Save Draft",
+      "deleteStep": "Delete",
       "untitled": "Untitled automation",
       "backToAutomations": "Back to automations",
       "toasts": {
@@ -951,6 +952,11 @@
         "select": "Select an agent…",
         "placeholder": "Agent id",
         "unknown": "{id} (unknown agent)"
+      },
+      "queues": {
+        "select": "Select a queue…",
+        "placeholder": "Queue id",
+        "unknown": "{id} (unknown queue)"
       },
       "pipelines": {
         "pipelineLabel": "Pipeline",
@@ -982,9 +988,21 @@
         "tagLabel": "Tag",
         "modeLabel": "Mode",
         "modes": {
-          "round_robin": "Round-robin",
+          "round_robin": "Automatic (assignment rules)",
+          "queue": "Queue",
           "specific": "Specific agent"
         },
+        "modeHints": {
+          "round_robin": "Uses the account's assignment policy (round-robin or fewest open chats).",
+          "queue": "Moves the conversation to a queue and assigns it with that queue's own rules and agents.",
+          "specific": "Always assigns to the same agent."
+        },
+        "queueLabel": "Queue",
+        "interactiveTitle": "Interactive message",
+        "interactiveEdit": "Edit message and buttons",
+        "interactiveEmpty": "No message text yet",
+        "interactiveCancel": "Cancel",
+        "interactiveDone": "Done",
         "agentLabel": "Agent",
         "fieldLabel": "Field",
         "valueLabel": "Value",

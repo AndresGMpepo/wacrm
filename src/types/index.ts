@@ -569,8 +569,10 @@ export interface TagStepConfig {
 }
 
 export interface AssignConversationStepConfig {
-  mode: 'specific' | 'round_robin';
+  mode: 'specific' | 'round_robin' | 'queue';
   agent_id?: string;
+  /** Required when mode is 'queue' — a conversation_queues row. */
+  queue_id?: string;
 }
 
 export interface UpdateContactFieldStepConfig {

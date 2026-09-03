@@ -87,6 +87,12 @@ function validateOne(step: StepLike, path: string, issues: ValidationIssue[]): v
           message: 'agent is required when mode is "specific"',
         })
       }
+      if (c.mode === 'queue' && !nonEmpty(c.queue_id)) {
+        issues.push({
+          path: `${path}.queue_id`,
+          message: 'queue is required when mode is "queue"',
+        })
+      }
       break
     case 'update_contact_field':
       if (!nonEmpty(c.field)) {

@@ -513,24 +513,59 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
     case 'assign_conversation': {
       const cfg = step.step_config as AssignConversationStepConfig
       if (!args.contactId) throw new Error('assign_conversation needs a contact')
-      let agentId = cfg.agent_id
-      if (cfg.mode === 'round_robin') {
-        // Pick any member of the account. The existing implementation
-        // only ever returned the automation's author; preserving that
-        // shape until a real round-robin algorithm replaces it.
-        const { data: profiles } = await db
+      const conversationId = await resolveConversationId(args)
+
+      if (cfg.mode === 'specific') {
+        if (!cfg.agent_id) throw new Error('assign_conversation needs an agent')
+        const { data: member } = await db
           .from('profiles')
           .select('user_id')
+          .eq('user_id', cfg.agent_id)
           .eq('account_id', args.automation.account_id)
-          .limit(1)
-        agentId = profiles?.[0]?.user_id
+          .maybeSingle()
+        if (!member) throw new Error('assign_conversation: agent is not in this account')
+        await db
+          .from('conversations')
+          .update({ assigned_agent_id: cfg.agent_id, updated_at: new Date().toISOString() })
+          .eq('id', conversationId)
+          .eq('account_id', args.automation.account_id)
+        return `assigned to ${cfg.agent_id}`
       }
-      if (!agentId) return 'no agent resolved'
+
+      const update: Record<string, unknown> = {
+        // Re-routing is the explicit intent of this step, so the current
+        // assignment is cleared — otherwise the RPC (which only fills an
+        // empty assignee) would silently no-op after the inbound
+        // auto-assignment already picked someone.
+        assigned_agent_id: null,
+        updated_at: new Date().toISOString(),
+      }
+      if (cfg.mode === 'queue') {
+        if (!cfg.queue_id) throw new Error('assign_conversation needs a queue')
+        const { data: queue } = await db
+          .from('conversation_queues')
+          .select('id')
+          .eq('id', cfg.queue_id)
+          .eq('account_id', args.automation.account_id)
+          .maybeSingle()
+        if (!queue) throw new Error('assign_conversation: queue is not in this account')
+        update.queue_id = cfg.queue_id
+      }
       await db
         .from('conversations')
-        .update({ assigned_agent_id: agentId })
+        .update(update)
+        .eq('id', conversationId)
         .eq('account_id', args.automation.account_id)
-        .eq('contact_id', args.contactId)
+
+      // Same routing rules the inbox uses: the queue's own mode + members
+      // when the conversation sits in a queue, otherwise the account
+      // assignment policy.
+      const { data: agentId, error: assignErr } = await db.rpc('auto_assign_inbound_conversation', {
+        p_account_id: args.automation.account_id,
+        p_conversation_id: conversationId,
+      })
+      if (assignErr) throw new Error(`assignment failed: ${assignErr.message}`)
+      if (!agentId) return 'no agent available for assignment'
       return `assigned to ${agentId}`
     }
 

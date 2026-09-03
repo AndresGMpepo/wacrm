@@ -33,12 +33,20 @@ import {
   ArrowUp,
   MousePointerClick,
   List,
+  Pencil,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -61,7 +69,7 @@ import {
   blankButtonsPayload,
   blankListPayload,
 } from "@/components/interactive/interactive-builder"
-import { interactivePayloadPreviewText } from "@/lib/whatsapp/interactive"
+import { interactivePayloadPreviewText, validateInteractivePayload } from "@/lib/whatsapp/interactive"
 import { AUTOMATION_CHANNELS } from "@/lib/automations/channels"
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
@@ -214,6 +222,13 @@ interface AutomationResources {
   customFields: CustomField[]
   pipelines: PipelineOption[]
   stages: PipelineStageOption[]
+  queues: QueueOption[]
+}
+
+interface QueueOption {
+  id: string
+  name: string
+  is_default: boolean
 }
 
 interface PipelineOption {
@@ -235,6 +250,7 @@ const ResourcesContext = createContext<AutomationResources>({
   customFields: [],
   pipelines: [],
   stages: [],
+  queues: [],
 })
 
 function useResources(): AutomationResources {
@@ -248,6 +264,7 @@ function ResourcesProvider({ children }: { children: ReactNode }) {
   const [customFields, setCustomFields] = useState<CustomField[]>([])
   const [pipelines, setPipelines] = useState<PipelineOption[]>([])
   const [stages, setStages] = useState<PipelineStageOption[]>([])
+  const [queues, setQueues] = useState<QueueOption[]>([])
 
   useEffect(() => {
     let cancelled = false
@@ -258,7 +275,7 @@ function ResourcesProvider({ children }: { children: ReactNode }) {
     // actually be sent (anything else 400s at send time), matching the
     // broadcast picker.
     void (async () => {
-      const [tagsRes, templatesRes, customFieldsRes, pipelinesRes, stagesRes] =
+      const [tagsRes, templatesRes, customFieldsRes, pipelinesRes, stagesRes, queuesRes] =
         await Promise.all([
           supabase.from("tags").select("*").order("name"),
           supabase
@@ -272,6 +289,10 @@ function ResourcesProvider({ children }: { children: ReactNode }) {
             .from("pipeline_stages")
             .select("id, name, pipeline_id, position")
             .order("position"),
+          supabase
+            .from("conversation_queues")
+            .select("id, name, is_default")
+            .order("name"),
         ])
       if (cancelled) return
       setTags((tagsRes.data as TagRecord[] | null) ?? [])
@@ -279,6 +300,7 @@ function ResourcesProvider({ children }: { children: ReactNode }) {
       setCustomFields((customFieldsRes.data as CustomField[] | null) ?? [])
       setPipelines((pipelinesRes.data as PipelineOption[] | null) ?? [])
       setStages((stagesRes.data as PipelineStageOption[] | null) ?? [])
+      setQueues((queuesRes.data as QueueOption[] | null) ?? [])
     })()
 
     // Members go through the API so we inherit its email-visibility
@@ -302,7 +324,7 @@ function ResourcesProvider({ children }: { children: ReactNode }) {
 
   return (
     <ResourcesContext.Provider
-      value={{ tags, members, templates, customFields, pipelines, stages }}
+      value={{ tags, members, templates, customFields, pipelines, stages, queues }}
     >
       {children}
     </ResourcesContext.Provider>
@@ -442,6 +464,112 @@ function AgentSelect({
       ))}
       {value && !selected && (
         <option value={value}>{t("agents.unknown", { id: value })}</option>
+      )}
+    </select>
+  )
+}
+
+/** Buttons / list steps open the shared interactive builder in a dialog:
+ *  the form plus its live preview needs far more room than a step card. */
+function InteractiveStepEditor({
+  payload,
+  onChange,
+  t,
+}: {
+  payload: InteractiveMessagePayload
+  onChange: (p: InteractiveMessagePayload) => void
+  t: ReturnType<typeof useTranslations>
+}) {
+  const [open, setOpen] = useState(false)
+  const [draft, setDraft] = useState<InteractiveMessagePayload>(payload)
+  const validation = validateInteractivePayload(payload)
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="rounded-md border border-border bg-muted/40 p-3">
+        <p className="break-words whitespace-pre-wrap text-sm text-foreground">
+          {payload.body || t("config.interactiveEmpty")}
+        </p>
+        <p className="mt-1 break-words text-[11px] text-muted-foreground">
+          {interactivePayloadPreviewText(payload)}
+        </p>
+      </div>
+      {!validation.ok && <p className="text-xs text-red-400">{validation.error}</p>}
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => {
+          setDraft(payload)
+          setOpen(true)
+        }}
+      >
+        <Pencil className="h-3.5 w-3.5" />
+        {t("config.interactiveEdit")}
+      </Button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>{t("config.interactiveTitle")}</DialogTitle>
+          </DialogHeader>
+          <div className="max-h-[70vh] overflow-y-auto p-1">
+            <InteractiveBuilder value={draft} onChange={setDraft} />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setOpen(false)}>
+              {t("config.interactiveCancel")}
+            </Button>
+            <Button
+              onClick={() => {
+                onChange(draft)
+                setOpen(false)
+              }}
+            >
+              {t("config.interactiveDone")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}
+
+/** Queue dropdown by name, storing the queue id. Falls back to a raw id
+ *  input when the account has no queues (or they can't be read). */
+function QueueSelect({
+  value,
+  onChange,
+  t,
+}: {
+  value: string
+  onChange: (v: string) => void
+  t: ReturnType<typeof useTranslations>
+}) {
+  const { queues } = useResources()
+  if (queues.length === 0) {
+    return (
+      <Input
+        placeholder={t("queues.placeholder")}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="bg-muted text-foreground"
+      />
+    )
+  }
+  const selected = queues.find((q) => q.id === value)
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className={SELECT_CLASS}
+    >
+      <option value="">{t("queues.select")}</option>
+      {queues.map((q) => (
+        <option key={q.id} value={q.id}>
+          {q.name}
+        </option>
+      ))}
+      {value && !selected && (
+        <option value={value}>{t("queues.unknown", { id: value })}</option>
       )}
     </select>
   )
@@ -1162,14 +1290,9 @@ function StepRenderer({
   // Card widths on mobile fill the full canvas column (max-w-2xl px-4
   // still keeps them reasonable). On sm+ the original fixed widths
   // come back so the flow visual stays recognisable.
-  const isInteractive = step.step_type === "send_buttons" || step.step_type === "send_list"
   const width = isCondition
     ? "w-full max-w-[400px] sm:w-[400px]"
-    : // The buttons/list editor needs room for its form + live preview;
-      // 320px squeezed every input to a single character per line.
-      isInteractive && expanded
-      ? "w-full max-w-[640px] sm:w-[640px]"
-      : "w-full max-w-[320px] sm:w-80"
+    : "w-full max-w-[320px] sm:w-80"
 
   return (
     <>
@@ -1233,7 +1356,7 @@ function StepRenderer({
                   onClick={() => props.deleteStepAt(path)}
                 >
                   <Trash2 className="h-3.5 w-3.5" />
-                  {t("delete", { defaultValue: "Delete" })}
+                  {t("deleteStep")}
                 </Button>
               </div>
             </div>
@@ -1373,14 +1496,16 @@ function StepEditor({
       )
     case "send_buttons":
     case "send_list":
-      // The whole step_config IS the interactive payload; the shared
-      // builder edits it in place (and enforces Meta's limits + preview).
+      // The whole step_config IS the interactive payload. It's edited in a
+      // dialog because the buttons/list form plus its preview never fit the
+      // narrow step card on the canvas.
       return (
-        <InteractiveBuilder
-          value={asInteractive(cfg)}
+        <InteractiveStepEditor
+          payload={asInteractive(cfg)}
           onChange={(payload) =>
             onChange({ ...step, step_config: toStepConfig(payload) })
           }
+          t={t}
         />
       )
     case "send_template":
@@ -1413,9 +1538,22 @@ function StepEditor({
               className="w-full rounded-md border border-border bg-muted px-2 py-1.5 text-sm text-foreground"
             >
               <option value="round_robin">{t("config.modes.round_robin")}</option>
+              <option value="queue">{t("config.modes.queue")}</option>
               <option value="specific">{t("config.modes.specific")}</option>
             </select>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              {t(`config.modeHints.${(cfg.mode as string) ?? "round_robin"}`)}
+            </p>
           </FieldBlock>
+          {cfg.mode === "queue" && (
+            <FieldBlock label={t("config.queueLabel")}>
+              <QueueSelect
+                value={(cfg.queue_id as string) ?? ""}
+                onChange={(v) => set({ queue_id: v })}
+                t={t}
+              />
+            </FieldBlock>
+          )}
           {cfg.mode === "specific" && (
             <FieldBlock label={t("config.agentLabel")}>
               <AgentSelect

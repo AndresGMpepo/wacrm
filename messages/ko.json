@@ -928,6 +928,7 @@
       "activeAria": "활성",
       "save": "저장",
       "saveDraft": "초안 저장",
+      "deleteStep": "삭제",
       "untitled": "제목 없는 자동화",
       "backToAutomations": "자동화로 돌아가기",
       "toasts": {
@@ -951,6 +952,11 @@
         "select": "상담원 선택…",
         "placeholder": "상담원 id",
         "unknown": "{id} (알 수 없는 상담원)"
+      },
+      "queues": {
+        "select": "대기열 선택…",
+        "placeholder": "대기열 id",
+        "unknown": "{id} (알 수 없는 대기열)"
       },
       "pipelines": {
         "pipelineLabel": "파이프라인",
@@ -982,9 +988,21 @@
         "tagLabel": "태그",
         "modeLabel": "모드",
         "modes": {
-          "round_robin": "순차 배정",
+          "round_robin": "자동 (배정 규칙)",
+          "queue": "대기열",
           "specific": "특정 상담원"
         },
+        "modeHints": {
+          "round_robin": "계정의 배정 정책(순차 또는 최소 진행 대화)을 사용합니다.",
+          "queue": "대화를 대기열로 이동하고 해당 대기열의 규칙과 상담원으로 배정합니다.",
+          "specific": "항상 같은 상담원에게 배정합니다."
+        },
+        "queueLabel": "대기열",
+        "interactiveTitle": "인터랙티브 메시지",
+        "interactiveEdit": "메시지와 버튼 편집",
+        "interactiveEmpty": "아직 메시지 텍스트가 없습니다",
+        "interactiveCancel": "취소",
+        "interactiveDone": "완료",
         "agentLabel": "상담원",
         "fieldLabel": "필드",
         "valueLabel": "값",
