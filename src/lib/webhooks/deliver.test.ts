@@ -11,7 +11,8 @@ vi.mock('@/lib/webhooks/ssrf', () => ({
   isDeliverableUrl: vi.fn(async () => true),
 }));
 
-import { dispatchWebhookEvent, MAX_CONSECUTIVE_FAILURES } from './deliver';
+import { retryDelayMs } from './delivery-worker';
+import { dispatchWebhookEvent } from './deliver';
 import { isDeliverableUrl } from './ssrf';
 
 interface Row {
@@ -20,42 +21,34 @@ interface Row {
   secret: string;
 }
 interface Calls {
-  updates: { id: string; payload: Record<string, unknown> }[];
-  rpcs: { name: string; args: Record<string, unknown> }[];
+  queued: Record<string, unknown>[];
 }
 
 function makeDb(rows: Row[], calls: Calls) {
-  const from = () => {
-    let mode: 'select' | 'update' = 'select';
-    let payload: Record<string, unknown> = {};
-    let id: string | null = null;
+  const from = (table: string) => {
+    let payload: Record<string, unknown>[] = [];
     const b: Record<string, unknown> = {
       select: () => b,
-      eq: (col: string, val: string) => {
-        if (col === 'id') id = val;
+      eq: () => b,
+      contains: () => b,
+      insert: (rowsToInsert: Record<string, unknown>[]) => {
+        payload = rowsToInsert;
         return b;
       },
-      update: (p: Record<string, unknown>) => {
-        mode = 'update';
-        payload = p;
-        return b;
-      },
-      contains: () => Promise.resolve({ data: rows, error: null }),
       then: (resolve: (v: unknown) => unknown) => {
-        if (mode === 'update' && id) calls.updates.push({ id, payload });
-        return resolve({ data: null, error: null });
+        if (table === 'webhook_delivery_jobs') {
+          calls.queued.push(...payload);
+          return resolve({ error: null });
+        }
+        return resolve({ data: rows, error: null });
       },
     };
     return b;
   };
-  const rpc = (name: string, args: Record<string, unknown>) => {
-    calls.rpcs.push({ name, args });
-    return Promise.resolve({ data: null, error: null });
-  };
-  return { from, rpc } as unknown as SupabaseClient;
+  return { from } as unknown as SupabaseClient;
 }
 
-const emptyCalls = (): Calls => ({ updates: [], rpcs: [] });
+const emptyCalls = (): Calls => ({ queued: [] });
 
 beforeEach(() => {
   vi.mocked(isDeliverableUrl).mockResolvedValue(true);
@@ -64,8 +57,8 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('dispatchWebhookEvent', () => {
-  it('signs + POSTs (no redirect follow) and resets failure_count on success', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 } as Response);
+  it('queues a stable, deduplicable delivery instead of sending inside the caller', async () => {
+    const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
     const calls = emptyCalls();
 
@@ -76,37 +69,36 @@ describe('dispatchWebhookEvent', () => {
       { x: 1 }
     );
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, opts] = fetchMock.mock.calls[0];
-    expect(url).toBe('https://a.test/hook');
-    expect(opts.redirect).toBe('manual');
-    expect(opts.headers['X-NexoOmni-Event']).toBe('message.received');
-    expect(opts.headers['X-NexoOmni-Signature']).toMatch(/^t=\d+,v1=[0-9a-f]{64}$/);
-    // Payload carries a dedupe id.
-    expect(JSON.parse(opts.body).id).toMatch(/[0-9a-f-]{36}/);
-    expect(calls.updates[0]).toMatchObject({ id: 'a', payload: { failure_count: 0 } });
-    expect(calls.rpcs).toHaveLength(0);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(calls.queued).toHaveLength(1);
+    expect(calls.queued[0]).toMatchObject({ account_id: 'acct-1', endpoint_id: 'a', event_type: 'message.received' });
+    expect(calls.queued[0].delivery_id).toMatch(/[0-9a-f-]{36}/);
+    expect(JSON.parse(calls.queued[0].payload as string)).toMatchObject({
+      id: calls.queued[0].delivery_id,
+      event: 'message.received',
+      account_id: 'acct-1',
+      data: { x: 1 },
+    });
   });
 
-  it('records an atomic failure (RPC) when the endpoint errors', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500 } as Response));
+  it('creates an independent job for each subscribed endpoint', async () => {
     const calls = emptyCalls();
 
     await dispatchWebhookEvent(
-      makeDb([{ id: 'b', url: 'https://b.test/hook', secret: 's2' }], calls),
+      makeDb([
+        { id: 'a', url: 'https://a.test/hook', secret: 's1' },
+        { id: 'b', url: 'https://b.test/hook', secret: 's2' },
+      ], calls),
       'acct-1',
       'message.received',
       {}
     );
 
-    expect(calls.rpcs[0]).toEqual({
-      name: 'record_webhook_failure',
-      args: { endpoint_id: 'b', max_failures: MAX_CONSECUTIVE_FAILURES },
-    });
-    expect(calls.updates).toHaveLength(0);
+    expect(calls.queued).toHaveLength(2);
+    expect(calls.queued[0].delivery_id).not.toBe(calls.queued[1].delivery_id);
   });
 
-  it('blocks a non-public target (SSRF guard) without fetching', async () => {
+  it('does not resolve or fetch the endpoint until the delivery worker claims it', async () => {
     vi.mocked(isDeliverableUrl).mockResolvedValue(false);
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
@@ -120,7 +112,8 @@ describe('dispatchWebhookEvent', () => {
     );
 
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(calls.rpcs[0].name).toBe('record_webhook_failure');
+    expect(isDeliverableUrl).not.toHaveBeenCalled();
+    expect(calls.queued).toHaveLength(1);
   });
 
   it('does nothing when no endpoints are subscribed', async () => {
@@ -129,7 +122,14 @@ describe('dispatchWebhookEvent', () => {
     const calls = emptyCalls();
     await dispatchWebhookEvent(makeDb([], calls), 'acct-1', 'message.received', {});
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(calls.rpcs).toHaveLength(0);
-    expect(calls.updates).toHaveLength(0);
+    expect(calls.queued).toHaveLength(0);
+  });
+});
+
+describe('retryDelayMs', () => {
+  it('uses bounded exponential backoff between attempts', () => {
+    expect(retryDelayMs(1)).toBe(60_000);
+    expect(retryDelayMs(2)).toBe(120_000);
+    expect(retryDelayMs(20)).toBe(15 * 60_000);
   });
 });

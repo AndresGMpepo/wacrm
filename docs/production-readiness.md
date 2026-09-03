@@ -50,6 +50,19 @@ El inicio de WACRM ya ejecuta el worker de análisis configurado por
 mismo bucle en Scripts de Easypanel; duplicarlo puede procesar trabajos dos
 veces. Al separar producción, el worker se moverá a un servicio dedicado.
 
+## Entrega durable de webhooks
+
+Los eventos de API y n8n se guardan primero en una cola de base de datos y
+después se entregan con hasta tres intentos y espera exponencial. Configura:
+
+```text
+WEBHOOK_DELIVERY_WORKER_SECRET=una-cadena-aleatoria-distinta-de-al-menos-32-caracteres
+```
+
+Con `APP_URL` y ese secreto, el inicio standalone ejecuta el worker cada
+minuto. Los trabajos agotados quedan como `dead_letter` en
+`webhook_delivery_jobs` para investigarlos sin perder su estado de entrega.
+
 ## Uptime Kuma en Easypanel
 
 Despliega Uptime Kuma como un servicio independiente de `app_wacrm`; no debe

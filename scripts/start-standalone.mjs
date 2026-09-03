@@ -18,6 +18,9 @@ let workerRunning = false;
 let flowsCronTimer = null;
 let initialFlowsCronTimer = null;
 let flowsCronRunning = false;
+let webhookDeliveryTimer = null;
+let initialWebhookDeliveryTimer = null;
+let webhookDeliveryRunning = false;
 const canRunAnalysisWorker = Boolean(
   process.env.APP_URL && process.env.AI_ANALYSIS_WORKER_SECRET,
 );
@@ -47,6 +50,19 @@ const runFlowsCron = () => {
   cron.on('error', (error) => console.error('[flows cron] spawn failed:', error));
   cron.on('exit', () => { flowsCronRunning = false; });
 };
+const canRunWebhookDeliveryWorker = Boolean(
+  process.env.APP_URL && process.env.WEBHOOK_DELIVERY_WORKER_SECRET,
+);
+const runWebhookDeliveryWorker = () => {
+  if (!canRunWebhookDeliveryWorker || webhookDeliveryRunning) return;
+  webhookDeliveryRunning = true;
+  const worker = spawn(process.execPath, ['scripts/run-webhook-delivery-worker.mjs'], {
+    stdio: 'inherit',
+    env: process.env,
+  });
+  worker.on('error', (error) => console.error('[webhook delivery worker] spawn failed:', error));
+  worker.on('exit', () => { webhookDeliveryRunning = false; });
+};
 
 if (canRunAnalysisWorker) {
   // Give Next enough time to accept the first local/public request, then
@@ -64,12 +80,21 @@ if (canRunFlowsCron) {
   console.info('[flows cron] disabled: APP_URL or AUTOMATION_CRON_SECRET is missing.');
 }
 
+if (canRunWebhookDeliveryWorker) {
+  initialWebhookDeliveryTimer = setTimeout(runWebhookDeliveryWorker, 20_000);
+  webhookDeliveryTimer = setInterval(runWebhookDeliveryWorker, 60_000);
+} else {
+  console.info('[webhook delivery worker] disabled: APP_URL or WEBHOOK_DELIVERY_WORKER_SECRET is missing.');
+}
+
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, () => {
     if (workerTimer) clearInterval(workerTimer);
     if (initialWorkerTimer) clearTimeout(initialWorkerTimer);
     if (flowsCronTimer) clearInterval(flowsCronTimer);
     if (initialFlowsCronTimer) clearTimeout(initialFlowsCronTimer);
+    if (webhookDeliveryTimer) clearInterval(webhookDeliveryTimer);
+    if (initialWebhookDeliveryTimer) clearTimeout(initialWebhookDeliveryTimer);
     child.kill(signal);
   });
 }
