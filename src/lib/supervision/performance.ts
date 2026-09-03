@@ -62,7 +62,10 @@ export async function buildAgentPerformance(
         .from('messages')
         .select('conversation_id, sender_id, sender_type, created_at, conversations!inner(account_id)')
         .eq('conversations.account_id', accountId)
-        .in('sender_type', ['agent', 'customer'])
+        // Bot replies come along on purpose: they score for nobody, but they
+        // DO stop the clock — a customer the AI answered in seconds was not
+        // waiting for the human who opened the chat the next morning.
+        .in('sender_type', ['agent', 'customer', 'bot'])
         .gte('created_at', since)
         .order('created_at', { ascending: true })
         .limit(20_000),
@@ -144,6 +147,11 @@ export async function buildAgentPerformance(
 
     if (message.sender_type === 'customer') {
       if (!waitingSince.has(conversationId)) waitingSince.set(conversationId, message.created_at)
+      continue
+    }
+
+    if (message.sender_type === 'bot') {
+      waitingSince.delete(conversationId)
       continue
     }
 

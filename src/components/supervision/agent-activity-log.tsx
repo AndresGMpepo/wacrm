@@ -167,8 +167,12 @@ export function AgentActivityLog() {
                       <tr className="border-border border-b text-left text-xs text-muted-foreground">
                         <th className="py-2 pr-3 font-medium">Agente</th>
                         <th className="px-2 py-2 text-right font-medium">Conectado</th>
-                        <th className="px-2 py-2 text-right font-medium">1.ª respuesta</th>
-                        <th className="px-2 py-2 text-right font-medium">Resolución</th>
+                        <th className="px-2 py-2 text-right font-medium" title="Mediana de espera del cliente hasta la respuesta de este agente. Entre paréntesis, cuántas esperas se midieron.">
+                          Respuesta
+                        </th>
+                        <th className="px-2 py-2 text-right font-medium" title="Mediana desde que se abrió la conversación hasta que este agente la cerró.">
+                          Resolución
+                        </th>
                         <th className="px-2 py-2 text-right font-medium">Mensajes</th>
                         <th className="px-2 py-2 text-right font-medium">Chats atendidos</th>
                         <th className="px-2 py-2 text-right font-medium">Cerrados</th>
@@ -185,11 +189,21 @@ export function AgentActivityLog() {
                         <tr key={row.user_id} className="border-border/60 border-b last:border-0">
                           <td className="py-2 pr-3 font-medium text-foreground">{row.agent}</td>
                           <td className="px-2 py-2 text-right">{formatDuration(row.online_seconds || null)}</td>
-                          <td className="px-2 py-2 text-right" title={`${row.first_response_samples} respuestas medidas`}>
+                          <td className="px-2 py-2 text-right">
                             {formatDuration(row.first_response_median_seconds)}
+                            {row.first_response_samples > 0 ? (
+                              <span className="text-muted-foreground ml-1 text-[10px]">
+                                ({row.first_response_samples})
+                              </span>
+                            ) : null}
                           </td>
-                          <td className="px-2 py-2 text-right" title={`${row.resolution_samples} cierres medidos`}>
+                          <td className="px-2 py-2 text-right">
                             {formatDuration(row.resolution_median_seconds)}
+                            {row.resolution_samples > 0 ? (
+                              <span className="text-muted-foreground ml-1 text-[10px]">
+                                ({row.resolution_samples})
+                              </span>
+                            ) : null}
                           </td>
                           <td className="px-2 py-2 text-right">{row.messages_sent}</td>
                           <td className="px-2 py-2 text-right">{row.conversations_handled}</td>
