@@ -46,42 +46,48 @@ export async function replaceSteps(
   return insertSteps(automationId, input)
 }
 
-export async function insertSteps(
+export function buildStepRows(
   automationId: string,
   input: BuilderStepInput[],
-): Promise<string | null> {
-  if (!input || input.length === 0) return null
+): InsertRow[] {
+  if (!input || input.length === 0) return []
 
   const looksFlat = input.some(
-    (s) => s.branch !== undefined || s.parent_index !== undefined,
+    (step) => step.branch !== undefined || step.parent_index !== undefined,
   )
   const tree = looksFlat ? seedsToTree(input) : input
-
   const rows: InsertRow[] = []
   function walk(
     steps: BuilderStepInput[],
     parentId: string | null,
     branch: 'yes' | 'no' | null,
   ) {
-    steps.forEach((s, idx) => {
-      const id = s.id ?? uid()
+    steps.forEach((step, index) => {
+      const id = step.id ?? uid()
       rows.push({
         id,
         automation_id: automationId,
         parent_step_id: parentId,
         branch,
-        step_type: s.step_type,
-        step_config: s.step_config ?? {},
-        position: idx,
+        step_type: step.step_type,
+        step_config: step.step_config ?? {},
+        position: index,
       })
-      if (s.step_type === 'condition' && s.branches) {
-        if (s.branches.yes) walk(s.branches.yes, id, 'yes')
-        if (s.branches.no) walk(s.branches.no, id, 'no')
+      if (step.step_type === 'condition' && step.branches) {
+        if (step.branches.yes) walk(step.branches.yes, id, 'yes')
+        if (step.branches.no) walk(step.branches.no, id, 'no')
       }
     })
   }
   walk(tree, null, null)
+  return rows
+}
 
+export async function insertSteps(
+  automationId: string,
+  input: BuilderStepInput[],
+): Promise<string | null> {
+  const rows = buildStepRows(automationId, input)
   if (rows.length === 0) return null
   const { error } = await supabaseAdmin().from('automation_steps').insert(rows)
   return error?.message ?? null

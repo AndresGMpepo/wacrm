@@ -45,6 +45,15 @@ type ContactHistoryItem =
   | { kind: "conversation"; id: string; channel: string; status: ContactConversation["status"]; summary: string; occurredAt: string | null }
   | { kind: "call"; id: string; direction: ContactCall["direction"]; summary: string; occurredAt: string | null; durationSeconds: number | null };
 
+function channelLabel(conversation: ContactConversation) {
+  if (conversation.channel_type === "yeastar_live_chat") return conversation.channel_source_label ? `Chat web · ${conversation.channel_source_label}` : "Chat web Yeastar";
+  if (conversation.channel_type === "facebook" || conversation.channel_type === "zernio_facebook") return "Facebook";
+  if (conversation.channel_type === "instagram" || conversation.channel_type === "zernio_instagram") return "Instagram";
+  if (conversation.channel_type === "zernio_whatsapp") return "WhatsApp";
+  if (conversation.channel_type === "tiktok") return "TikTok";
+  return "WhatsApp";
+}
+
 interface ContactSidebarProps {
   contact: Contact | null;
   conversationId?: string | null;
@@ -218,14 +227,6 @@ export function ContactSidebar({ contact, conversationId, internalNotesOpenSigna
   const contactPhone = displayContactPhone(contact.phone);
   const displayName = contact.name || contactPhone || "Contacto";
   const initials = displayName.charAt(0).toUpperCase();
-  function channelLabel(conversation: ContactConversation) {
-    if (conversation.channel_type === "yeastar_live_chat") return conversation.channel_source_label ? `Chat web · ${conversation.channel_source_label}` : "Chat web Yeastar";
-    if (conversation.channel_type === "facebook" || conversation.channel_type === "zernio_facebook") return "Facebook";
-    if (conversation.channel_type === "instagram" || conversation.channel_type === "zernio_instagram") return "Instagram";
-    if (conversation.channel_type === "zernio_whatsapp") return "WhatsApp";
-    if (conversation.channel_type === "tiktok") return "TikTok";
-    return "WhatsApp";
-  }
 
   return (
     <div className="flex h-full w-80 flex-col border-l border-border bg-card">

@@ -3,8 +3,8 @@ import { getCurrentAccount, requireRole, toErrorResponse } from '@/lib/auth/acco
 import { supabaseAdmin } from '@/lib/automations/admin-client'
 import { normalizeChannelTypes } from '@/lib/automations/channels'
 import {
+  buildStepRows,
   loadStepsTree,
-  replaceSteps,
   type BuilderStepInput,
 } from '@/lib/automations/steps-tree'
 import {
@@ -113,18 +113,21 @@ export async function PATCH(
     }
   }
 
-  if (Object.keys(update).length > 0) {
+  if (Array.isArray(body.steps)) {
+    const { error } = await admin.rpc('replace_automation_definition', {
+      p_account_id: accountId,
+      p_automation_id: id,
+      p_patch: update,
+      p_steps: buildStepRows(id, body.steps as BuilderStepInput[]),
+    })
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  } else if (Object.keys(update).length > 0) {
     const { error: updErr } = await admin
       .from('automations')
       .update(update)
       .eq('id', id)
       .eq('account_id', accountId)
     if (updErr) return NextResponse.json({ error: updErr.message }, { status: 500 })
-  }
-
-  if (Array.isArray(body.steps)) {
-    const err = await replaceSteps(id, body.steps as BuilderStepInput[])
-    if (err) return NextResponse.json({ error: err }, { status: 500 })
   }
 
   return NextResponse.json({ ok: true })
