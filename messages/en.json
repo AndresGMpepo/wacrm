@@ -380,6 +380,13 @@
       "noTagsAvailable": "No tags available. Create tags in Settings.",
       "phoneRequired": "Phone number is required"
     },
+    "trace": {
+      "description": "Everyone who handled this customer, on chat and phone.",
+      "download": "Download CSV",
+      "empty": "No activity recorded yet.",
+      "noAgent": "No agent",
+      "loadFailed": "Could not load the traceability"
+    },
     "detailView": {
       "tabs": {
         "details": "Details",
@@ -389,6 +396,7 @@
         "deals": "Deals",
         "tags": "Tags",
         "memory": "Nexo Memory",
+        "trace": "Traceability",
       "noTags": "No tags",
       "noDeals": "No deals",
       "addNotePlaceholder": "Add a note..."

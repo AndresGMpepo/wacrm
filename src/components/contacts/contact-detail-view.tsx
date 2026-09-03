@@ -54,6 +54,7 @@ import {
 } from 'lucide-react';
 import { useTelephony } from '@/components/telephony/telephony-provider';
 import { NexoMemoryPanel } from '@/components/contacts/nexo-memory-panel';
+import { ContactTracePanel } from '@/components/contacts/contact-trace-panel';
 import { useTranslations } from 'next-intl';
 
 interface ContactDetailViewProps {
@@ -585,6 +586,12 @@ export function ContactDetailView({
                 >
                   {t('tabs.memory')}
                 </TabsTrigger>
+                <TabsTrigger
+                  value="trace"
+                  className="data-active:bg-muted data-active:text-primary text-muted-foreground"
+                >
+                  {t('tabs.trace')}
+                </TabsTrigger>
               </TabsList>
 
               {/* Details Tab */}
@@ -851,6 +858,10 @@ export function ContactDetailView({
               {/* Nexo Memory Tab */}
               <TabsContent value="memory" className="flex-1 overflow-y-auto px-4 py-3">
                 {contactId ? <NexoMemoryPanel contactId={contactId} /> : null}
+              </TabsContent>
+
+              <TabsContent value="trace" className="flex-1 overflow-y-auto px-4 py-3">
+                {contactId ? <ContactTracePanel contactId={contactId} /> : null}
               </TabsContent>
             </Tabs>
           </div>

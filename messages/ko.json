@@ -380,6 +380,13 @@
       "noTagsAvailable": "사용 가능한 태그가 없습니다. 설정에서 태그를 만드세요.",
       "phoneRequired": "전화번호는 필수입니다"
     },
+    "trace": {
+      "description": "채팅과 통화에서 이 고객을 응대한 모든 담당자입니다.",
+      "download": "CSV 다운로드",
+      "empty": "아직 기록된 활동이 없습니다.",
+      "noAgent": "담당자 없음",
+      "loadFailed": "이력을 불러오지 못했습니다"
+    },
     "detailView": {
       "tabs": {
         "details": "상세 정보",
@@ -389,6 +396,7 @@
         "deals": "딜",
         "tags": "태그",
         "memory": "Nexo Memory",
+        "trace": "이력 추적",
         "noTags": "태그 없음",
         "noDeals": "딜 없음",
         "addNotePlaceholder": "메모 추가..."

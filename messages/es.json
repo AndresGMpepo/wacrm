@@ -380,6 +380,13 @@
       "noTagsAvailable": "No hay etiquetas disponibles. Créalas en Configuración.",
       "phoneRequired": "El número de teléfono es obligatorio"
     },
+    "trace": {
+      "description": "Quién atendió a este cliente, en chat y en llamadas.",
+      "download": "Descargar CSV",
+      "empty": "Aún no hay actividad registrada.",
+      "noAgent": "Sin agente",
+      "loadFailed": "No se pudo cargar la trazabilidad"
+    },
     "detailView": {
       "tabs": {
         "details": "Detalles",
@@ -389,6 +396,7 @@
         "deals": "Tratos",
         "tags": "Etiquetas",
         "memory": "Nexo Memory",
+        "trace": "Trazabilidad",
         "noTags": "Sin etiquetas",
         "noDeals": "Sin tratos",
         "addNotePlaceholder": "Añadir una nota..."
