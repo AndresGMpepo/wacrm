@@ -16,13 +16,13 @@ function bad(message: string) {
 }
 
 const CONFIG_COLUMNS =
-  'provider, model, analysis_model, image_analysis_model, voice_transcription_model, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, handoff_target, handoff_queue_id, channel_types, conversation_analysis_enabled, analysis_on_customer_message, analysis_on_transfer, analysis_on_close, analysis_daily_limit, analysis_monthly_limit, analysis_max_per_conversation, analysis_images_enabled, analysis_voice_notes_enabled, media_analysis_daily_limit, qa_scoring_enabled, qa_scoring_criteria, api_key, embeddings_api_key'
+  'provider, model, analysis_model, image_analysis_model, voice_transcription_model, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, handoff_target, handoff_queue_id, channel_types, conversation_analysis_enabled, analysis_on_customer_message, analysis_on_transfer, analysis_on_close, analysis_daily_limit, analysis_monthly_limit, analysis_max_per_conversation, analysis_images_enabled, analysis_voice_notes_enabled, analysis_auto_route_enabled, media_analysis_daily_limit, qa_scoring_enabled, qa_scoring_criteria, api_key, embeddings_api_key'
 
 const LEGACY_CONFIG_COLUMNS =
   'provider, model, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, conversation_analysis_enabled, analysis_on_customer_message, analysis_on_transfer, analysis_on_close, analysis_daily_limit, analysis_monthly_limit, analysis_max_per_conversation, analysis_images_enabled, analysis_voice_notes_enabled, media_analysis_daily_limit, qa_scoring_enabled, qa_scoring_criteria, api_key, embeddings_api_key'
 
 function isMissingModelColumn(error: { code?: string; message?: string }) {
-  return error.code === '42703' || /(?:analysis_model|image_analysis_model|voice_transcription_model|handoff_target|handoff_queue_id|channel_types)/i.test(error.message ?? '')
+  return error.code === '42703' || /(?:analysis_model|image_analysis_model|voice_transcription_model|handoff_target|handoff_queue_id|channel_types|analysis_auto_route_enabled)/i.test(error.message ?? '')
 }
 
 /**
@@ -320,6 +320,7 @@ export async function POST(request: Request) {
       handoff_target: handoffTarget,
       handoff_queue_id: handoffQueueId,
       channel_types: channelTypes,
+      analysis_auto_route_enabled: body.analysis_auto_route_enabled === true,
     }
     // Only touch the handoff target when the form actually sent the field,
     // so a partial save (e.g. flipping a toggle) doesn't wipe it.
@@ -332,7 +333,7 @@ export async function POST(request: Request) {
 
     const writeValues = encryptedKey ? { ...shared, api_key: encryptedKey } : shared
     const legacyWriteValues = Object.fromEntries(
-      Object.entries(writeValues).filter(([key]) => !['analysis_model', 'image_analysis_model', 'voice_transcription_model', 'handoff_target', 'handoff_queue_id', 'channel_types'].includes(key)),
+      Object.entries(writeValues).filter(([key]) => !['analysis_model', 'image_analysis_model', 'voice_transcription_model', 'handoff_target', 'handoff_queue_id', 'channel_types', 'analysis_auto_route_enabled'].includes(key)),
     )
     if (existing) {
       let { error: upErr } = await supabase

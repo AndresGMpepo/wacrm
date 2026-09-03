@@ -8,7 +8,21 @@ import { logAiUsage } from '@/lib/ai/usage'
 import { supabaseAdmin } from '@/lib/ai/admin-client'
 import { AiError } from '@/lib/ai/types'
 import { applyContactMemory, parseMemoryExtraction } from '@/lib/ai/memory'
+import {
+  INSIGHTS_PROMPT,
+  departmentsPrompt,
+  matchDepartmentQueue,
+  parseConversationInsights,
+} from '@/lib/ai/insights'
+import {
+  enrichContactFromInsights,
+  loadAccountQueues,
+  routeConversationToQueue,
+} from '@/lib/ai/insights-apply'
 import { MIN_DAILY_ANALYSES_PER_CONVERSATION } from '@/lib/ai/defaults'
+
+const ANALYSIS_COLUMNS =
+  'summary, sentiment, sentiment_score, next_best_action, reasons, qa_score, qa_empathy_score, qa_objection_handling_score, qa_script_adherence_score, qa_summary, qa_findings, insights, intent, urgency, lead_temperature, handoff_required, recommended_department, status, analyzed_message_count, analyzed_at'
 
 type Sentiment = 'positive' | 'neutral' | 'negative' | 'mixed'
 
@@ -83,7 +97,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ conversati
     }
     const { data, error } = await supabase
       .from('ai_conversation_analyses')
-      .select('summary, sentiment, sentiment_score, next_best_action, reasons, qa_score, qa_empathy_score, qa_objection_handling_score, qa_script_adherence_score, qa_summary, qa_findings, status, analyzed_message_count, analyzed_at')
+      .select(ANALYSIS_COLUMNS)
       .eq('conversation_id', conversationId)
       .eq('source', 'whatsapp')
       .maybeSingle()
@@ -133,7 +147,7 @@ export async function POST(_: Request, { params }: { params: Promise<{ conversat
 
     const { data: qaPolicy } = await supabase
       .from('ai_configs')
-      .select('qa_scoring_enabled, qa_scoring_criteria, analysis_max_per_conversation')
+      .select('qa_scoring_enabled, qa_scoring_criteria, analysis_max_per_conversation, analysis_auto_route_enabled')
       .eq('account_id', accountId)
       .maybeSingle()
     const conversationLimit = Math.max(
@@ -155,6 +169,7 @@ export async function POST(_: Request, { params }: { params: Promise<{ conversat
       }, { status: 429 })
     }
     const qaEnabled = qaPolicy?.qa_scoring_enabled === true
+    const queues = await loadAccountQueues(supabase, accountId)
     const systemPrompt = [
       'Analiza esta conversación de atención al cliente. Responde únicamente JSON válido, sin markdown.',
       'Usa exactamente esta forma: {"summary":"...","sentiment":"positive|neutral|negative|mixed","sentiment_score":0,"next_best_action":"...","reasons":["..."]}.',
@@ -168,6 +183,7 @@ export async function POST(_: Request, { params }: { params: Promise<{ conversat
         : '',
       config.systemPrompt ? `Contexto del negocio: ${config.systemPrompt}` : '',
       'Incluye también memoria del cliente (Nexo Memory): "customer_stage":"..." (p.ej. prospecto, cotización, propuesta, cliente), "risk_level":"low|medium|high", "opportunity_score":0-100, "interests":[{"text":"...","confidence":0-1}], "objections":[{"text":"...","confidence":0-1}], "commitments":[{"description":"...","owner":"agent|customer","due_date":"YYYY-MM-DD|null"}], "important_facts":["..."] (hechos nuevos y relevantes, no saludos ni trivialidades). Omite cualquier campo del que no tengas evidencia clara.',
+      INSIGHTS_PROMPT + departmentsPrompt(queues.map((q) => q.name)),
     ].filter(Boolean).join('\n\n')
     const analysisConfig = { ...config, model: config.analysisModel ?? config.model }
     const result = await generateText({ config: analysisConfig, systemPrompt, messages })
@@ -175,6 +191,8 @@ export async function POST(_: Request, { params }: { params: Promise<{ conversat
     if (!match) throw new AiError('The AI did not return a valid analysis.', { code: 'invalid_analysis' })
     const rawValue = JSON.parse(match[0]) as Record<string, unknown>
     const analysis = parseAnalysis(rawValue)
+    const insights = parseConversationInsights(rawValue)
+    const recommendedQueueId = matchDepartmentQueue(queues, insights.recommended_department)
 
     const admin = supabaseAdmin()
     const { data, error } = await admin
@@ -185,19 +203,32 @@ export async function POST(_: Request, { params }: { params: Promise<{ conversat
         source: 'whatsapp',
         status: 'completed',
         ...analysis,
+        insights,
+        intent: insights.intent,
+        urgency: insights.urgency,
+        lead_temperature: insights.lead_temperature,
+        handoff_required: insights.handoff_required,
+        recommended_department: insights.recommended_department,
+        recommended_queue_id: recommendedQueueId,
         model: analysisConfig.model,
         analyzed_message_count: messages.length,
         analyzed_at: new Date().toISOString(),
         error_message: null,
       }, { onConflict: 'conversation_id,source' })
-      .select('summary, sentiment, sentiment_score, next_best_action, reasons, qa_score, qa_empathy_score, qa_objection_handling_score, qa_script_adherence_score, qa_summary, qa_findings, status, analyzed_message_count, analyzed_at')
+      .select(ANALYSIS_COLUMNS)
       .single()
     if (error) throw error
     void logAiUsage(admin, { accountId, conversationId, mode: 'analysis', provider: config.provider, model: analysisConfig.model, usage: result.usage })
+    if (qaPolicy?.analysis_auto_route_enabled && insights.handoff_required && recommendedQueueId) {
+      await routeConversationToQueue(admin, accountId, conversationId, recommendedQueueId)
+    }
     if (conversation.contact_id) {
-      await applyContactMemory(admin, { accountId, contactId: conversation.contact_id, source: { type: 'conversation', id: conversationId } }, analysis, parseMemoryExtraction(rawValue)).catch((memoryError) => {
+      const memory = parseMemoryExtraction(rawValue)
+      memory.important_facts = [...memory.important_facts, ...insights.customer_context_update].slice(0, 8)
+      await applyContactMemory(admin, { accountId, contactId: conversation.contact_id, source: { type: 'conversation', id: conversationId } }, analysis, memory).catch((memoryError) => {
         console.error('[nexo-memory] Failed to apply memory extraction:', memoryError)
       })
+      await enrichContactFromInsights(admin, accountId, conversation.contact_id, insights)
     }
     return NextResponse.json({ analysis: data })
   } catch (error) {

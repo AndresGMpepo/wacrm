@@ -98,6 +98,7 @@ export function AiConfig() {
   const [handoffTarget, setHandoffTarget] = useState<HandoffTarget>('agent');
   const [handoffQueueId, setHandoffQueueId] = useState('');
   const [channelTypes, setChannelTypes] = useState<string[]>([]);
+  const [analysisAutoRouteEnabled, setAnalysisAutoRouteEnabled] = useState(false);
   const [queues, setQueues] = useState<{ id: string; name: string }[]>([]);
   const [members, setMembers] = useState<AccountMember[]>([]);
 
@@ -143,6 +144,7 @@ export function AiConfig() {
         setHandoffTarget((data.handoff_target as HandoffTarget) ?? 'agent');
         setHandoffQueueId(data.handoff_queue_id ?? '');
         setChannelTypes(Array.isArray(data.channel_types) ? data.channel_types : []);
+        setAnalysisAutoRouteEnabled(Boolean(data.analysis_auto_route_enabled));
         setHasStoredKey(Boolean(data.has_key));
         setApiKey(data.has_key ? MASKED_KEY : '');
         setKeyEdited(false);
@@ -194,6 +196,7 @@ export function AiConfig() {
     handoff_target: handoffTarget,
     handoff_queue_id: handoffQueueId || null,
     channel_types: channelTypes,
+    analysis_auto_route_enabled: analysisAutoRouteEnabled,
     conversation_analysis_enabled: conversationAnalysisEnabled,
     analysis_on_customer_message: analysisOnCustomerMessage,
     analysis_on_transfer: analysisOnTransfer,
@@ -683,6 +686,10 @@ export function AiConfig() {
               <label className="flex items-center justify-between gap-4 text-sm"><span>Tras 2 minutos sin respuesta del cliente</span><Switch checked={analysisOnCustomerMessage} onCheckedChange={setAnalysisOnCustomerMessage} disabled={disabled || !conversationAnalysisEnabled} /></label>
               <label className="flex items-center justify-between gap-4 text-sm"><span>Al transferir o asignar a otro agente</span><Switch checked={analysisOnTransfer} onCheckedChange={setAnalysisOnTransfer} disabled={disabled || !conversationAnalysisEnabled} /></label>
               <label className="flex items-center justify-between gap-4 text-sm"><span>Al cerrar la conversación</span><Switch checked={analysisOnClose} onCheckedChange={setAnalysisOnClose} disabled={disabled || !conversationAnalysisEnabled} /></label>
+            </div>
+            <div className="flex items-center justify-between gap-4 rounded-md border border-border p-3">
+              <div><p className="text-sm font-medium">Enrutar por departamento detectado</p><p className="text-xs text-muted-foreground">Cuando el análisis concluya que se necesita una persona, mueve la conversación sin dueño a la cola del departamento que detectó y deja que esa cola asigne al agente.</p></div>
+              <Switch checked={analysisAutoRouteEnabled} onCheckedChange={setAnalysisAutoRouteEnabled} disabled={disabled || !conversationAnalysisEnabled} />
             </div>
             <div className="grid gap-4 sm:grid-cols-3">
               <div className="space-y-2"><Label>Límite diario de análisis</Label><Input type="number" min={1} max={10000} value={analysisDailyLimit} onChange={(e) => setAnalysisDailyLimit(Number(e.target.value) || 1)} disabled={disabled || !conversationAnalysisEnabled} /><p className="text-xs text-muted-foreground">Cantidad total de ejecuciones IA para toda la cuenta por día.</p></div>

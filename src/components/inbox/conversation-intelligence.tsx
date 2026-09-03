@@ -18,8 +18,37 @@ type Analysis = {
   qa_script_adherence_score: number | null
   qa_summary: string | null
   qa_findings: string[] | null
+  intent: string | null
+  urgency: 'low' | 'medium' | 'high' | 'critical' | null
+  lead_temperature: 'cold' | 'warm' | 'hot' | null
+  handoff_required: boolean | null
+  recommended_department: string | null
+  insights: {
+    sub_intent?: string | null
+    need?: string | null
+    product_service?: string | null
+    impact?: string | null
+    expected_result?: string | null
+    missing_information?: string[] | null
+    handoff_reason?: string | null
+    customer_context_update?: string[] | null
+    commercial_opportunity?: boolean | null
+  } | null
   analyzed_message_count: number
   analyzed_at: string | null
+}
+
+const urgencyMeta: Record<string, { label: string; className: string }> = {
+  low: { label: 'Urgencia baja', className: 'text-muted-foreground' },
+  medium: { label: 'Urgencia media', className: 'text-sky-500' },
+  high: { label: 'Urgencia alta', className: 'text-amber-500' },
+  critical: { label: 'Urgencia crítica', className: 'text-red-500' },
+}
+
+const temperatureMeta: Record<string, { label: string; className: string }> = {
+  cold: { label: 'Lead frío', className: 'text-sky-500' },
+  warm: { label: 'Lead tibio', className: 'text-amber-500' },
+  hot: { label: 'Lead caliente', className: 'text-red-500' },
 }
 
 const sentimentMeta = {
@@ -100,8 +129,15 @@ export function ConversationIntelligence({ conversationId }: { conversationId: s
         </div>
       </div>
       {expanded && (loading ? <p className="mt-2 text-xs text-muted-foreground">Cargando análisis…</p> : analysis ? <div className="mt-2 space-y-1.5 text-xs text-muted-foreground">
+        <ClassificationRow analysis={analysis} />
         {analysis.summary ? <p><span className="font-medium text-foreground">Resumen:</span> {analysis.summary}</p> : null}
+        {analysis.insights?.need ? <p><span className="font-medium text-foreground">Necesidad:</span> {analysis.insights.need}</p> : null}
+        {analysis.insights?.product_service ? <p><span className="font-medium text-foreground">Producto/servicio:</span> {analysis.insights.product_service}</p> : null}
+        {analysis.insights?.expected_result ? <p><span className="font-medium text-foreground">Resultado esperado:</span> {analysis.insights.expected_result}</p> : null}
         {analysis.next_best_action ? <p><span className="font-medium text-foreground">Siguiente acción:</span> {analysis.next_best_action}</p> : null}
+        {analysis.insights?.missing_information?.length ? <p><span className="font-medium text-foreground">Falta por confirmar:</span> {analysis.insights.missing_information.join(' · ')}</p> : null}
+        {analysis.handoff_required ? <p className="text-amber-500"><span className="font-medium">Requiere agente humano</span>{analysis.insights?.handoff_reason ? `: ${analysis.insights.handoff_reason}` : ''}{analysis.recommended_department ? ` → ${analysis.recommended_department}` : ''}</p> : null}
+        {analysis.insights?.customer_context_update?.length ? <div><p className="font-medium text-foreground">Nuevo del cliente:</p><ul className="mt-0.5 list-disc space-y-0.5 pl-4">{analysis.insights.customer_context_update.map((fact, index) => <li key={`${index}-${fact}`}>{fact}</li>)}</ul></div> : null}
         {analysis.reasons?.length ? <p>{analysis.reasons.join(' · ')}</p> : null}
         {qaScore != null ? <div className="mt-3 rounded-md border border-border bg-muted/30 p-2.5"><p className="flex items-center gap-1.5 font-medium text-foreground"><ClipboardCheck className="size-3.5 text-primary" />Auditoría de calidad · {qaScore}/100</p><div className="mt-2 grid grid-cols-3 gap-2 text-center"><QaMetric label="Empatía" value={analysis.qa_empathy_score} /><QaMetric label="Objeciones" value={analysis.qa_objection_handling_score} /><QaMetric label="Guion" value={analysis.qa_script_adherence_score} /></div>{analysis.qa_summary ? <p className="mt-2">{analysis.qa_summary}</p> : null}{analysis.qa_findings?.length ? <ul className="mt-1.5 list-disc space-y-0.5 pl-4">{analysis.qa_findings.map((finding, index) => <li key={`${index}-${finding}`}>{finding}</li>)}</ul> : null}</div> : null}
       </div> : <p className="mt-2 text-xs text-muted-foreground">Genera un resumen, sentimiento y siguiente acción para este chat.</p>)}
@@ -111,4 +147,26 @@ export function ConversationIntelligence({ conversationId }: { conversationId: s
 
 function QaMetric({ label, value }: { label: string; value: number | null }) {
   return <div className="rounded bg-background px-1.5 py-1"><p className="text-[10px] text-muted-foreground">{label}</p><p className="text-xs font-semibold text-foreground">{value == null ? '—' : `${value}/100`}</p></div>
+}
+
+function ClassificationRow({ analysis }: { analysis: Analysis }) {
+  const urgency = analysis.urgency ? urgencyMeta[analysis.urgency] : null
+  const temperature = analysis.lead_temperature ? temperatureMeta[analysis.lead_temperature] : null
+  const chips: { key: string; label: string; className: string }[] = []
+  if (analysis.intent) chips.push({ key: 'intent', label: analysis.intent, className: 'text-foreground' })
+  if (analysis.insights?.sub_intent) chips.push({ key: 'sub', label: analysis.insights.sub_intent, className: 'text-muted-foreground' })
+  if (urgency) chips.push({ key: 'urgency', label: urgency.label, className: urgency.className })
+  if (temperature) chips.push({ key: 'temp', label: temperature.label, className: temperature.className })
+  if (analysis.insights?.commercial_opportunity) chips.push({ key: 'opp', label: 'Oportunidad comercial', className: 'text-emerald-500' })
+  if (analysis.recommended_department) chips.push({ key: 'dept', label: analysis.recommended_department, className: 'text-primary' })
+  if (chips.length === 0) return null
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {chips.map((chip) => (
+        <span key={chip.key} className={cn('rounded-full border border-border bg-muted/40 px-2 py-0.5 text-[11px] font-medium', chip.className)}>
+          {chip.label}
+        </span>
+      ))}
+    </div>
+  )
 }

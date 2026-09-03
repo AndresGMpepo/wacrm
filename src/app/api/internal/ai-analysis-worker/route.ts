@@ -12,6 +12,17 @@ import { MIN_DAILY_ANALYSES_PER_CONVERSATION, aiRequestTimeoutMs } from '@/lib/a
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
 import { syncGoogleCalendarChanges } from '@/lib/appointments/google-calendar'
 import { applyContactMemory, parseMemoryExtraction } from '@/lib/ai/memory'
+import {
+  INSIGHTS_PROMPT,
+  departmentsPrompt,
+  matchDepartmentQueue,
+  parseConversationInsights,
+} from '@/lib/ai/insights'
+import {
+  enrichContactFromInsights,
+  loadAccountQueues,
+  routeConversationToQueue,
+} from '@/lib/ai/insights-apply'
 import { alertCommitmentOverdue, alertStaleProspect, sendDailyNexoMemoryDigest } from '@/lib/notifications/nexo-memory-alerts'
 
 export const maxDuration = 60
@@ -101,7 +112,7 @@ export async function POST(request: Request) {
         db.from('ai_usage_log').select('id', { count: 'exact', head: true }).eq('account_id', job.account_id).eq('mode', 'analysis').gte('created_at', startOfMonth()),
         db.from('ai_usage_log').select('id', { count: 'exact', head: true }).eq('conversation_id', job.conversation_id).eq('mode', 'analysis').gte('created_at', startOfDay()),
       ])
-      const { data: policy } = await db.from('ai_configs').select('analysis_daily_limit, analysis_monthly_limit, analysis_max_per_conversation, qa_scoring_enabled, qa_scoring_criteria').eq('account_id', job.account_id).single()
+      const { data: policy } = await db.from('ai_configs').select('analysis_daily_limit, analysis_monthly_limit, analysis_max_per_conversation, qa_scoring_enabled, qa_scoring_criteria, analysis_auto_route_enabled').eq('account_id', job.account_id).single()
       const dailyCount = daily.count ?? 0
       const monthlyCount = monthly.count ?? 0
       const conversationCount = perConversation.count ?? 0
@@ -129,18 +140,46 @@ export async function POST(request: Request) {
         : ''
       const memoryPrompt = ' Incluye también memoria del cliente (Nexo Memory): "customer_stage":"..." (p.ej. prospecto, cotización, propuesta, cliente), "risk_level":"low|medium|high", "opportunity_score":0-100, "interests":[{"text":"...","confidence":0-1}], "objections":[{"text":"...","confidence":0-1}], "commitments":[{"description":"...","owner":"agent|customer","due_date":"YYYY-MM-DD|null"}], "important_facts":["..."] (hechos nuevos y relevantes, no saludos ni trivialidades). Omite cualquier campo del que no tengas evidencia clara en la conversación.'
       const analysisConfig = { ...config, model: config.analysisModel ?? config.model }
-      const result = await generateText({ config: analysisConfig, messages, systemPrompt: 'Analiza la conversación. Responde únicamente JSON: {"summary":"...","sentiment":"positive|neutral|negative|mixed","sentiment_score":0,"next_best_action":"...","reasons":["..."]}. Usa español y no inventes datos.' + qaPrompt + memoryPrompt })
+      const queues = await loadAccountQueues(db, job.account_id)
+      const result = await generateText({ config: analysisConfig, messages, systemPrompt: 'Analiza la conversación. Responde únicamente JSON: {"summary":"...","sentiment":"positive|neutral|negative|mixed","sentiment_score":0,"next_best_action":"...","reasons":["..."]}. Usa español y no inventes datos.' + qaPrompt + memoryPrompt + INSIGHTS_PROMPT + departmentsPrompt(queues.map((q) => q.name)) })
       const match = result.text.match(/\{[\s\S]*\}/)
       if (!match) throw new Error('La IA no devolvió JSON válido.')
       const rawValue = JSON.parse(match[0]) as Record<string, unknown>
       const analysis = parse(rawValue)
-      const { error: writeError } = await db.from('ai_conversation_analyses').upsert({ account_id: job.account_id, conversation_id: job.conversation_id, source: 'whatsapp', status: 'completed', ...analysis, model: analysisConfig.model, analyzed_message_count: messages.length, analyzed_at: new Date().toISOString(), error_message: null }, { onConflict: 'conversation_id,source' })
+      const insights = parseConversationInsights(rawValue)
+      const recommendedQueueId = matchDepartmentQueue(queues, insights.recommended_department)
+      const { error: writeError } = await db.from('ai_conversation_analyses').upsert({
+        account_id: job.account_id,
+        conversation_id: job.conversation_id,
+        source: 'whatsapp',
+        status: 'completed',
+        ...analysis,
+        insights,
+        intent: insights.intent,
+        urgency: insights.urgency,
+        lead_temperature: insights.lead_temperature,
+        handoff_required: insights.handoff_required,
+        recommended_department: insights.recommended_department,
+        recommended_queue_id: recommendedQueueId,
+        model: analysisConfig.model,
+        analyzed_message_count: messages.length,
+        analyzed_at: new Date().toISOString(),
+        error_message: null,
+      }, { onConflict: 'conversation_id,source' })
       if (writeError) throw writeError
       const contactId = Array.isArray(job.conversation) ? job.conversation[0]?.contact_id : job.conversation?.contact_id
       if (contactId) {
-        await applyContactMemory(db, { accountId: job.account_id, contactId, source: { type: 'conversation', id: job.conversation_id } }, analysis, parseMemoryExtraction(rawValue)).catch((memoryError) => {
+        const memory = parseMemoryExtraction(rawValue)
+        // `customer_context_update` is what the model learned that we didn't
+        // already know, which is exactly the shape Nexo Memory wants.
+        memory.important_facts = [...memory.important_facts, ...insights.customer_context_update].slice(0, 8)
+        await applyContactMemory(db, { accountId: job.account_id, contactId, source: { type: 'conversation', id: job.conversation_id } }, analysis, memory).catch((memoryError) => {
           console.error('[nexo-memory] Failed to apply memory extraction:', memoryError)
         })
+        await enrichContactFromInsights(db, job.account_id, contactId, insights)
+      }
+      if (policy.analysis_auto_route_enabled && insights.handoff_required && recommendedQueueId) {
+        await routeConversationToQueue(db, job.account_id, job.conversation_id, recommendedQueueId)
       }
       await db.from('ai_analysis_jobs').update({ status: 'completed', error_message: null }).eq('id', job.id)
       await logAiUsage(db, { accountId: job.account_id, conversationId: job.conversation_id, mode: 'analysis', provider: config.provider, model: analysisConfig.model, usage: result.usage })
@@ -153,6 +192,13 @@ export async function POST(request: Request) {
         sentiment_score: analysis.sentiment_score,
         qa_score: analysis.qa_score,
         next_best_action: analysis.next_best_action,
+        intent: insights.intent,
+        sub_intent: insights.sub_intent,
+        urgency: insights.urgency,
+        lead_temperature: insights.lead_temperature,
+        commercial_opportunity: insights.commercial_opportunity,
+        handoff_required: insights.handoff_required,
+        recommended_department: insights.recommended_department,
         analyzed_at: new Date().toISOString(),
       }
       await dispatchWebhookEvent(db, job.account_id, 'ai.analysis.completed', eventData)
@@ -183,8 +229,7 @@ export async function POST(request: Request) {
 /** A commitment ("enviar cotización el viernes") that's still 'pending' past its
  *  due date is a broken promise — flag it automatically so Nexo Memory and the
  *  executive action queue surface it without waiting for the next AI analysis. */
-async function markOverdueCommitments(db: ReturnType<typeof supabaseAdmin>) {
-  const today = new Date().toISOString().slice(0, 10)
+async function markOverdueCommitments(db: ReturnType<typeof supabaseAdmin>) {  const today = new Date().toISOString().slice(0, 10)
   const { data, error } = await db.from('contact_commitments')
     .update({ status: 'overdue', updated_at: new Date().toISOString() })
     .eq('status', 'pending')
