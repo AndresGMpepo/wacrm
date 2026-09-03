@@ -3,6 +3,7 @@
 import { ShieldAlert } from 'lucide-react'
 import { useAuth } from '@/hooks/use-auth'
 import { AgentOperationalPanel } from '@/components/supervision/agent-operational-panel'
+import { AgentActivityLog } from '@/components/supervision/agent-activity-log'
 import { AiSupervisionCard } from '@/components/agents/ai-supervision'
 import { CriticalInterventionQueue } from '@/components/supervision/critical-intervention-queue'
 import { TelephonyLiveMonitor } from '@/components/supervision/telephony-live-monitor'
@@ -29,6 +30,7 @@ export default function SupervisionPage() {
           <AiSupervisionCard />
           <TelephonyLiveMonitor />
           <TraceabilityLog />
+          <AgentActivityLog />
         </>
       ) : (
         <div className="rounded-xl border border-border bg-card p-5 text-sm text-muted-foreground">
