@@ -195,6 +195,26 @@ export function NodeConfigForm({
         />
       );
 
+    case "offer_slots":
+      return (
+        <OfferSlotsForm
+          cfg={cfg as OfferSlotsCfg}
+          allNodes={allNodes}
+          currentKey={node.node_key}
+          onUpdateConfig={onUpdateConfig}
+        />
+      );
+
+    case "book_appointment":
+      return (
+        <BookAppointmentForm
+          cfg={cfg as BookAppointmentCfg}
+          allNodes={allNodes}
+          currentKey={node.node_key}
+          onUpdateConfig={onUpdateConfig}
+        />
+      );
+
     case "handoff":
       return (
         <TextRow
@@ -343,6 +363,116 @@ function SendButtonsForm({
       </div>
     </>
   );
+}
+
+// ============================================================
+// appointments
+// ============================================================
+
+interface OfferSlotsCfg {
+  text?: string;
+  specialist_id?: string;
+  duration_minutes?: number;
+  days_ahead?: number;
+  max_options?: number;
+  var_key?: string;
+  next_node_key?: string;
+  no_availability_next?: string;
+}
+
+interface BookAppointmentCfg {
+  slot_var_key?: string;
+  title?: string;
+  specialist_id?: string;
+  duration_minutes?: number;
+  notes?: string;
+  next_node_key?: string;
+  conflict_next?: string;
+}
+
+interface AppointmentSpecialist {
+  id: string;
+  full_name: string;
+  is_active: boolean;
+}
+
+function useAppointmentSpecialists(): AppointmentSpecialist[] {
+  const [specialists, setSpecialists] = useState<AppointmentSpecialist[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/appointments/specialists")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body: { specialists?: AppointmentSpecialist[] } | null) => {
+        if (!cancelled) {
+          setSpecialists((body?.specialists ?? []).filter((specialist) => specialist.is_active));
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return specialists;
+}
+
+function SpecialistSelect({ value, onChange }: { value?: string; onChange: (value: string) => void }) {
+  const specialists = useAppointmentSpecialists();
+  return (
+    <div>
+      <label className="mb-1 block text-xs text-muted-foreground">Especialista</label>
+      <Select
+        value={value || "__general__"}
+        onValueChange={(next) => onChange(!next || next === "__general__" ? "" : next)}
+      >
+        <SelectTrigger className="bg-muted"><SelectValue /></SelectTrigger>
+        <SelectContent>
+          <SelectItem value="__general__">Agenda general</SelectItem>
+          {specialists.map((specialist) => <SelectItem key={specialist.id} value={specialist.id}>{specialist.full_name}</SelectItem>)}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
+function AppointmentNumberField({ label, value, min, max, onChange }: { label: string; value: number; min: number; max: number; onChange: (value: number) => void }) {
+  return <div><label className="mb-1 block text-xs text-muted-foreground">{label}</label><Input type="number" min={min} max={max} value={value} onChange={(event) => onChange(Number(event.target.value))} className="bg-muted" /></div>;
+}
+
+function OfferSlotsForm({ cfg, allNodes, currentKey, onUpdateConfig }: { cfg: OfferSlotsCfg; allNodes: BuilderNode[]; currentKey: string; onUpdateConfig: (patch: Record<string, unknown>) => void }) {
+  return <>
+    <TextRow label="Mensaje para el cliente" value={cfg.text ?? ""} onChange={(text) => onUpdateConfig({ text })} rows={2} />
+    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+      <SpecialistSelect value={cfg.specialist_id} onChange={(specialist_id) => onUpdateConfig({ specialist_id: specialist_id || undefined })} />
+      <AppointmentNumberField label="Duración (minutos)" value={cfg.duration_minutes ?? 30} min={5} max={480} onChange={(duration_minutes) => onUpdateConfig({ duration_minutes })} />
+    </div>
+    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+      <AppointmentNumberField label="Buscar próximos días" value={cfg.days_ahead ?? 7} min={1} max={60} onChange={(days_ahead) => onUpdateConfig({ days_ahead })} />
+      <AppointmentNumberField label="Horarios a mostrar" value={cfg.max_options ?? 6} min={1} max={10} onChange={(max_options) => onUpdateConfig({ max_options })} />
+    </div>
+    <div><label className="mb-1 block text-xs text-muted-foreground">Clave del horario elegido</label><Input value={cfg.var_key ?? "slot"} onChange={(event) => onUpdateConfig({ var_key: event.target.value.replace(/[^a-zA-Z0-9_]/g, "") })} className="bg-muted font-mono text-xs" /></div>
+    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+      <NextNodeRow value={cfg.next_node_key ?? ""} allNodes={allNodes} currentKey={currentKey} onChange={(next_node_key) => onUpdateConfig({ next_node_key })} label="Al elegir un horario" />
+      <NextNodeRow value={cfg.no_availability_next ?? ""} allNodes={allNodes} currentKey={currentKey} onChange={(no_availability_next) => onUpdateConfig({ no_availability_next })} label="Sin disponibilidad" />
+    </div>
+  </>;
+}
+
+function BookAppointmentForm({ cfg, allNodes, currentKey, onUpdateConfig }: { cfg: BookAppointmentCfg; allNodes: BuilderNode[]; currentKey: string; onUpdateConfig: (patch: Record<string, unknown>) => void }) {
+  return <>
+    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+      <div><label className="mb-1 block text-xs text-muted-foreground">Clave del horario elegido</label><Input value={cfg.slot_var_key ?? "slot"} onChange={(event) => onUpdateConfig({ slot_var_key: event.target.value.replace(/[^a-zA-Z0-9_]/g, "") })} className="bg-muted font-mono text-xs" /></div>
+      <SpecialistSelect value={cfg.specialist_id} onChange={(specialist_id) => onUpdateConfig({ specialist_id: specialist_id || undefined })} />
+    </div>
+    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+      <AppointmentNumberField label="Duración (minutos)" value={cfg.duration_minutes ?? 30} min={5} max={480} onChange={(duration_minutes) => onUpdateConfig({ duration_minutes })} />
+    </div>
+    <TextRow label="Título de la cita" value={cfg.title ?? ""} onChange={(title) => onUpdateConfig({ title })} />
+    <TextRow label="Notas internas" value={cfg.notes ?? ""} onChange={(notes) => onUpdateConfig({ notes })} rows={2} />
+    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+      <NextNodeRow value={cfg.next_node_key ?? ""} allNodes={allNodes} currentKey={currentKey} onChange={(next_node_key) => onUpdateConfig({ next_node_key })} label="Cita confirmada" />
+      <NextNodeRow value={cfg.conflict_next ?? ""} allNodes={allNodes} currentKey={currentKey} onChange={(conflict_next) => onUpdateConfig({ conflict_next })} label="Horario ocupado" />
+    </div>
+  </>;
 }
 
 // ============================================================

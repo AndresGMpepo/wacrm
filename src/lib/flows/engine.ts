@@ -886,6 +886,7 @@ async function advanceFromNodeKey(
         accountId: run.account_id,
         userId: run.user_id,
         contactId: run.contact_id!,
+        conversationId: run.conversation_id!,
         cfg,
         vars: run.vars,
       });

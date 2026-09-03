@@ -112,6 +112,7 @@ export async function bookFlowAppointment(
     accountId: string
     userId: string
     contactId: string
+    conversationId: string
     cfg: BookAppointmentNodeConfig
     vars: Record<string, unknown>
   },
@@ -134,6 +135,7 @@ export async function bookFlowAppointment(
       account_id: args.accountId,
       created_by: args.userId,
       contact_id: args.contactId,
+      source_conversation_id: args.conversationId,
       specialist_id: specialistId,
       title: args.cfg.title?.trim().slice(0, 160) || 'Cita agendada',
       notes: args.cfg.notes?.trim().slice(0, 2000) || null,
@@ -149,6 +151,18 @@ export async function bookFlowAppointment(
     const conflict = (error as { code?: string }).code === '23P01'
     console.error('[flows] could not book the appointment:', error.message)
     return { ok: false, reason: conflict ? 'conflict' : 'failed' }
+  }
+
+  const dueAt = new Date(new Date(data.starts_at as string).getTime() - 60 * 60_000)
+  if (dueAt > new Date()) {
+    const { error: reminderError } = await db.from('appointment_reminders').insert({
+      account_id: args.accountId,
+      appointment_id: data.id,
+      due_at: dueAt.toISOString(),
+    })
+    if (reminderError) {
+      console.error('[flows] could not schedule the appointment reminder:', reminderError.message)
+    }
   }
 
   return { ok: true, appointmentId: data.id as string, startsAt: data.starts_at as string }

@@ -159,6 +159,36 @@ describe("validateFlowForActivation — trigger", () => {
 });
 
 describe("validateFlowForActivation — nodes", () => {
+  it("validates required appointment node configuration and branches", () => {
+    const nodes = [
+      { node_key: "start", node_type: "start", config: { next_node_key: "slots" } },
+      {
+        node_key: "slots",
+        node_type: "offer_slots",
+        config: { text: "", var_key: "", next_node_key: "missing", no_availability_next: "also_missing" },
+      },
+      {
+        node_key: "book",
+        node_type: "book_appointment",
+        config: { slot_var_key: "", title: "", next_node_key: "missing", conflict_next: "also_missing" },
+      },
+    ];
+    const issues = validateFlowForActivation(validFlow, nodes);
+
+    expect(issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ node_key: "slots", field: "text" }),
+        expect.objectContaining({ node_key: "slots", field: "var_key" }),
+        expect.objectContaining({ node_key: "slots", field: "next_node_key" }),
+        expect.objectContaining({ node_key: "slots", field: "no_availability_next" }),
+        expect.objectContaining({ node_key: "book", field: "slot_var_key" }),
+        expect.objectContaining({ node_key: "book", field: "title" }),
+        expect.objectContaining({ node_key: "book", field: "next_node_key" }),
+        expect.objectContaining({ node_key: "book", field: "conflict_next" }),
+      ]),
+    );
+  });
+
   it("flags send_buttons without text", () => {
     const nodes = [
       { node_key: "s", node_type: "start", config: { next_node_key: "b" } },

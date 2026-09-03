@@ -701,6 +701,46 @@ function validateNode(
       break;
     }
 
+    case "offer_slots": {
+      const cfg = node.config as {
+        text?: string;
+        var_key?: string;
+        duration_minutes?: number;
+        days_ahead?: number;
+        max_options?: number;
+        next_node_key?: string;
+        no_availability_next?: string;
+      };
+      if (!cfg.text?.trim()) {
+        issues.push({ severity: "error", scope: "node", node_key: node.node_key, field: "text", message: "El nodo Ofrecer horarios necesita un texto para el cliente." });
+      }
+      validateVarKey(issues, node.node_key, "var_key", cfg.var_key, "El nodo Ofrecer horarios necesita una clave para guardar el horario elegido.");
+      validateAppointmentNumber(issues, node.node_key, "duration_minutes", cfg.duration_minutes, 5, 480, "La duración debe estar entre 5 y 480 minutos.");
+      validateAppointmentNumber(issues, node.node_key, "days_ahead", cfg.days_ahead, 1, 60, "El período de búsqueda debe estar entre 1 y 60 días.");
+      validateAppointmentNumber(issues, node.node_key, "max_options", cfg.max_options, 1, 10, "Se pueden mostrar entre 1 y 10 horarios.");
+      validateNextNode(issues, node.node_key, "next_node_key", cfg.next_node_key, knownKeys, "El nodo Ofrecer horarios necesita un destino al elegir un horario.");
+      validateNextNode(issues, node.node_key, "no_availability_next", cfg.no_availability_next, knownKeys, "El nodo Ofrecer horarios necesita un destino sin disponibilidad.");
+      break;
+    }
+
+    case "book_appointment": {
+      const cfg = node.config as {
+        slot_var_key?: string;
+        title?: string;
+        duration_minutes?: number;
+        next_node_key?: string;
+        conflict_next?: string;
+      };
+      validateVarKey(issues, node.node_key, "slot_var_key", cfg.slot_var_key, "El nodo Agendar cita necesita la clave donde se guardó el horario elegido.");
+      if (!cfg.title?.trim()) {
+        issues.push({ severity: "error", scope: "node", node_key: node.node_key, field: "title", message: "El nodo Agendar cita necesita un título." });
+      }
+      validateAppointmentNumber(issues, node.node_key, "duration_minutes", cfg.duration_minutes, 5, 480, "La duración debe estar entre 5 y 480 minutos.");
+      validateNextNode(issues, node.node_key, "next_node_key", cfg.next_node_key, knownKeys, "El nodo Agendar cita necesita un destino al confirmar la cita.");
+      validateNextNode(issues, node.node_key, "conflict_next", cfg.conflict_next, knownKeys, "El nodo Agendar cita necesita un destino cuando el horario ya no esté disponible.");
+      break;
+    }
+
     case "handoff":
     case "end":
       // Terminal nodes have no outgoing edges; nothing to validate
@@ -717,6 +757,49 @@ function validateNode(
   }
 
   return issues;
+}
+
+function validateVarKey(
+  issues: ValidationIssue[],
+  nodeKey: string,
+  field: string,
+  value: string | undefined,
+  requiredMessage: string,
+) {
+  if (!value?.trim()) {
+    issues.push({ severity: "error", scope: "node", node_key: nodeKey, field, message: requiredMessage });
+  } else if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(value)) {
+    issues.push({ severity: "error", scope: "node", node_key: nodeKey, field, message: `La clave "${value}" debe usar letras, números o guion bajo y comenzar con una letra o guion bajo.` });
+  }
+}
+
+function validateAppointmentNumber(
+  issues: ValidationIssue[],
+  nodeKey: string,
+  field: string,
+  value: number | undefined,
+  min: number,
+  max: number,
+  message: string,
+) {
+  if (value !== undefined && (!Number.isInteger(value) || value < min || value > max)) {
+    issues.push({ severity: "error", scope: "node", node_key: nodeKey, field, message });
+  }
+}
+
+function validateNextNode(
+  issues: ValidationIssue[],
+  nodeKey: string,
+  field: string,
+  value: string | undefined,
+  knownKeys: Set<string>,
+  requiredMessage: string,
+) {
+  if (!value) {
+    issues.push({ severity: "error", scope: "node", node_key: nodeKey, field, message: requiredMessage });
+  } else if (!knownKeys.has(value)) {
+    issues.push({ severity: "error", scope: "node", node_key: nodeKey, field, message: `La ruta "${field}" apunta al nodo inexistente "${value}".` });
+  }
 }
 
 // ============================================================
@@ -754,6 +837,24 @@ function outgoingEdges(node: NodeInput): string[] {
     case "set_tag": {
       const cfg = node.config as { next_node_key?: string };
       return cfg.next_node_key ? [cfg.next_node_key] : [];
+    }
+    case "offer_slots": {
+      const cfg = node.config as {
+        next_node_key?: string;
+        no_availability_next?: string;
+      };
+      return [cfg.next_node_key, cfg.no_availability_next].filter(
+        (key): key is string => !!key,
+      );
+    }
+    case "book_appointment": {
+      const cfg = node.config as {
+        next_node_key?: string;
+        conflict_next?: string;
+      };
+      return [cfg.next_node_key, cfg.conflict_next].filter(
+        (key): key is string => !!key,
+      );
     }
     case "condition": {
       const cfg = node.config as {

@@ -11,6 +11,7 @@ import { describeImageWithOpenAi, downloadPublicMedia, transcribeAudioWithOpenAi
 import { MIN_DAILY_ANALYSES_PER_CONVERSATION, aiRequestTimeoutMs } from '@/lib/ai/defaults'
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
 import { syncGoogleCalendarChanges } from '@/lib/appointments/google-calendar'
+import { flowChannel, flowSendText } from '@/lib/flows/channel-send'
 import { applyContactMemory, parseMemoryExtraction } from '@/lib/ai/memory'
 import {
   INSIGHTS_PROMPT,
@@ -29,6 +30,29 @@ export const maxDuration = 60
 
 type Job = { id: string; account_id: string; conversation_id: string; attempts: number; conversation: { contact_id: string } | { contact_id: string }[] | null }
 type MediaJob = { id: string; account_id: string; conversation_id: string; message_id: string; kind: 'image' | 'voice_note'; conversation: { channel_type: string | null } | { channel_type: string | null }[] | null }
+type AppointmentReminderJob = {
+  id: string
+  account_id: string
+  appointment: {
+    id: string
+    contact_id: string | null
+    created_by: string | null
+    source_conversation_id: string | null
+    starts_at: string
+    timezone: string
+    title: string
+    status: string
+  } | {
+    id: string
+    contact_id: string | null
+    created_by: string | null
+    source_conversation_id: string | null
+    starts_at: string
+    timezone: string
+    title: string
+    status: string
+  }[] | null
+}
 
 function startOfDay() { const d = new Date(); d.setHours(0, 0, 0, 0); return d.toISOString() }
 function startOfMonth() { const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); return d.toISOString() }
@@ -212,6 +236,7 @@ export async function POST(request: Request) {
     }
   }
   const followUps = await processCallFollowUps(db)
+  const appointmentReminders = await processAppointmentReminders(db)
   const overdueCommitments = await markOverdueCommitments(db)
   const staleProspects = await alertStaleProspects(db)
   await sendNexoMemoryDigests(db).catch((error) => {
@@ -223,7 +248,91 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error('[appointments] Google Calendar inbound sync could not start:', error)
   }
-  return NextResponse.json({ completed, skipped, failed, media: mediaResult, follow_ups: followUps, overdue_commitments: overdueCommitments, stale_prospects: staleProspects, google_calendar: googleCalendar })
+  return NextResponse.json({ completed, skipped, failed, media: mediaResult, follow_ups: followUps, appointment_reminders: appointmentReminders, overdue_commitments: overdueCommitments, stale_prospects: staleProspects, google_calendar: googleCalendar })
+}
+
+async function processAppointmentReminders(db: ReturnType<typeof supabaseAdmin>) {
+  const { data, error } = await db
+    .from('appointment_reminders')
+    .select('id, account_id, appointment:appointments(id, contact_id, created_by, source_conversation_id, starts_at, timezone, title, status)')
+    .eq('status', 'queued')
+    .lte('due_at', new Date().toISOString())
+    .order('due_at')
+    .limit(20)
+  if (error) {
+    console.error('[appointments] Could not load reminders:', error.message)
+    return { sent: 0, skipped: 0, failed: 1 }
+  }
+
+  let sent = 0
+  let skipped = 0
+  let failed = 0
+  for (const reminder of (data ?? []) as AppointmentReminderJob[]) {
+    const { data: claimed } = await db.from('appointment_reminders')
+      .update({ status: 'sending', error_message: null })
+      .eq('id', reminder.id)
+      .eq('status', 'queued')
+      .select('id')
+      .maybeSingle()
+    if (!claimed) continue
+
+    const appointment = Array.isArray(reminder.appointment)
+      ? reminder.appointment[0]
+      : reminder.appointment
+    if (!appointment || ['cancelled', 'completed', 'no_show'].includes(appointment.status)) {
+      await db.from('appointment_reminders').update({ status: 'skipped', error_message: 'La cita ya no está pendiente.' }).eq('id', reminder.id)
+      skipped++
+      continue
+    }
+    if (!appointment.contact_id || !appointment.created_by || !appointment.source_conversation_id) {
+      await db.from('appointment_reminders').update({ status: 'skipped', error_message: 'La cita no tiene una conversación de origen para conservar el canal.' }).eq('id', reminder.id)
+      skipped++
+      continue
+    }
+
+    if (await flowChannel(reminder.account_id, appointment.source_conversation_id) === 'whatsapp') {
+      const { data: lastInbound } = await db.from('messages')
+        .select('created_at')
+        .eq('conversation_id', appointment.source_conversation_id)
+        .eq('sender_type', 'customer')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      const isWithinWindow = lastInbound && Date.now() - new Date(lastInbound.created_at).getTime() <= 24 * 60 * 60_000
+      if (!isWithinWindow) {
+        await db.from('appointment_reminders').update({ status: 'skipped', error_message: 'WhatsApp requiere una plantilla aprobada después de 24 horas sin respuesta del cliente.' }).eq('id', reminder.id)
+        skipped++
+        continue
+      }
+    }
+
+    const startsAt = new Intl.DateTimeFormat('es-MX', {
+      timeZone: appointment.timezone || 'UTC',
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).format(new Date(appointment.starts_at))
+    try {
+      await flowSendText({
+        accountId: reminder.account_id,
+        userId: appointment.created_by,
+        conversationId: appointment.source_conversation_id,
+        contactId: appointment.contact_id,
+        text: `Recordatorio: tienes ${appointment.title} el ${startsAt}.`,
+      })
+      await db.from('appointment_reminders').update({ status: 'sent', sent_at: new Date().toISOString() }).eq('id', reminder.id)
+      sent++
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message.slice(0, 500) : 'No se pudo enviar el recordatorio.'
+      await db.from('appointment_reminders').update({ status: 'failed', error_message: message }).eq('id', reminder.id)
+      console.error('[appointments] Could not send reminder:', { appointmentId: appointment.id, error: message })
+      failed++
+    }
+  }
+  return { sent, skipped, failed }
 }
 
 /** A commitment ("enviar cotización el viernes") that's still 'pending' past its
