@@ -1,11 +1,12 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 /**
- * Per-agent workload for a time window.
+ * Per-agent workload and service times for a time window.
  *
  * Volume comes from the tables that already hold it (`messages`,
- * `conversation_assignment_history`, call transcriptions) and state changes
- * from `agent_activity_log`. Nothing is double-written just to be counted.
+ * `conversation_assignment_history`, call transcriptions), state changes
+ * from `agent_activity_log`, and connected time from
+ * `member_presence_sessions`. Nothing is double-written just to be counted.
  */
 
 export interface AgentPerformanceRow {
@@ -20,6 +21,30 @@ export interface AgentPerformanceRow {
   notes: number
   appointments_created: number
   tags_applied: number
+  /** How long the customer waited for this agent's reply. */
+  first_response_median_seconds: number | null
+  first_response_samples: number
+  /** From the conversation opening to the moment this agent closed it. */
+  resolution_median_seconds: number | null
+  resolution_samples: number
+  /** Time with an `online` heartbeat inside the window. */
+  online_seconds: number
+}
+
+type MessageRow = {
+  conversation_id: string
+  sender_id: string | null
+  sender_type: string
+  created_at: string
+}
+
+function median(values: number[]): number | null {
+  if (values.length === 0) return null
+  const sorted = [...values].sort((a, b) => a - b)
+  const middle = Math.floor(sorted.length / 2)
+  return sorted.length % 2 === 0
+    ? Math.round((sorted[middle - 1] + sorted[middle]) / 2)
+    : sorted[middle]
 }
 
 export async function buildAgentPerformance(
@@ -27,38 +52,52 @@ export async function buildAgentPerformance(
   accountId: string,
   since: string,
 ): Promise<AgentPerformanceRow[]> {
-  const [profiles, messages, assignments, calls, activity] = await Promise.all([
-    db.from('profiles').select('user_id, full_name, email').eq('account_id', accountId),
-    // Inner join keeps the scan inside this account without adding an
-    // account_id column to the hottest table in the product.
-    db
-      .from('messages')
-      .select('sender_id, conversation_id, conversations!inner(account_id)')
-      .eq('conversations.account_id', accountId)
-      .eq('sender_type', 'agent')
-      .not('sender_id', 'is', null)
-      .gte('created_at', since)
-      .limit(20_000),
-    db
-      .from('conversation_assignment_history')
-      .select('from_agent_id, to_agent_id, source')
-      .eq('account_id', accountId)
-      .gte('created_at', since),
-    db
-      .from('yeastar_call_transcriptions')
-      .select('agent_user_id')
-      .eq('account_id', accountId)
-      .gte('created_at', since),
-    db
-      .from('agent_activity_log')
-      .select('actor_user_id, action')
-      .eq('account_id', accountId)
-      .gte('created_at', since)
-      .limit(20_000),
-  ])
+  const [profiles, messages, assignments, calls, activity, presence, currentPresence] =
+    await Promise.all([
+      db.from('profiles').select('user_id, full_name, email').eq('account_id', accountId),
+      // Inner join keeps the scan inside this account without adding an
+      // account_id column to the hottest table in the product. Customer
+      // messages come along because response time needs both sides.
+      db
+        .from('messages')
+        .select('conversation_id, sender_id, sender_type, created_at, conversations!inner(account_id)')
+        .eq('conversations.account_id', accountId)
+        .in('sender_type', ['agent', 'customer'])
+        .gte('created_at', since)
+        .order('created_at', { ascending: true })
+        .limit(20_000),
+      db
+        .from('conversation_assignment_history')
+        .select('from_agent_id, to_agent_id, source')
+        .eq('account_id', accountId)
+        .gte('created_at', since),
+      db
+        .from('yeastar_call_transcriptions')
+        .select('agent_user_id')
+        .eq('account_id', accountId)
+        .gte('created_at', since),
+      db
+        .from('agent_activity_log')
+        .select('actor_user_id, action, conversation_id, created_at')
+        .eq('account_id', accountId)
+        .gte('created_at', since)
+        .limit(20_000),
+      db
+        .from('member_presence_sessions')
+        .select('user_id, status, started_at, ended_at')
+        .eq('account_id', accountId)
+        .eq('status', 'online')
+        // A session may have started before the window and still count for
+        // the part that falls inside it.
+        .gte('started_at', new Date(new Date(since).getTime() - 86_400_000).toISOString()),
+      db.from('member_presence').select('user_id, last_seen_at').eq('account_id', accountId),
+    ])
 
   const rows = new Map<string, AgentPerformanceRow>()
   const handled = new Map<string, Set<string>>()
+  const firstResponses = new Map<string, number[]>()
+  const resolutions = new Map<string, number[]>()
+
   const ensure = (userId: string, name?: string): AgentPerformanceRow => {
     const existing = rows.get(userId)
     if (existing) return existing
@@ -74,6 +113,11 @@ export async function buildAgentPerformance(
       notes: 0,
       appointments_created: 0,
       tags_applied: 0,
+      first_response_median_seconds: null,
+      first_response_samples: 0,
+      resolution_median_seconds: null,
+      resolution_samples: 0,
+      online_seconds: 0,
     }
     rows.set(userId, created)
     return created
@@ -86,15 +130,50 @@ export async function buildAgentPerformance(
     )
   }
 
-  for (const message of messages.data ?? []) {
-    const agent = ensure(message.sender_id as string)
+  // ---- Messages: volume, conversations handled, response time ----
+  const messageRows = (messages.data ?? []) as unknown as MessageRow[]
+  // Oldest customer message still unanswered, per conversation.
+  const waitingSince = new Map<string, string>()
+  const firstMessageAt = new Map<string, string>()
+
+  for (const message of messageRows) {
+    const conversationId = message.conversation_id
+    if (!firstMessageAt.has(conversationId)) {
+      firstMessageAt.set(conversationId, message.created_at)
+    }
+
+    if (message.sender_type === 'customer') {
+      if (!waitingSince.has(conversationId)) waitingSince.set(conversationId, message.created_at)
+      continue
+    }
+
+    if (!message.sender_id) continue
+    const agent = ensure(message.sender_id)
     agent.messages_sent += 1
     const set = handled.get(agent.user_id) ?? new Set<string>()
-    set.add(message.conversation_id as string)
+    set.add(conversationId)
     handled.set(agent.user_id, set)
+
+    const waiting = waitingSince.get(conversationId)
+    if (waiting) {
+      const seconds = Math.max(
+        0,
+        Math.round((new Date(message.created_at).getTime() - new Date(waiting).getTime()) / 1000),
+      )
+      const samples = firstResponses.get(agent.user_id) ?? []
+      samples.push(seconds)
+      firstResponses.set(agent.user_id, samples)
+      waitingSince.delete(conversationId)
+    }
   }
+
   for (const [userId, set] of handled) {
     ensure(userId).conversations_handled = set.size
+  }
+  for (const [userId, samples] of firstResponses) {
+    const agent = ensure(userId)
+    agent.first_response_median_seconds = median(samples)
+    agent.first_response_samples = samples.length
   }
 
   for (const row of assignments.data ?? []) {
@@ -108,13 +187,68 @@ export async function buildAgentPerformance(
     if (row.agent_user_id) ensure(row.agent_user_id as string).calls += 1
   }
 
+  // ---- Activity: closes, notes, tags, appointments ----
+  const closedConversationIds = new Set<string>()
   for (const row of activity.data ?? []) {
     if (!row.actor_user_id) continue
     const agent = ensure(row.actor_user_id as string)
-    if (row.action === 'conversation_closed') agent.conversations_closed += 1
-    else if (row.action === 'note_added') agent.notes += 1
+    if (row.action === 'conversation_closed') {
+      agent.conversations_closed += 1
+      if (row.conversation_id) closedConversationIds.add(row.conversation_id as string)
+    } else if (row.action === 'note_added') agent.notes += 1
     else if (row.action === 'appointment_created') agent.appointments_created += 1
     else if (row.action === 'tag_added') agent.tags_applied += 1
+  }
+
+  // ---- Resolution time ----
+  if (closedConversationIds.size > 0) {
+    // A conversation closed inside the window may have opened before it, so
+    // the start comes from the conversation row rather than the message page.
+    const { data: conversations } = await db
+      .from('conversations')
+      .select('id, created_at')
+      .eq('account_id', accountId)
+      .in('id', [...closedConversationIds])
+    const openedAt = new Map<string, string>()
+    for (const row of conversations ?? []) {
+      openedAt.set(row.id as string, row.created_at as string)
+    }
+    for (const row of activity.data ?? []) {
+      if (row.action !== 'conversation_closed' || !row.actor_user_id || !row.conversation_id) continue
+      const start =
+        openedAt.get(row.conversation_id as string) ?? firstMessageAt.get(row.conversation_id as string)
+      if (!start) continue
+      const seconds = Math.max(
+        0,
+        Math.round((new Date(row.created_at as string).getTime() - new Date(start).getTime()) / 1000),
+      )
+      const samples = resolutions.get(row.actor_user_id as string) ?? []
+      samples.push(seconds)
+      resolutions.set(row.actor_user_id as string, samples)
+    }
+    for (const [userId, samples] of resolutions) {
+      const agent = ensure(userId)
+      agent.resolution_median_seconds = median(samples)
+      agent.resolution_samples = samples.length
+    }
+  }
+
+  // ---- Connected time ----
+  const lastSeen = new Map<string, string>()
+  for (const row of currentPresence.data ?? []) {
+    lastSeen.set(row.user_id as string, row.last_seen_at as string)
+  }
+  const windowStart = new Date(since).getTime()
+  const now = Date.now()
+  for (const session of presence.data ?? []) {
+    const userId = session.user_id as string
+    // An open session means the browser never said goodbye: bound it at the
+    // agent's last heartbeat, never at now().
+    const endRaw = (session.ended_at as string | null) ?? lastSeen.get(userId) ?? null
+    const end = endRaw ? Math.min(new Date(endRaw).getTime(), now) : now
+    const start = Math.max(new Date(session.started_at as string).getTime(), windowStart)
+    if (end <= start) continue
+    ensure(userId).online_seconds += Math.round((end - start) / 1000)
   }
 
   return [...rows.values()]
@@ -127,7 +261,8 @@ export async function buildAgentPerformance(
         row.transfers_received > 0 ||
         row.notes > 0 ||
         row.appointments_created > 0 ||
-        row.tags_applied > 0,
+        row.tags_applied > 0 ||
+        row.online_seconds > 0,
     )
     .sort((a, b) => b.messages_sent - a.messages_sent || a.agent.localeCompare(b.agent))
 }
@@ -137,6 +272,11 @@ const CSV_HEADERS = [
   'mensajes_enviados',
   'conversaciones_atendidas',
   'conversaciones_cerradas',
+  'primera_respuesta_mediana_seg',
+  'primera_respuesta_muestras',
+  'resolucion_mediana_seg',
+  'resolucion_muestras',
+  'tiempo_conectado_seg',
   'transferencias_enviadas',
   'transferencias_recibidas',
   'llamadas',
@@ -145,8 +285,8 @@ const CSV_HEADERS = [
   'etiquetas_aplicadas',
 ]
 
-function csvCell(value: string | number): string {
-  const raw = String(value ?? '')
+function csvCell(value: string | number | null): string {
+  const raw = value === null || value === undefined ? '' : String(value)
   const safe = /^[=+\-@]/.test(raw) ? `'${raw}` : raw
   return `"${safe.replace(/"/g, '""')}"`
 }
@@ -158,6 +298,11 @@ export function agentPerformanceCsv(rows: AgentPerformanceRow[]): string {
       row.messages_sent,
       row.conversations_handled,
       row.conversations_closed,
+      row.first_response_median_seconds,
+      row.first_response_samples,
+      row.resolution_median_seconds,
+      row.resolution_samples,
+      row.online_seconds,
       row.transfers_sent,
       row.transfers_received,
       row.calls,
@@ -169,4 +314,14 @@ export function agentPerformanceCsv(rows: AgentPerformanceRow[]): string {
       .join(','),
   )
   return [CSV_HEADERS.join(','), ...body].join('\r\n')
+}
+
+/** Compact human duration for the supervision table ("2m 14s", "1h 3m"). */
+export function formatDuration(seconds: number | null): string {
+  if (seconds === null) return '—'
+  if (seconds < 60) return `${seconds}s`
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m ${seconds % 60}s`
+  const hours = Math.floor(minutes / 60)
+  return `${hours}h ${minutes % 60}m`
 }

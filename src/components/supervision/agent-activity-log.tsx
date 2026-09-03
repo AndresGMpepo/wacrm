@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { formatDuration } from '@/lib/supervision/performance'
 
 type ActivityEvent = {
   id: string
@@ -31,6 +32,11 @@ type PerformanceRow = {
   notes: number
   appointments_created: number
   tags_applied: number
+  first_response_median_seconds: number | null
+  first_response_samples: number
+  resolution_median_seconds: number | null
+  resolution_samples: number
+  online_seconds: number
 }
 
 const ACTION_LABELS: Record<string, string> = {
@@ -156,10 +162,13 @@ export function AgentActivityLog() {
                 </p>
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-[52rem] text-sm">
+                  <table className="w-full min-w-[64rem] text-sm">
                     <thead>
                       <tr className="border-border border-b text-left text-xs text-muted-foreground">
                         <th className="py-2 pr-3 font-medium">Agente</th>
+                        <th className="px-2 py-2 text-right font-medium">Conectado</th>
+                        <th className="px-2 py-2 text-right font-medium">1.ª respuesta</th>
+                        <th className="px-2 py-2 text-right font-medium">Resolución</th>
                         <th className="px-2 py-2 text-right font-medium">Mensajes</th>
                         <th className="px-2 py-2 text-right font-medium">Chats atendidos</th>
                         <th className="px-2 py-2 text-right font-medium">Cerrados</th>
@@ -175,6 +184,13 @@ export function AgentActivityLog() {
                       {rows.map((row) => (
                         <tr key={row.user_id} className="border-border/60 border-b last:border-0">
                           <td className="py-2 pr-3 font-medium text-foreground">{row.agent}</td>
+                          <td className="px-2 py-2 text-right">{formatDuration(row.online_seconds || null)}</td>
+                          <td className="px-2 py-2 text-right" title={`${row.first_response_samples} respuestas medidas`}>
+                            {formatDuration(row.first_response_median_seconds)}
+                          </td>
+                          <td className="px-2 py-2 text-right" title={`${row.resolution_samples} cierres medidos`}>
+                            {formatDuration(row.resolution_median_seconds)}
+                          </td>
                           <td className="px-2 py-2 text-right">{row.messages_sent}</td>
                           <td className="px-2 py-2 text-right">{row.conversations_handled}</td>
                           <td className="px-2 py-2 text-right">{row.conversations_closed}</td>
