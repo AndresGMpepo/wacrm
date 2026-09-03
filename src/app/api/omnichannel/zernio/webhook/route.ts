@@ -427,7 +427,7 @@ export async function POST(request: Request) {
       )
       const { data: rows, error: findError } = await db
         .from('conversations')
-        .select('id, unread_count')
+        .select('id, unread_count, status')
         .eq('account_id', typed.account_id)
         .eq('connector_id', typed.id)
         .eq('external_session_id', externalConversationId)
@@ -440,7 +440,7 @@ export async function POST(request: Request) {
         const { data, error } = await db
           .from('conversations')
           .insert({ account_id: typed.account_id, user_id: auditUserId, contact_id: contactId, channel_type: typed.provider, connector_id: typed.id, external_session_id: externalConversationId, channel_source_label: typed.display_name, queue_id: typed.queue_id })
-          .select('id, unread_count')
+          .select('id, unread_count, status')
           .single()
         if (error || !data) throw error ?? new Error('No se pudo crear la conversación entrante.')
         conversationRow = data
@@ -464,7 +464,10 @@ export async function POST(request: Request) {
         .select('id', { count: 'exact', head: true })
         .eq('conversation_id', conversationRow.id)
         .eq('sender_type', 'customer')
-      const isFirstInboundMessage = (priorCustomerMessages ?? 0) === 0
+      // A customer writing again after the thread was closed starts a new
+      // relationship cycle, so welcome flows run again.
+      const isFirstInboundMessage =
+        (priorCustomerMessages ?? 0) === 0 || conversationRow.status === 'closed'
       const { error: messageError } = await db.from('messages').insert({
         conversation_id: conversationRow.id,
         sender_type: 'customer',

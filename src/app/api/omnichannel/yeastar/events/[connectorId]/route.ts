@@ -403,7 +403,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
     })
 
     const { data: conversations, error: conversationError } = await db.from('conversations')
-      .select('id, unread_count').eq('account_id', connector.account_id).eq('connector_id', connector.id).eq('external_session_id', sessionId)
+      .select('id, unread_count, status').eq('account_id', connector.account_id).eq('connector_id', connector.id).eq('external_session_id', sessionId)
       .order('created_at', { ascending: true }).limit(1)
     if (conversationError) throw conversationError
     let conversation = conversations?.[0]
@@ -419,7 +419,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
         channel_source_label: connector.display_name,
         channel_source_url: connector.source_url,
         queue_id: connector.queue_id,
-      }).select('id, unread_count').single()
+      }).select('id, unread_count, status').single()
       if (createConversationError || !created) throw createConversationError ?? new Error('Could not create Live Chat conversation')
       conversation = created
       conversationCreated = true
@@ -460,7 +460,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
       .select('id', { count: 'exact', head: true })
       .eq('conversation_id', conversation.id)
       .eq('sender_type', 'customer')
-    const isFirstInboundMessage = (priorCustomerMessages ?? 0) === 0
+    const isFirstInboundMessage = (priorCustomerMessages ?? 0) === 0 || conversation.status === 'closed'
     const { error: messageError } = await db.from('messages').insert({
       conversation_id: conversation.id,
       sender_type: 'customer',

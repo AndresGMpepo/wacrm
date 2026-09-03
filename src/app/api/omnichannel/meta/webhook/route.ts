@@ -282,7 +282,7 @@ async function ingestMessage(db: ReturnType<typeof admin>, connector: Connector,
   const profile = await resolveMetaProfile(connector, senderId)
   const { contactId, created: contactCreated } = await resolveContact(db, connector, senderId, auditUserId, profile)
   if (!contactId) throw new Error('No se pudo resolver el contacto Meta para la reacción.')
-  const { data: rows, error: findError } = await db.from('conversations').select('id, unread_count')
+  const { data: rows, error: findError } = await db.from('conversations').select('id, unread_count, status')
     .eq('account_id', connector.account_id).eq('connector_id', connector.id).eq('external_session_id', senderId).limit(1)
   if (findError) throw findError
   let conversation = rows?.[0]
@@ -291,7 +291,7 @@ async function ingestMessage(db: ReturnType<typeof admin>, connector: Connector,
     const { data, error } = await db.from('conversations').insert({
       account_id: connector.account_id, user_id: auditUserId, contact_id: contactId, channel_type: connector.provider,
       connector_id: connector.id, external_session_id: senderId, channel_source_label: connector.display_name, queue_id: connector.queue_id,
-    }).select('id, unread_count').single()
+    }).select('id, unread_count, status').single()
     if (error || !data) throw error ?? new Error('No se pudo crear la conversación Meta.')
     conversation = data
     created = true

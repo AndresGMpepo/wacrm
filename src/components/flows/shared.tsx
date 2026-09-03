@@ -17,6 +17,8 @@
  */
 
 import {
+  CalendarCheck,
+  CalendarClock,
   Flag,
   GitFork,
   Inbox,
@@ -49,6 +51,8 @@ export type NodeType =
   | 'collect_input'
   | 'condition'
   | 'set_tag'
+  | 'offer_slots'
+  | 'book_appointment'
   | 'handoff'
   | 'end';
 
@@ -152,6 +156,20 @@ export const NODE_META: Record<
     blurb: 'Agrega o elimina una etiqueta del contacto',
     category: 'logic',
   },
+  offer_slots: {
+    label: 'Ofrecer horarios',
+    icon: CalendarClock,
+    color: 'text-teal-400',
+    blurb: 'Muestra los huecos libres y guarda el que elija el cliente',
+    category: 'logic',
+  },
+  book_appointment: {
+    label: 'Agendar cita',
+    icon: CalendarCheck,
+    color: 'text-teal-400',
+    blurb: 'Reserva el horario elegido y lo liga al contacto',
+    category: 'logic',
+  },
   handoff: {
     label: 'Transferir a agente',
     icon: UserPlus,
@@ -205,6 +223,8 @@ const NODE_HUE: Record<NodeType, { l: number; c: number; h: number }> = {
   collect_input: { l: 0.65, c: 0.1, h: 185 }, // teal — capture
   condition: { l: 0.72, c: 0.15, h: 65 }, // amber — a fork in the road
   set_tag: { l: 0.65, c: 0.15, h: 350 }, // pink
+  offer_slots: { l: 0.66, c: 0.14, h: 185 }, // teal
+  book_appointment: { l: 0.62, c: 0.14, h: 185 }, // teal
   handoff: { l: 0.65, c: 0.17, h: 16 }, // rose — hands off
   end: { l: 0.55, c: 0.01, h: 260 }, // neutral grey — terminal
 };
@@ -419,6 +439,15 @@ export function summarizeNode(
       return tagId
         ? t ? t('tagPicked', { mode, tag: tagId.slice(0, 8) }) : `${mode} tag ${tagId.slice(0, 8)}…`
         : t ? t('tagNone', { mode }) : `${mode} tag (none picked)`;
+    }
+    case 'offer_slots': {
+      const text = typeof cfg.text === 'string' ? cfg.text : '';
+      const duration = Number(cfg.duration_minutes) || 30;
+      return text ? `${truncate(text, 40)} · ${duration} min` : `Citas de ${duration} min`;
+    }
+    case 'book_appointment': {
+      const title = typeof cfg.title === 'string' ? cfg.title : '';
+      return title ? truncate(title) : null;
     }
     case 'handoff': {
       const note = typeof cfg.note === 'string' ? cfg.note : '';

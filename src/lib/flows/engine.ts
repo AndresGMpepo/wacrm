@@ -41,12 +41,20 @@ import {
   matchNumberedOption,
 } from "./channel-send";
 import { decideFallback, resolveFallbackPolicy } from "./fallback";
+import {
+  bookFlowAppointment,
+  loadOfferedSlots,
+  slotsVarKey,
+  type OfferedSlot,
+} from "./appointments";
 import type { ChannelType } from "@/types";
 import { addContactTagAndDispatch } from "@/lib/contacts/tag-events";
 import { removeContactTag } from "@/lib/contacts/tag-write";
 import {
   type CollectInputNodeConfig,
   type ConditionNodeConfig,
+  type BookAppointmentNodeConfig,
+  type OfferSlotsNodeConfig,
   type DispatchInboundInput,
   type DispatchInboundResult,
   type FlowNodeRow,
@@ -808,6 +816,96 @@ async function advanceFromNodeKey(
       }
       return { outcome: "advanced" };
     }
+    if (node.node_type === "offer_slots") {
+      const cfg = node.config as unknown as OfferSlotsNodeConfig;
+      const { slots, hasSchedule } = await loadOfferedSlots(db, run.account_id, cfg);
+      if (slots.length === 0) {
+        await logEvent(db, run.id, "node_entered", node.node_key, {
+          node_type: "offer_slots",
+          reason: hasSchedule ? "no_availability" : "no_schedule",
+        });
+        if (!cfg.no_availability_next) {
+          await endRun(db, run.id, "completed", "no_availability");
+          return { outcome: "completed" };
+        }
+        currentKey = cfg.no_availability_next;
+        continue;
+      }
+
+      // The options are dynamic, so the run has to remember what it offered
+      // before it can map the answer back to an instant.
+      const vars = { ...run.vars, [slotsVarKey(node.node_key)]: slots };
+      await db.from("flow_runs").update({ vars }).eq("id", run.id);
+      run.vars = vars;
+
+      const common = {
+        accountId: run.account_id,
+        userId: run.user_id,
+        conversationId: run.conversation_id!,
+        contactId: run.contact_id!,
+        bodyText: interpolateVars(cfg.text, run.vars),
+      };
+      // Meta allows three reply buttons; anything longer has to be a list.
+      const sent =
+        slots.length <= 3
+          ? await flowSendButtons({
+              ...common,
+              buttons: slots.map((slot) => ({ id: slot.id, title: slot.title })),
+            })
+          : await flowSendList({
+              ...common,
+              buttonLabel: "Ver horarios",
+              sections: [
+                {
+                  title: "Horarios disponibles",
+                  rows: slots.map((slot) => ({ id: slot.id, title: slot.title })),
+                },
+              ],
+            });
+      await logEvent(db, run.id, "message_sent", node.node_key, {
+        node_type: "offer_slots",
+        offered: slots.length,
+        whatsapp_message_id: sent.message_id,
+      });
+      const advanced = await advanceCurrentNodeKey(
+        db,
+        run.id,
+        run.current_node_key,
+        node.node_key,
+      );
+      if (!advanced) {
+        await logEvent(db, run.id, "error", node.node_key, {
+          reason: "lost_race_during_advance",
+        });
+      }
+      return { outcome: "advanced" };
+    }
+    if (node.node_type === "book_appointment") {
+      const cfg = node.config as unknown as BookAppointmentNodeConfig;
+      const result = await bookFlowAppointment(db, {
+        accountId: run.account_id,
+        userId: run.user_id,
+        contactId: run.contact_id!,
+        cfg,
+        vars: run.vars,
+      });
+      await logEvent(db, run.id, "node_entered", node.node_key, {
+        node_type: "book_appointment",
+        booked: result.ok,
+        reason: result.reason ?? null,
+        appointment_id: result.appointmentId ?? null,
+      });
+      if (!result.ok) {
+        if (!cfg.conflict_next) {
+          await endRun(db, run.id, "completed", result.reason ?? "booking_failed");
+          return { outcome: "completed" };
+        }
+        currentKey = cfg.conflict_next;
+        continue;
+      }
+      currentKey = cfg.next_node_key;
+      continue;
+    }
     if (node.node_type === "handoff") {
       await executeHandoff(db, run, node);
       return { outcome: "handed_off" };
@@ -970,7 +1068,29 @@ async function handleReplyForActiveRun(
   //
   // Everything else falls through to the fallback policy below.
   let matched: string | null = null;
-  if (
+  if (currentNode.node_type === "offer_slots") {
+    // The options were built at send time, so the answer is resolved against
+    // what this run actually offered — not against the node's static config.
+    const cfg = currentNode.config as unknown as OfferSlotsNodeConfig;
+    const offered = (run.vars[slotsVarKey(currentNode.node_key)] ?? []) as OfferedSlot[];
+    const replyId =
+      message.kind === "interactive_reply"
+        ? message.reply_id
+        : matchNumberedOption(message.text, offered.map((slot) => ({ id: slot.id, title: slot.title })));
+    const chosen = offered.find((slot) => slot.id === replyId);
+    if (chosen) {
+      const vars = { ...run.vars, [cfg.var_key]: chosen.start };
+      const { error } = await db.from("flow_runs").update({ vars, reprompt_count: 0 }).eq("id", run.id);
+      if (!error) {
+        run.vars = vars;
+        run.reprompt_count = 0;
+        await logEvent(db, run.id, "node_entered", currentNode.node_key, {
+          chosen_slot: chosen.start,
+        });
+        matched = cfg.next_node_key;
+      }
+    }
+  } else if (
     message.kind === "interactive_reply" &&
     (currentNode.node_type === "send_buttons" ||
       currentNode.node_type === "send_list")

@@ -618,7 +618,11 @@ async function processMessage(
     .select('id', { count: 'exact', head: true })
     .eq('conversation_id', conversation.id)
     .eq('sender_type', 'customer')
-  const isFirstInboundMessage = (priorCustomerMsgCount ?? 0) === 0
+  // A customer writing again after the thread was closed starts a new
+  // relationship cycle, so welcome flows and first-contact automations run
+  // again instead of leaving them on a dead thread.
+  const reengaged = conversation.status === 'closed'
+  const isFirstInboundMessage = (priorCustomerMsgCount ?? 0) === 0 || reengaged
 
   const { error: msgError } = await supabaseAdmin().from('messages').insert({
     conversation_id: conversation.id,
@@ -648,6 +652,9 @@ async function processMessage(
       last_message_text: contentText || `[${message.type}]`,
       last_message_at: new Date().toISOString(),
       unread_count: (conversation.unread_count || 0) + 1,
+      // A closed thread that receives a message is open again; leaving it
+      // closed hides the customer from the inbox.
+      ...(reengaged ? { status: 'open' } : {}),
       updated_at: new Date().toISOString(),
     })
     .eq('id', conversation.id)

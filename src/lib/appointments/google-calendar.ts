@@ -69,8 +69,56 @@ async function accessToken(accountId: string, scope: { specialistId: string | nu
   return { db, calendarId: data.calendar_id, token: refreshed.access_token, connectionId: data.id }
 }
 
-function eventBody(appointment: AppointmentForGoogle) {
-  const contactRow = Array.isArray(appointment.contact) ? appointment.contact[0] : appointment.contact
+/**
+ * Busy ranges the specialist (or agent) already has in Google.
+ *
+ * Availability without this offers slots the person is not actually free
+ * for: anything booked straight into their Google Calendar is invisible to
+ * us. Best-effort by design — a Google outage must degrade to "we only know
+ * our own bookings", never break the booking flow.
+ */
+export async function getGoogleBusy(
+  accountId: string,
+  scope: { specialistId: string | null; assignedAgentId: string | null },
+  from: Date,
+  to: Date,
+): Promise<{ start: Date; end: Date }[]> {
+  if (!googleCalendarConfigured()) return []
+  let connection: Awaited<ReturnType<typeof accessToken>> = null
+  try {
+    connection = await accessToken(accountId, scope)
+  } catch (error) {
+    console.error('[appointments] could not read the Google connection:', error)
+    return []
+  }
+  if (!connection) return []
+
+  try {
+    const response = await fetch('https://www.googleapis.com/calendar/v3/freeBusy', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${connection.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        timeMin: from.toISOString(),
+        timeMax: to.toISOString(),
+        items: [{ id: connection.calendarId || 'primary' }],
+      }),
+      signal: AbortSignal.timeout(10_000),
+    })
+    const payload = (await response.json().catch(() => ({}))) as {
+      calendars?: Record<string, { busy?: { start: string; end: string }[] }>
+    }
+    if (!response.ok) return []
+    return Object.values(payload.calendars ?? {})
+      .flatMap((calendar) => calendar.busy ?? [])
+      .map((slot) => ({ start: new Date(slot.start), end: new Date(slot.end) }))
+      .filter((slot) => !Number.isNaN(slot.start.getTime()) && !Number.isNaN(slot.end.getTime()))
+  } catch (error) {
+    console.error('[appointments] Google freeBusy query failed:', error)
+    return []
+  }
+}
+
+function eventBody(appointment: AppointmentForGoogle) {  const contactRow = Array.isArray(appointment.contact) ? appointment.contact[0] : appointment.contact
   const contact = contactRow?.name || contactRow?.phone
   return { summary: appointment.title, description: [appointment.notes, contact ? `Cliente: ${contact}` : null, `NexoOmni appointment: ${appointment.id}`].filter(Boolean).join('\n'), start: { dateTime: appointment.starts_at, timeZone: appointment.timezone || 'UTC' }, end: { dateTime: appointment.ends_at, timeZone: appointment.timezone || 'UTC' } }
 }

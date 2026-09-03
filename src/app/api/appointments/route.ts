@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { requireAccountModule } from '@/lib/account/modules'
 import { toErrorResponse } from '@/lib/auth/account'
 import { deleteGoogleEvent, syncGoogleAppointment } from '@/lib/appointments/google-calendar'
+import { findConflict } from '@/lib/appointments/availability'
 import { recordAppointmentMemoryEvent, upsertAppointmentFollowUp } from '@/lib/appointments/memory'
 
 const STATUSES = ['scheduled', 'confirmed', 'completed', 'cancelled', 'no_show'] as const
@@ -141,6 +142,14 @@ export async function POST(request: Request) {
     if (googleCalendarConnectionId && !await validGoogleConnectionId(supabase, accountId, googleCalendarConnectionId, specialistId)) {
       return NextResponse.json({ error: 'Ese calendario de Google no está disponible para este especialista.' }, { status: 400 })
     }
+    // The database also refuses overlapping specialist bookings (migration
+    // 116); this catches the agent case too and answers with a readable error.
+    if (await findConflict(supabase, accountId, { specialistId, agentUserId: specialistId ? null : assignedAgentId }, new Date(startsAt), new Date(endsAt))) {
+      return NextResponse.json(
+        { error: 'Ese horario ya está ocupado. Elige otro momento disponible.', code: 'appointment_conflict' },
+        { status: 409 },
+      )
+    }
     const { data, error } = await supabase.from('appointments').insert({
       account_id: accountId, created_by: userId, title, starts_at: startsAt, ends_at: endsAt,
       contact_id: contactId,
@@ -217,6 +226,34 @@ export async function PATCH(request: Request) {
       update.google_calendar_connection_id = body.google_calendar_connection_id
     }
     if (!Object.keys(update).length) return NextResponse.json({ error: 'No hay cambios para guardar.' }, { status: 400 })
+    // Rescheduling has to clear the new slot too — but never against itself.
+    if ((startsAt || endsAt) && update.status !== 'cancelled') {
+      const { data: current } = await supabase
+        .from('appointments')
+        .select('starts_at, ends_at, assigned_agent_id, specialist_id')
+        .eq('id', id)
+        .eq('account_id', accountId)
+        .maybeSingle()
+      const nextStart = new Date((startsAt ?? current?.starts_at) as string)
+      const nextEnd = new Date((endsAt ?? current?.ends_at) as string)
+      const specialist = 'specialist_id' in update ? (update.specialist_id as string | null) : current?.specialist_id ?? null
+      const agent = 'assigned_agent_id' in update ? (update.assigned_agent_id as string) : current?.assigned_agent_id ?? null
+      if (
+        await findConflict(
+          supabase,
+          accountId,
+          { specialistId: specialist, agentUserId: specialist ? null : agent },
+          nextStart,
+          nextEnd,
+          { ignoreAppointmentId: id },
+        )
+      ) {
+        return NextResponse.json(
+          { error: 'Ese horario ya está ocupado. Elige otro momento disponible.', code: 'appointment_conflict' },
+          { status: 409 },
+        )
+      }
+    }
     const { data, error } = await supabase.from('appointments').update(update).eq('id', id).eq('account_id', accountId).select('id, title, notes, starts_at, ends_at, timezone, status, google_calendar_event_id, google_calendar_connection_id, assigned_agent_id, specialist_id, contact:contacts(name, phone)').maybeSingle()
     if (error) throw error
     if (!data) return NextResponse.json({ error: 'La cita no existe.' }, { status: 404 })

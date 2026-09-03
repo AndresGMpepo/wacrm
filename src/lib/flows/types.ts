@@ -179,6 +179,49 @@ export interface SetTagNodeConfig {
 export type EndNodeConfig = Record<string, never>;
 
 /**
+ * Offers the free slots of a specialist (or the account's default hours) as
+ * a menu, and stores the one the customer picks in
+ * `flow_runs.vars[var_key]` as an ISO instant.
+ *
+ * Suspends like `send_buttons`: the customer's next tap (or number, on
+ * channels without buttons) wakes the run.
+ */
+export interface OfferSlotsNodeConfig {
+  /** Text above the options. */
+  text: string;
+  /** Whose calendar to read. Omitted = the account's default hours. */
+  specialist_id?: string;
+  /** Appointment length in minutes. Defaults to the schedule's slot size. */
+  duration_minutes?: number;
+  /** How far ahead to look. */
+  days_ahead?: number;
+  /** Most options to show at once (Meta caps lists at 10 rows). */
+  max_options?: number;
+  /** Key under which the chosen ISO start time is stored. */
+  var_key: string;
+  /** Where to go once a slot is chosen. */
+  next_node_key: string;
+  /** Where to go when the calendar has nothing free. */
+  no_availability_next?: string;
+}
+
+/**
+ * Books the slot held in `flow_runs.vars` and links it to the contact.
+ */
+export interface BookAppointmentNodeConfig {
+  /** Var holding the chosen ISO start time (written by `offer_slots`). */
+  slot_var_key: string;
+  title: string;
+  duration_minutes?: number;
+  specialist_id?: string;
+  /** Optional note; supports {{vars.X}} interpolation. */
+  notes?: string;
+  next_node_key: string;
+  /** Taken between the offer and the confirmation — rare, but real. */
+  conflict_next?: string;
+}
+
+/**
  * Total union — every concrete node_type the v1 engine understands.
  * Add new node types here and the engine's switch will flag missing
  * cases via TypeScript's exhaustiveness check.
@@ -195,6 +238,8 @@ export type FlowNodeConfig =
   | { node_type: "collect_input"; config: CollectInputNodeConfig }
   | { node_type: "condition"; config: ConditionNodeConfig }
   | { node_type: "set_tag"; config: SetTagNodeConfig }
+  | { node_type: "offer_slots"; config: OfferSlotsNodeConfig }
+  | { node_type: "book_appointment"; config: BookAppointmentNodeConfig }
   | { node_type: "handoff"; config: HandoffNodeConfig }
   | { node_type: "end"; config: EndNodeConfig };
 

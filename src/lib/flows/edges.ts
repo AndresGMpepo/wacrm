@@ -181,6 +181,18 @@ export function outgoingSlots(node: BuilderNode): OutgoingSlot[] {
     case "set_tag":
       return [{ id: "next", label: "Next" }];
 
+    case "offer_slots":
+      return [
+        { id: "next", label: "Eligió horario" },
+        { id: "no_availability", label: "Sin disponibilidad" },
+      ];
+
+    case "book_appointment":
+      return [
+        { id: "next", label: "Agendada" },
+        { id: "conflict", label: "Horario ocupado" },
+      ];
+
     case "condition":
       return [
         { id: "true", label: "true" },
@@ -259,6 +271,16 @@ export function applyEdgeConnection(
     case "condition":
       if (sourceHandle === "true") return { true_next: targetKey };
       if (sourceHandle === "false") return { false_next: targetKey };
+      return null;
+
+    case "offer_slots":
+      if (sourceHandle === "next") return { next_node_key: targetKey };
+      if (sourceHandle === "no_availability") return { no_availability_next: targetKey };
+      return null;
+
+    case "book_appointment":
+      if (sourceHandle === "next") return { next_node_key: targetKey };
+      if (sourceHandle === "conflict") return { conflict_next: targetKey };
       return null;
 
     case "send_buttons": {
@@ -361,6 +383,30 @@ function patchedConfigWithoutKey(
         ...cfg,
         ...(trueMatch ? { true_next: "" } : {}),
         ...(falseMatch ? { false_next: "" } : {}),
+      };
+    }
+
+    case "offer_slots": {
+      const c = cfg as { next_node_key?: string; no_availability_next?: string };
+      const nextMatch = c.next_node_key === deletedKey;
+      const emptyMatch = c.no_availability_next === deletedKey;
+      if (!nextMatch && !emptyMatch) return null;
+      return {
+        ...cfg,
+        ...(nextMatch ? { next_node_key: "" } : {}),
+        ...(emptyMatch ? { no_availability_next: "" } : {}),
+      };
+    }
+
+    case "book_appointment": {
+      const c = cfg as { next_node_key?: string; conflict_next?: string };
+      const nextMatch = c.next_node_key === deletedKey;
+      const conflictMatch = c.conflict_next === deletedKey;
+      if (!nextMatch && !conflictMatch) return null;
+      return {
+        ...cfg,
+        ...(nextMatch ? { next_node_key: "" } : {}),
+        ...(conflictMatch ? { conflict_next: "" } : {}),
       };
     }
 

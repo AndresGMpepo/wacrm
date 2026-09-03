@@ -26,6 +26,7 @@ import {
 } from '@/components/ui/card';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
+import { AppointmentSchedules } from '@/components/appointments/appointment-schedules';
 import { toast } from 'sonner';
 
 type Appointment = {
@@ -104,7 +105,7 @@ function auditLabel(audit: Appointment['latest_audit']) {
 }
 
 export default function AppointmentsPage() {
-  const { accountId, user } = useAuth();
+  const { accountId, user, accountRole } = useAuth();
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
@@ -831,6 +832,11 @@ export default function AppointmentsPage() {
           </Button>
         </div>
       </div>
+
+      <AppointmentSchedules
+        specialists={specialists}
+        canEdit={accountRole === 'owner' || accountRole === 'admin'}
+      />
 
       {googleAvailable ? (
         <Card>

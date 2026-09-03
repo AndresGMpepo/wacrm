@@ -185,6 +185,24 @@ export function defaultConfigFor(type: NodeType): Record<string, unknown> {
       };
     case "set_tag":
       return { mode: "add", tag_id: "", next_node_key: "" };
+    case "offer_slots":
+      return {
+        text: "Estos son los horarios disponibles:",
+        duration_minutes: 30,
+        days_ahead: 7,
+        max_options: 6,
+        var_key: "slot",
+        next_node_key: "",
+        no_availability_next: "",
+      };
+    case "book_appointment":
+      return {
+        slot_var_key: "slot",
+        title: "Cita agendada",
+        duration_minutes: 30,
+        next_node_key: "",
+        conflict_next: "",
+      };
     case "handoff":
       return { note: "" };
     case "end":
