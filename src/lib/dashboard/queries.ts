@@ -55,10 +55,11 @@ export async function loadMetrics(db: DB): Promise<MetricsBundle> {
       .eq('status', 'open')
       .gte('created_at', yesterdayStart)
       .lt('created_at', todayStart),
-    db.from('contacts').select('id', { count: 'exact', head: true }).gte('created_at', todayStart),
+    db.from('contacts').select('id', { count: 'exact', head: true }).is('deleted_at', null).gte('created_at', todayStart),
     db
       .from('contacts')
       .select('id', { count: 'exact', head: true })
+      .is('deleted_at', null)
       .gte('created_at', yesterdayStart)
       .lt('created_at', todayStart),
     db.from('deals').select('value, status').eq('status', 'open'),
@@ -279,6 +280,7 @@ export async function loadActivity(db: DB, limit = 20): Promise<ActivityItem[]> 
     db
       .from('contacts')
       .select('id, name, phone, created_at')
+      .is('deleted_at', null)
       .order('created_at', { ascending: false })
       .limit(10),
     db

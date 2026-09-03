@@ -49,6 +49,8 @@ import {
   ChevronRight,
   SlidersHorizontal,
   Filter,
+  Archive,
+  ArchiveRestore,
   X,
 } from 'lucide-react';
 import { ContactForm } from '@/components/contacts/contact-form';
@@ -78,6 +80,8 @@ export default function ContactsPage() {
   const [totalCount, setTotalCount] = useState(0);
   // Tag filter — contacts shown must have ANY of these tags (OR).
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
+  // Archived contacts are hidden by default; admins can review and restore them.
+  const [showArchived, setShowArchived] = useState(false);
 
   // Modals
   const [formOpen, setFormOpen] = useState(false);
@@ -161,6 +165,10 @@ export default function ContactsPage() {
         .order('created_at', { ascending: false })
         .range(from, to);
 
+      query = showArchived
+        ? query.not('deleted_at', 'is', null)
+        : query.is('deleted_at', null);
+
       if (term) {
         const like = `%${term}%`;
         query = query.or(`name.ilike.${like},phone.ilike.${like},email.ilike.${like}`);
@@ -208,7 +216,7 @@ export default function ContactsPage() {
 
     setContacts(enriched);
     setLoading(false);
-  }, [supabase, page, search, selectedTagIds, tagsMap, t]);
+  }, [supabase, page, search, selectedTagIds, showArchived, tagsMap, t]);
 
   // Load-once-on-mount-ish data fetches. Each setter inside runs
   // inside an async promise completion (Supabase await), not
@@ -254,21 +262,29 @@ export default function ContactsPage() {
     if (!deleteTarget) return;
     setDeleting(true);
 
-    const { error } = await supabase
-      .from('contacts')
-      .delete()
-      .eq('id', deleteTarget.id);
-
-    if (error) {
-      toast.error(t('toastFailedDelete'));
-    } else {
-      toast.success(t('toastDeleted'));
-      fetchContacts();
-    }
+    const ok = await archiveContacts([deleteTarget.id], showArchived);
+    if (ok) fetchContacts();
 
     setDeleting(false);
     setDeleteConfirmOpen(false);
     setDeleteTarget(null);
+  }
+
+  /** Archiving keeps the customer's conversations; only a platform operator
+   *  can destroy them. `restore` brings an archived contact back. */
+  async function archiveContacts(ids: string[], restore: boolean) {
+    const res = await fetch('/api/contacts/archive', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ids, restore }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      toast.error(body?.error ?? t('toastFailedDelete'));
+      return false;
+    }
+    toast.success(restore ? t('toastRestored') : t('toastArchived'));
+    return true;
   }
 
   const allOnPageSelected =
@@ -301,12 +317,7 @@ export default function ContactsPage() {
     if (ids.length === 0) return;
     setDeleting(true);
 
-    const { error } = await supabase.from('contacts').delete().in('id', ids);
-
-    if (error) {
-      toast.error(t('toastBulkFailedDelete'));
-    } else {
-      toast.success(t('toastBulkDeleted', { count: ids.length }));
+    if (await archiveContacts(ids, showArchived)) {
       setSelected(new Set());
       fetchContacts();
     }
@@ -461,6 +472,19 @@ export default function ContactsPage() {
               )}
             </PopoverContent>
           </Popover>
+          {canEditSettings && (
+            <Button
+              variant={showArchived ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => {
+                setShowArchived((v) => !v);
+                setPage(0);
+              }}
+            >
+              <Archive className="size-4" />
+              {showArchived ? t('showActive') : t('showArchived')}
+            </Button>
+          )}
         </div>
 
         {/* Active tag-filter chips */}
@@ -515,14 +539,14 @@ export default function ContactsPage() {
               {t('clearSelection')}
             </Button>
             <GatedButton
-              variant="destructive"
+              variant={showArchived ? 'outline' : 'destructive'}
               size="sm"
-              canAct={canEdit}
-              gateReason="delete contacts"
+              canAct={showArchived ? canEditSettings : canEdit}
+              gateReason={showArchived ? 'restore contacts' : 'archive contacts'}
               onClick={() => setBulkDeleteOpen(true)}
             >
-              <Trash2 className="size-4" />
-              {t('deleteSelected')}
+              {showArchived ? <ArchiveRestore className="size-4" /> : <Trash2 className="size-4" />}
+              {showArchived ? t('restoreSelected') : t('archiveSelected')}
             </GatedButton>
           </div>
         </div>
@@ -677,14 +701,14 @@ export default function ContactsPage() {
                         </DropdownMenuItem>
                         <DropdownMenuSeparator className="bg-border" />
                         <DropdownMenuItem
-                          variant="destructive"
+                          variant={showArchived ? 'default' : 'destructive'}
                           onClick={(e) => {
                             e.stopPropagation();
                             confirmDelete(contact);
                           }}
                         >
-                          <Trash2 className="size-4" />
-                          {t('deleteAction')}
+                          {showArchived ? <ArchiveRestore className="size-4" /> : <Archive className="size-4" />}
+                          {showArchived ? t('restoreAction') : t('archiveAction')}
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
@@ -776,9 +800,11 @@ export default function ContactsPage() {
       <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
         <DialogContent className="bg-popover border-border text-popover-foreground sm:max-w-sm">
           <DialogHeader>
-            <DialogTitle className="text-popover-foreground">{t('deleteContactTitle')}</DialogTitle>
+            <DialogTitle className="text-popover-foreground">{showArchived ? t('restoreContactTitle') : t('archiveContactTitle')}</DialogTitle>
             <DialogDescription className="text-muted-foreground">
-              {t('deleteContactDesc', { name: deleteTarget?.name || deleteTarget?.phone || '' })}
+              {showArchived
+                ? t('restoreContactDesc', { name: deleteTarget?.name || deleteTarget?.phone || '' })
+                : t('archiveContactDesc', { name: deleteTarget?.name || deleteTarget?.phone || '' })}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="bg-popover border-border">
@@ -790,12 +816,12 @@ export default function ContactsPage() {
               {t('cancel')}
             </Button>
             <Button
-              variant="destructive"
+              variant={showArchived ? 'default' : 'destructive'}
               onClick={handleDelete}
               disabled={deleting}
             >
               {deleting && <Loader2 className="size-4 animate-spin" />}
-              {t('deleteBtn')}
+              {showArchived ? t('restoreBtn') : t('archiveBtn')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -806,10 +832,12 @@ export default function ContactsPage() {
         <DialogContent className="bg-popover border-border text-popover-foreground sm:max-w-sm">
           <DialogHeader>
             <DialogTitle className="text-popover-foreground">
-              {t('deleteBulkTitle')}
+              {showArchived ? t('restoreBulkTitle') : t('archiveBulkTitle')}
             </DialogTitle>
             <DialogDescription className="text-muted-foreground">
-              {t('deleteBulkDesc', { count: selected.size })}
+              {showArchived
+                ? t('restoreBulkDesc', { count: selected.size })
+                : t('archiveBulkDesc', { count: selected.size })}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="bg-popover border-border">
@@ -821,12 +849,12 @@ export default function ContactsPage() {
               {t('cancel')}
             </Button>
             <Button
-              variant="destructive"
+              variant={showArchived ? 'default' : 'destructive'}
               onClick={handleBulkDelete}
               disabled={deleting}
             >
               {deleting && <Loader2 className="size-4 animate-spin" />}
-              {t('deleteBtn')}
+              {showArchived ? t('restoreBtn') : t('archiveBtn')}
             </Button>
           </DialogFooter>
         </DialogContent>
