@@ -10,6 +10,7 @@ import { latestUserMessage } from './query'
 import { engineSendText } from '@/lib/flows/meta-send'
 import { sendOmnichannelText } from '@/lib/omnichannel/outbound-text'
 import { checkRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
+import type { AiConfig } from './types'
 import type { ChannelType } from '@/types'
 
 interface DispatchArgs {
@@ -26,6 +27,101 @@ interface DispatchArgs {
   /** True when an automation already answered this same inbound, so the
    *  customer isn't texted twice. */
   automationReplied?: boolean
+}
+
+export interface AutoReplyGateInput {
+  accountId: string
+  conversationId: string
+  channelType?: ChannelType
+  automationReplied?: boolean
+}
+
+export type AutoReplyGateResult =
+  | {
+      ok: true
+      config: AiConfig
+      conv: { assigned_agent_id: string | null; ai_reply_count: number }
+    }
+  | { ok: false; reason: string }
+
+/**
+ * Every reason the agent may stay silent, in one place, so the inbox can
+ * explain it and the dispatch can log it. "The AI never answers" used to be
+ * undiagnosable — each gate simply returned.
+ */
+export async function evaluateAutoReplyGates(
+  db: ReturnType<typeof supabaseAdmin>,
+  input: AutoReplyGateInput,
+): Promise<AutoReplyGateResult> {
+  const { accountId, conversationId } = input
+
+  const config = await loadAiConfig(db, accountId)
+  if (!config) return { ok: false, reason: 'ai_inactive' }
+  if (!config.autoReplyEnabled) return { ok: false, reason: 'auto_reply_disabled' }
+
+  // Channel scope: an account can let the agent answer everywhere (null)
+  // or only on the channels it was trained for.
+  if (
+    config.channelTypes &&
+    config.channelTypes.length > 0 &&
+    (!input.channelType || !config.channelTypes.includes(input.channelType))
+  ) {
+    return { ok: false, reason: `channel_out_of_scope:${input.channelType ?? 'unknown'}` }
+  }
+
+  // Deterministic, user-configured responders win over the LLM — the
+  // caller already excludes messages a Flow consumed. When the caller
+  // knows whether a message-level automation actually ran for THIS
+  // inbound (every inbound webhook does), we trust that; otherwise we
+  // fall back to the conservative "account has some active
+  // auto-responder" check.
+  if (input.automationReplied) return { ok: false, reason: 'automation_replied' }
+  if (input.automationReplied === undefined) {
+    const { data: autoResponders } = await db
+      .from('automations')
+      .select('id')
+      .eq('account_id', accountId)
+      .eq('is_active', true)
+      .in('trigger_type', ['new_message_received', 'keyword_match'])
+      .limit(1)
+    if (autoResponders && autoResponders.length > 0) {
+      return { ok: false, reason: 'account_has_active_auto_responder' }
+    }
+  }
+
+  const { data: conv, error: convErr } = await db
+    .from('conversations')
+    .select('assigned_agent_id, ai_autoreply_disabled, ai_reply_count')
+    .eq('id', conversationId)
+    .maybeSingle()
+  if (convErr || !conv) return { ok: false, reason: 'conversation_not_found' }
+  if (conv.ai_autoreply_disabled) return { ok: false, reason: 'paused_on_this_conversation' }
+
+  // "A human owns this thread" must mean a person actually wrote in it, not
+  // merely that routing put a name on it: queue auto-assignment stamps an
+  // assignee on every inbound, which silenced the agent account-wide.
+  const { count: humanMessages } = await db
+    .from('messages')
+    .select('id', { count: 'exact', head: true })
+    .eq('conversation_id', conversationId)
+    .eq('sender_type', 'agent')
+    .not('sender_id', 'is', null)
+  if ((humanMessages ?? 0) > 0) return { ok: false, reason: 'human_agent_already_replied' }
+
+  // Cheap early-out; the authoritative cap check is the atomic claim in the
+  // dispatch (this read can race a concurrent inbound).
+  if (conv.ai_reply_count >= config.autoReplyMaxPerConversation) {
+    return {
+      ok: false,
+      reason: `reply_cap_reached:${conv.ai_reply_count}/${config.autoReplyMaxPerConversation}`,
+    }
+  }
+
+  return {
+    ok: true,
+    config,
+    conv: { assigned_agent_id: conv.assigned_agent_id, ai_reply_count: conv.ai_reply_count },
+  }
 }
 
 /**
@@ -55,48 +151,19 @@ export async function dispatchInboundToAiReply(
   try {
     const db = supabaseAdmin()
 
-    const config = await loadAiConfig(db, accountId)
-    if (!config || !config.autoReplyEnabled) return
-
-    // Channel scope: an account can let the agent answer everywhere
-    // (null) or only on the channels it was trained for.
-    if (
-      config.channelTypes &&
-      config.channelTypes.length > 0 &&
-      (!args.channelType || !config.channelTypes.includes(args.channelType))
-    ) {
+    const gate = await evaluateAutoReplyGates(db, {
+      accountId,
+      conversationId,
+      channelType: args.channelType,
+      automationReplied: args.automationReplied,
+    })
+    if (!gate.ok) {
+      console.info(
+        `[ai auto-reply] skipped conversation ${conversationId}: ${gate.reason}`,
+      )
       return
     }
-
-    // Deterministic, user-configured responders win over the LLM — the
-    // caller already excludes messages a Flow consumed. When the caller
-    // knows whether a message-level automation actually ran for THIS
-    // inbound (every inbound webhook does), we trust that; otherwise we
-    // fall back to the conservative "account has some active
-    // auto-responder" check.
-    if (args.automationReplied) return
-    if (args.automationReplied === undefined) {
-      const { data: autoResponders } = await db
-        .from('automations')
-        .select('id')
-        .eq('account_id', accountId)
-        .eq('is_active', true)
-        .in('trigger_type', ['new_message_received', 'keyword_match'])
-        .limit(1)
-      if (autoResponders && autoResponders.length > 0) return
-    }
-
-    const { data: conv, error: convErr } = await db
-      .from('conversations')
-      .select('assigned_agent_id, ai_autoreply_disabled, ai_reply_count')
-      .eq('id', conversationId)
-      .maybeSingle()
-    if (convErr || !conv) return
-    if (conv.assigned_agent_id) return // a human owns this thread
-    if (conv.ai_autoreply_disabled) return // handed off / turned off here
-    // Cheap early-out; the authoritative cap check is the atomic claim
-    // below (this read can race a concurrent inbound).
-    if (conv.ai_reply_count >= config.autoReplyMaxPerConversation) return
+    const { config, conv } = gate
 
     const messages = await buildConversationContext(db, conversationId)
     if (messages.length === 0) return
@@ -180,20 +247,19 @@ export async function dispatchInboundToAiReply(
             ? config.handoffQueueId ?? null
             : null
 
-      if (queueId && !conv.assigned_agent_id) {
+      // The gates above already established no human has written here, so a
+      // routing-time assignee may be replaced by the configured target.
+      if (queueId) {
         update.queue_id = queueId
-      } else if (
-        (config.handoffTarget ?? 'agent') === 'agent' &&
-        config.handoffAgentId &&
-        !conv.assigned_agent_id
-      ) {
+        update.assigned_agent_id = null
+      } else if ((config.handoffTarget ?? 'agent') === 'agent' && config.handoffAgentId) {
         update.assigned_agent_id = config.handoffAgentId
       }
       await db.from('conversations').update(update).eq('id', conversationId)
 
       // Let the queue's own rules (round-robin / fewest open chats,
       // restricted to its members) pick the human.
-      if (queueId && !conv.assigned_agent_id) {
+      if (queueId) {
         const { error: assignErr } = await db.rpc('auto_assign_inbound_conversation', {
           p_account_id: accountId,
           p_conversation_id: conversationId,

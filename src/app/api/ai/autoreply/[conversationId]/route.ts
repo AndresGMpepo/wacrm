@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server'
 import { requireRole, toErrorResponse } from '@/lib/auth/account'
 import { checkRateLimit, rateLimitResponse, RATE_LIMITS } from '@/lib/rate-limit'
+import { evaluateAutoReplyGates } from '@/lib/ai/auto-reply'
+import { supabaseAdmin } from '@/lib/ai/admin-client'
+import type { ChannelType } from '@/types'
 
 type Params = { params: Promise<{ conversationId: string }> }
 
@@ -97,6 +100,39 @@ export async function POST(request: Request, { params }: Params) {
     }
 
     return NextResponse.json({ success: true, paused })
+  } catch (err) {
+    return toErrorResponse(err)
+  }
+}
+
+/**
+ * GET /api/ai/autoreply/[conversationId]  (agent+)
+ *
+ * Why the agent did or didn't answer this thread. Returns the same gate the
+ * inbound dispatch evaluates, so "the AI doesn't reply" is answerable from
+ * the inbox instead of the server log.
+ */
+export async function GET(_request: Request, { params }: Params) {
+  try {
+    const { supabase, accountId } = await requireRole('agent')
+    const { conversationId } = await params
+
+    const { data: conv } = await supabase
+      .from('conversations')
+      .select('id, channel_type')
+      .eq('id', conversationId)
+      .eq('account_id', accountId)
+      .maybeSingle()
+    if (!conv) return NextResponse.json({ error: 'Conversation not found' }, { status: 404 })
+
+    const gate = await evaluateAutoReplyGates(supabaseAdmin(), {
+      accountId,
+      conversationId,
+      channelType: (conv.channel_type ?? 'whatsapp') as ChannelType,
+    })
+    return NextResponse.json(
+      gate.ok ? { eligible: true, reason: null } : { eligible: false, reason: gate.reason },
+    )
   } catch (err) {
     return toErrorResponse(err)
   }
