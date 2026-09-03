@@ -21,14 +21,17 @@ export interface AgentPerformanceRow {
   notes: number
   appointments_created: number
   tags_applied: number
-  /** How long the customer waited for this agent's reply. */
+  /** How long the customer waited for this agent's reply, counting only
+   *  time when somebody was on shift. */
   first_response_median_seconds: number | null
   first_response_samples: number
   /** From the conversation opening to the moment this agent closed it. */
   resolution_median_seconds: number | null
   resolution_samples: number
-  /** Time with an `online` heartbeat inside the window. */
-  online_seconds: number
+  /** Signed in, whether actively typing or idle. */
+  connected_seconds: number
+  /** Of the above, time reported as `online` rather than `away`. */
+  active_seconds: number
 }
 
 type MessageRow = {
@@ -89,16 +92,15 @@ export async function buildAgentPerformance(
         .from('member_presence_sessions')
         .select('user_id, status, started_at, ended_at')
         .eq('account_id', accountId)
-        .eq('status', 'online')
-        // A session may have started before the window and still count for
-        // the part that falls inside it.
+        // Both statuses: 'away' is an idle tab, not a logged-out agent, and
+        // the heartbeat flips to it after five minutes without input.
         .gte('started_at', new Date(new Date(since).getTime() - 86_400_000).toISOString()),
       db.from('member_presence').select('user_id, last_seen_at').eq('account_id', accountId),
     ])
 
   const rows = new Map<string, AgentPerformanceRow>()
   const handled = new Map<string, Set<string>>()
-  const firstResponses = new Map<string, number[]>()
+  const firstResponses = new Map<string, { from: number; to: number; seconds: number }[]>()
   const resolutions = new Map<string, number[]>()
 
   const ensure = (userId: string, name?: string): AgentPerformanceRow => {
@@ -120,7 +122,8 @@ export async function buildAgentPerformance(
       first_response_samples: 0,
       resolution_median_seconds: null,
       resolution_samples: 0,
-      online_seconds: 0,
+      connected_seconds: 0,
+      active_seconds: 0,
     }
     rows.set(userId, created)
     return created
@@ -164,12 +167,10 @@ export async function buildAgentPerformance(
 
     const waiting = waitingSince.get(conversationId)
     if (waiting) {
-      const seconds = Math.max(
-        0,
-        Math.round((new Date(message.created_at).getTime() - new Date(waiting).getTime()) / 1000),
-      )
+      const from = new Date(waiting).getTime()
+      const to = new Date(message.created_at).getTime()
       const samples = firstResponses.get(agent.user_id) ?? []
-      samples.push(seconds)
+      samples.push({ from, to, seconds: Math.max(0, Math.round((to - from) / 1000)) })
       firstResponses.set(agent.user_id, samples)
       waitingSince.delete(conversationId)
     }
@@ -177,11 +178,6 @@ export async function buildAgentPerformance(
 
   for (const [userId, set] of handled) {
     ensure(userId).conversations_handled = set.size
-  }
-  for (const [userId, samples] of firstResponses) {
-    const agent = ensure(userId)
-    agent.first_response_median_seconds = median(samples)
-    agent.first_response_samples = samples.length
   }
 
   for (const row of assignments.data ?? []) {
@@ -241,13 +237,14 @@ export async function buildAgentPerformance(
     }
   }
 
-  // ---- Connected time ----
+  // ---- Connected time + when the team was on shift ----
   const lastSeen = new Map<string, string>()
   for (const row of currentPresence.data ?? []) {
     lastSeen.set(row.user_id as string, row.last_seen_at as string)
   }
   const windowStart = new Date(since).getTime()
   const now = Date.now()
+  const staffed: { start: number; end: number }[] = []
   for (const session of presence.data ?? []) {
     const userId = session.user_id as string
     // An open session means the browser never said goodbye: bound it at the
@@ -256,7 +253,21 @@ export async function buildAgentPerformance(
     const end = endRaw ? Math.min(new Date(endRaw).getTime(), now) : now
     const start = Math.max(new Date(session.started_at as string).getTime(), windowStart)
     if (end <= start) continue
-    ensure(userId).online_seconds += Math.round((end - start) / 1000)
+    const agent = ensure(userId)
+    agent.connected_seconds += Math.round((end - start) / 1000)
+    if (session.status === 'online') agent.active_seconds += Math.round((end - start) / 1000)
+    staffed.push({ start, end })
+  }
+
+  // ---- Response time, discounting hours with nobody on shift ----
+  const shifts = mergeIntervals(staffed)
+  for (const [userId, samples] of firstResponses) {
+    const agent = ensure(userId)
+    // Without presence history there is nothing to discount, so the raw
+    // wait is reported rather than a flattering zero.
+    const measured = shifts.length > 0 ? samples.map((sample) => staffedSeconds(sample, shifts)) : samples.map((s) => s.seconds)
+    agent.first_response_median_seconds = median(measured)
+    agent.first_response_samples = measured.length
   }
 
   return [...rows.values()]
@@ -270,9 +281,34 @@ export async function buildAgentPerformance(
         row.notes > 0 ||
         row.appointments_created > 0 ||
         row.tags_applied > 0 ||
-        row.online_seconds > 0,
+        row.connected_seconds > 0,
     )
     .sort((a, b) => b.messages_sent - a.messages_sent || a.agent.localeCompare(b.agent))
+}
+
+function mergeIntervals(intervals: { start: number; end: number }[]): { start: number; end: number }[] {
+  const sorted = [...intervals].sort((a, b) => a.start - b.start)
+  const merged: { start: number; end: number }[] = []
+  for (const interval of sorted) {
+    const last = merged[merged.length - 1]
+    if (last && interval.start <= last.end) last.end = Math.max(last.end, interval.end)
+    else merged.push({ ...interval })
+  }
+  return merged
+}
+
+/** Seconds of a wait that fell inside a shift. */
+function staffedSeconds(
+  wait: { from: number; to: number; seconds: number },
+  shifts: { start: number; end: number }[],
+): number {
+  let total = 0
+  for (const shift of shifts) {
+    const start = Math.max(wait.from, shift.start)
+    const end = Math.min(wait.to, shift.end)
+    if (end > start) total += end - start
+  }
+  return Math.round(total / 1000)
 }
 
 const CSV_HEADERS = [
@@ -280,11 +316,12 @@ const CSV_HEADERS = [
   'mensajes_enviados',
   'conversaciones_atendidas',
   'conversaciones_cerradas',
-  'primera_respuesta_mediana_seg',
-  'primera_respuesta_muestras',
+  'respuesta_mediana_seg',
+  'respuesta_muestras',
   'resolucion_mediana_seg',
   'resolucion_muestras',
   'tiempo_conectado_seg',
+  'tiempo_activo_seg',
   'transferencias_enviadas',
   'transferencias_recibidas',
   'llamadas',
@@ -310,7 +347,8 @@ export function agentPerformanceCsv(rows: AgentPerformanceRow[]): string {
       row.first_response_samples,
       row.resolution_median_seconds,
       row.resolution_samples,
-      row.online_seconds,
+      row.connected_seconds,
+      row.active_seconds,
       row.transfers_sent,
       row.transfers_received,
       row.calls,

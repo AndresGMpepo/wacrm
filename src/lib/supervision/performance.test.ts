@@ -19,7 +19,8 @@ function row(overrides: Partial<AgentPerformanceRow> = {}): AgentPerformanceRow 
     first_response_samples: 8,
     resolution_median_seconds: 5400,
     resolution_samples: 3,
-    online_seconds: 7200,
+    connected_seconds: 7200,
+    active_seconds: 5400,
     ...overrides,
   }
 }
@@ -29,7 +30,7 @@ describe('agentPerformanceCsv', () => {
     const csv = agentPerformanceCsv([row(), row({ user_id: 'u2', agent: 'Luis Paz' })])
     const lines = csv.split('\r\n')
     expect(lines[0]).toBe(
-      'agente,mensajes_enviados,conversaciones_atendidas,conversaciones_cerradas,primera_respuesta_mediana_seg,primera_respuesta_muestras,resolucion_mediana_seg,resolucion_muestras,tiempo_conectado_seg,transferencias_enviadas,transferencias_recibidas,llamadas,notas,citas_creadas,etiquetas_aplicadas',
+      'agente,mensajes_enviados,conversaciones_atendidas,conversaciones_cerradas,respuesta_mediana_seg,respuesta_muestras,resolucion_mediana_seg,resolucion_muestras,tiempo_conectado_seg,tiempo_activo_seg,transferencias_enviadas,transferencias_recibidas,llamadas,notas,citas_creadas,etiquetas_aplicadas',
     )
     expect(lines).toHaveLength(3)
     expect(lines[2]).toContain('"Luis Paz"')

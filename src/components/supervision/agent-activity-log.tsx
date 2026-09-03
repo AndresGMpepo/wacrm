@@ -36,7 +36,8 @@ type PerformanceRow = {
   first_response_samples: number
   resolution_median_seconds: number | null
   resolution_samples: number
-  online_seconds: number
+  connected_seconds: number
+  active_seconds: number
 }
 
 const ACTION_LABELS: Record<string, string> = {
@@ -166,8 +167,10 @@ export function AgentActivityLog() {
                     <thead>
                       <tr className="border-border border-b text-left text-xs text-muted-foreground">
                         <th className="py-2 pr-3 font-medium">Agente</th>
-                        <th className="px-2 py-2 text-right font-medium">Conectado</th>
-                        <th className="px-2 py-2 text-right font-medium" title="Mediana de espera del cliente hasta la respuesta de este agente. Entre paréntesis, cuántas esperas se midieron.">
+                        <th className="px-2 py-2 text-right font-medium" title="Tiempo con sesión abierta. Entre paréntesis, el tiempo con actividad (sin contar inactividad).">
+                          Conectado
+                        </th>
+                        <th className="px-2 py-2 text-right font-medium" title="Mediana de espera del cliente, contando solo las horas en que había alguien conectado. Entre paréntesis, cuántas esperas se midieron.">
                           Respuesta
                         </th>
                         <th className="px-2 py-2 text-right font-medium" title="Mediana desde que se abrió la conversación hasta que este agente la cerró.">
@@ -188,7 +191,14 @@ export function AgentActivityLog() {
                       {rows.map((row) => (
                         <tr key={row.user_id} className="border-border/60 border-b last:border-0">
                           <td className="py-2 pr-3 font-medium text-foreground">{row.agent}</td>
-                          <td className="px-2 py-2 text-right">{formatDuration(row.online_seconds || null)}</td>
+                          <td className="px-2 py-2 text-right">
+                            {formatDuration(row.connected_seconds || null)}
+                            {row.active_seconds > 0 ? (
+                              <span className="text-muted-foreground ml-1 text-[10px]">
+                                ({formatDuration(row.active_seconds)})
+                              </span>
+                            ) : null}
+                          </td>
                           <td className="px-2 py-2 text-right">
                             {formatDuration(row.first_response_median_seconds)}
                             {row.first_response_samples > 0 ? (
