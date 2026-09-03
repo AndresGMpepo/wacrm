@@ -332,6 +332,7 @@ async function ingestMessage(db: ReturnType<typeof admin>, connector: Connector,
     userId: auditUserId,
     contactId,
     conversationId: conversation.id,
+    channelType: connector.provider as ChannelType,
     message: { kind: 'text', text: contentText, meta_message_id: messageId },
     isFirstInboundMessage,
   })

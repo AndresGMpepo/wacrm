@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { requireEntitlement } from '@/lib/account/entitlements'
 import { toErrorResponse } from '@/lib/auth/account'
+import { normalizeChannelTypes } from '@/lib/automations/channels'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 
 /**
@@ -82,6 +83,7 @@ interface PutBody {
   description?: string | null
   trigger_type?: 'keyword' | 'first_inbound_message' | 'manual'
   trigger_config?: Record<string, unknown>
+  channel_types?: unknown
   entry_node_id?: string | null
   fallback_policy?: Record<string, unknown>
   nodes?: Array<{
@@ -136,6 +138,10 @@ export async function PUT(
   if (body.trigger_type !== undefined) flowPatch.trigger_type = body.trigger_type
   if (body.trigger_config !== undefined)
     flowPatch.trigger_config = body.trigger_config
+  // Normalized here too: the builder posts `[]` for "all channels", which
+  // must be stored as NULL to satisfy the 113 CHECK constraint.
+  if (body.channel_types !== undefined)
+    flowPatch.channel_types = normalizeChannelTypes(body.channel_types)
   if (body.entry_node_id !== undefined)
     flowPatch.entry_node_id = body.entry_node_id
   if (body.fallback_policy !== undefined)

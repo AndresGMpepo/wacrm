@@ -496,6 +496,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
       userId: auditUserId,
       contactId,
       conversationId: conversation.id,
+      channelType: 'yeastar_live_chat',
       message: { kind: 'text', text: contentText, meta_message_id: `yeastar:${connector.id}:${externalMessageId}` },
       isFirstInboundMessage,
     })

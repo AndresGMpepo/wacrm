@@ -26,6 +26,9 @@ export interface TraceEvent {
   channel: string | null
   conversation_id: string | null
   detail: string
+  /** Only set on the account-wide trace, where rows span many customers. */
+  contact?: string | null
+  contact_id?: string | null
 }
 
 interface AgentDirectory {
@@ -179,7 +182,117 @@ export async function buildContactTrace(
   return events.sort((a, b) => a.at.localeCompare(b.at))
 }
 
-const CSV_HEADERS = ['fecha', 'evento', 'agente', 'canal', 'conversacion', 'detalle']
+/**
+ * Account-wide trace for the supervision console: who took which
+ * conversation, who transferred it, and who was on each call — newest
+ * first, bounded by a time window.
+ */
+export async function buildAccountTrace(
+  db: SupabaseClient,
+  accountId: string,
+  opts: { since: string; limit?: number } = { since: new Date(Date.now() - 7 * 86_400_000).toISOString() },
+): Promise<TraceEvent[]> {
+  const limit = Math.min(500, Math.max(1, opts.limit ?? 200))
+  const directory = await loadAgentDirectory(db, accountId)
+
+  const [assignments, calls] = await Promise.all([
+    db
+      .from('conversation_assignment_history')
+      .select('conversation_id, contact_id, from_agent_id, to_agent_id, queue_id, source, created_at')
+      .eq('account_id', accountId)
+      .gte('created_at', opts.since)
+      .order('created_at', { ascending: false })
+      .limit(limit),
+    db
+      .from('yeastar_call_transcriptions')
+      .select('contact_id, agent_user_id, agent_extension, direction, started_at, duration_seconds, summary, created_at')
+      .eq('account_id', accountId)
+      .gte('created_at', opts.since)
+      .order('created_at', { ascending: false })
+      .limit(limit),
+  ])
+
+  const contactIds = new Set<string>()
+  const conversationIds = new Set<string>()
+  for (const row of assignments.data ?? []) {
+    if (row.contact_id) contactIds.add(row.contact_id as string)
+    if (row.conversation_id) conversationIds.add(row.conversation_id as string)
+  }
+  for (const row of calls.data ?? []) {
+    if (row.contact_id) contactIds.add(row.contact_id as string)
+  }
+
+  const [contactRows, conversationRows, queueRows] = await Promise.all([
+    contactIds.size
+      ? db.from('contacts').select('id, name, phone').in('id', [...contactIds])
+      : Promise.resolve({ data: [] as Record<string, unknown>[] }),
+    conversationIds.size
+      ? db.from('conversations').select('id, channel_type').in('id', [...conversationIds])
+      : Promise.resolve({ data: [] as Record<string, unknown>[] }),
+    db.from('conversation_queues').select('id, name').eq('account_id', accountId),
+  ])
+
+  const contactName = new Map<string, string>()
+  for (const row of contactRows.data ?? []) {
+    contactName.set(row.id as string, ((row.name as string) || (row.phone as string) || 'Contacto') as string)
+  }
+  const channelOf = new Map<string, string>()
+  for (const row of conversationRows.data ?? []) {
+    channelOf.set(row.id as string, ((row.channel_type as string) ?? 'whatsapp') as string)
+  }
+  const queueName = new Map<string, string>()
+  for (const row of queueRows.data ?? []) {
+    queueName.set(row.id as string, row.name as string)
+  }
+
+  const events: TraceEvent[] = []
+
+  for (const row of assignments.data ?? []) {
+    const to = directory.name(row.to_agent_id as string | null)
+    const from = directory.name(row.from_agent_id as string | null)
+    const queue = row.queue_id ? queueName.get(row.queue_id as string) : null
+    const source =
+      row.source === 'manual' ? 'transferencia manual' : row.source === 'released' ? 'liberada' : 'asignación automática'
+    events.push({
+      at: row.created_at as string,
+      type: 'assignment',
+      agent: to,
+      agent_id: (row.to_agent_id as string) ?? null,
+      channel: channelOf.get(row.conversation_id as string) ?? null,
+      conversation_id: (row.conversation_id as string) ?? null,
+      contact: row.contact_id ? contactName.get(row.contact_id as string) ?? null : null,
+      contact_id: (row.contact_id as string) ?? null,
+      detail: [
+        to ? (from ? `De ${from} a ${to}` : `Asignada a ${to}`) : 'Sin agente',
+        queue ? `cola ${queue}` : null,
+        source,
+      ]
+        .filter(Boolean)
+        .join(' · '),
+    })
+  }
+
+  for (const row of calls.data ?? []) {
+    const seconds = Number(row.duration_seconds) || 0
+    const direction =
+      row.direction === 'outbound' ? 'Llamada saliente' : row.direction === 'inbound' ? 'Llamada entrante' : 'Llamada'
+    events.push({
+      at: (row.started_at as string) || (row.created_at as string),
+      type: 'call',
+      agent: directory.name(row.agent_user_id as string | null) ?? ((row.agent_extension as string) || null),
+      agent_id: (row.agent_user_id as string) ?? null,
+      channel: 'telefonía',
+      conversation_id: null,
+      contact: row.contact_id ? contactName.get(row.contact_id as string) ?? null : null,
+      contact_id: (row.contact_id as string) ?? null,
+      detail: `${direction} · ${Math.floor(seconds / 60)}m ${seconds % 60}s${row.summary ? ` · ${String(row.summary).slice(0, 200)}` : ''}`,
+    })
+  }
+
+  return events.sort((a, b) => b.at.localeCompare(a.at)).slice(0, limit)
+}
+
+const CSV_HEADERS = ['fecha', 'evento', 'agente', 'contacto', 'canal', 'conversacion', 'detalle']
 
 /** Quote every field: names and summaries contain commas and quotes, and a
  *  leading =/+/-/@ would be executed as a formula by Excel. */
@@ -195,6 +308,7 @@ export function contactTraceCsv(events: TraceEvent[]): string {
       event.at,
       event.type,
       event.agent,
+      event.contact ?? null,
       event.channel,
       event.conversation_id,
       event.detail,

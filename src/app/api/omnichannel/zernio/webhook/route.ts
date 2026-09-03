@@ -522,6 +522,7 @@ export async function POST(request: Request) {
         userId: auditUserId,
         contactId,
         conversationId: conversationRow.id,
+        channelType: typed.provider as ChannelType,
         message: { kind: 'text', text: content, meta_message_id: messageId },
         isFirstInboundMessage,
       })

@@ -18,6 +18,8 @@
  * references in JSONB.
  */
 
+import type { ChannelType } from "@/types";
+
 // ============================================================
 // Node configs (discriminated union by node_type)
 // ============================================================
@@ -236,6 +238,8 @@ export interface FlowRow {
   status: "draft" | "active" | "archived";
   trigger_type: "keyword" | "first_inbound_message" | "manual";
   trigger_config: KeywordTriggerConfig | FirstInboundTriggerConfig | Record<string, unknown>;
+  /** Inbox channels this flow runs on. null = every channel. */
+  channel_types?: ChannelType[] | null;
   entry_node_id: string | null;
   fallback_policy: FlowFallbackPolicy;
   execution_count: number;
@@ -338,6 +342,9 @@ export interface DispatchInboundInput {
   userId: string;
   contactId: string;
   conversationId: string;
+  /** Inbox channel the message arrived on, matched against the flow's
+   *  own channel scope. */
+  channelType?: ChannelType;
   message: ParsedInbound;
 }
 

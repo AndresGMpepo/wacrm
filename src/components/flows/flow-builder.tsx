@@ -261,6 +261,75 @@ function KeywordsInput({
 // Trigger panel
 // ============================================================
 
+const FLOW_CHANNELS: { id: string; label: string }[] = [
+  { id: 'whatsapp', label: 'WhatsApp (Meta directo)' },
+  { id: 'zernio_whatsapp', label: 'WhatsApp (conectado)' },
+  { id: 'zernio_facebook', label: 'Facebook (conectado)' },
+  { id: 'zernio_instagram', label: 'Instagram (conectado)' },
+  { id: 'facebook', label: 'Facebook Messenger' },
+  { id: 'instagram', label: 'Instagram' },
+  { id: 'yeastar_live_chat', label: 'Chat web de Yeastar' },
+  { id: 'tiktok', label: 'TikTok' },
+];
+
+/** Empty selection means every channel — how flows behaved before they
+ *  became multichannel. */
+function FlowChannelPicker({
+  channels,
+  onChange,
+  t,
+}: {
+  channels: string[];
+  onChange: (channels: string[]) => void;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  const all = channels.length === 0;
+  return (
+    <div className="space-y-1">
+      <label className="border-border bg-muted flex items-center gap-2 rounded-md border px-2 py-1.5 text-sm">
+        <input
+          type="checkbox"
+          checked={all}
+          onChange={() => onChange([])}
+          className="accent-primary size-3.5"
+        />
+        {t('allChannels')}
+      </label>
+      {!all && (
+        <div className="border-border bg-muted space-y-1 rounded-md border px-2 py-1.5">
+          {FLOW_CHANNELS.map((channel) => (
+            <label key={channel.id} className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={channels.includes(channel.id)}
+                onChange={() =>
+                  onChange(
+                    channels.includes(channel.id)
+                      ? channels.filter((c) => c !== channel.id)
+                      : [...channels, channel.id],
+                  )
+                }
+                className="accent-primary size-3.5"
+              />
+              {channel.label}
+            </label>
+          ))}
+        </div>
+      )}
+      {all && (
+        <button
+          type="button"
+          onClick={() => onChange(['whatsapp'])}
+          className="text-primary hover:text-primary/80 text-[11px]"
+        >
+          {t('pickChannels')}
+        </button>
+      )}
+      <p className="text-muted-foreground text-[11px]">{t('channelsHint')}</p>
+    </div>
+  );
+}
+
 function TriggerPanel({
   state,
   setState,
@@ -328,6 +397,16 @@ function TriggerPanel({
             />
           </div>
         )}
+      </div>
+      <div className="mt-3">
+        <label className="text-muted-foreground mb-1 block text-xs">
+          {t('channelsLabel')}
+        </label>
+        <FlowChannelPicker
+          channels={state.channel_types}
+          onChange={(channels) => setState((s) => ({ ...s, channel_types: channels }))}
+          t={t}
+        />
       </div>
       {triggerIssues.length > 0 && (
         <div className="mt-3 flex flex-col gap-1">

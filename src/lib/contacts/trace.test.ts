@@ -19,7 +19,7 @@ describe('contactTraceCsv', () => {
   it('writes a header and one row per event', () => {
     const csv = contactTraceCsv([event(), event({ type: 'call', channel: 'telefonía' })])
     const lines = csv.split('\r\n')
-    expect(lines[0]).toBe('fecha,evento,agente,canal,conversacion,detalle')
+    expect(lines[0]).toBe('fecha,evento,agente,contacto,canal,conversacion,detalle')
     expect(lines).toHaveLength(3)
     expect(lines[1]).toContain('"Ana Ruiz"')
   })

@@ -6,6 +6,7 @@ import { AgentOperationalPanel } from '@/components/supervision/agent-operationa
 import { AiSupervisionCard } from '@/components/agents/ai-supervision'
 import { CriticalInterventionQueue } from '@/components/supervision/critical-intervention-queue'
 import { TelephonyLiveMonitor } from '@/components/supervision/telephony-live-monitor'
+import { TraceabilityLog } from '@/components/supervision/traceability-log'
 
 export default function SupervisionPage() {
   const { accountRole } = useAuth()
@@ -27,6 +28,7 @@ export default function SupervisionPage() {
           <CriticalInterventionQueue />
           <AiSupervisionCard />
           <TelephonyLiveMonitor />
+          <TraceabilityLog />
         </>
       ) : (
         <div className="rounded-xl border border-border bg-card p-5 text-sm text-muted-foreground">

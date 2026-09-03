@@ -41,6 +41,7 @@ import {
   matchNumberedOption,
 } from "./channel-send";
 import { decideFallback, resolveFallbackPolicy } from "./fallback";
+import type { ChannelType } from "@/types";
 import { addContactTagAndDispatch } from "@/lib/contacts/tag-events";
 import { removeContactTag } from "@/lib/contacts/tag-write";
 import {
@@ -88,6 +89,19 @@ export function matchReplyId(
     return null;
   }
   return null;
+}
+
+/**
+ * A flow with no channel scope runs everywhere. A scoped one refuses to
+ * start when the channel is unknown: it was written for a specific inbox.
+ */
+export function flowMatchesChannel(
+  channelTypes: string[] | null | undefined,
+  channelType: string | null | undefined,
+): boolean {
+  if (!channelTypes || channelTypes.length === 0) return true;
+  if (!channelType) return false;
+  return channelTypes.includes(channelType);
 }
 
 /**
@@ -338,6 +352,7 @@ async function findEntryFlow(
   accountId: string,
   message: ParsedInbound,
   isFirstInbound: boolean,
+  channelType: ChannelType | undefined,
 ): Promise<FlowRow | null> {
   // Only text messages can match an entry trigger. Interactive replies
   // are responses to existing prompts; they never start a new flow.
@@ -356,6 +371,7 @@ async function findEntryFlow(
 
   const typed = flows as FlowRow[];
   for (const flow of typed) {
+    if (!flowMatchesChannel(flow.channel_types, channelType)) continue;
     if (flow.trigger_type === "keyword") {
       if (matchesKeywordTrigger(
         message.text,
@@ -895,6 +911,7 @@ export async function dispatchInboundToFlows(
       input.accountId,
       input.message,
       input.isFirstInboundMessage,
+      input.channelType,
     );
     if (!flow || !flow.entry_node_id) {
       return { consumed: false, outcome: "no_match" };
