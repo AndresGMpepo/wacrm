@@ -334,6 +334,15 @@ function ResourcesProvider({ children }: { children: ReactNode }) {
 const SELECT_CLASS =
   "w-full rounded-md border border-border bg-muted px-2 py-1.5 text-sm text-foreground focus:border-primary focus:outline-none"
 
+/** Channels the automation is scoped to (empty = all), so a step editor can
+ *  warn when a channel in scope can't render what the step sends. */
+const ChannelScopeContext = createContext<ChannelType[]>([])
+
+function useScopedChannels(): ChannelType[] {
+  const scope = useContext(ChannelScopeContext)
+  return scope.length > 0 ? scope : AUTOMATION_CHANNELS
+}
+
 /** Tag dropdown by name + color, storing the tag's id. Falls back to a
  *  raw id input when no tags exist yet. */
 function TagSelect({
@@ -483,6 +492,7 @@ function InteractiveStepEditor({
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState<InteractiveMessagePayload>(payload)
   const validation = validateInteractivePayload(payload)
+  const fallbackChannels = useScopedChannels().filter((c) => c !== "whatsapp")
 
   return (
     <div className="flex flex-col gap-2">
@@ -494,6 +504,13 @@ function InteractiveStepEditor({
           {interactivePayloadPreviewText(payload)}
         </p>
       </div>
+      {fallbackChannels.length > 0 && (
+        <p className="rounded-md bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-500">
+          {t("config.interactiveFallbackNote", {
+            channels: fallbackChannels.map((c) => t(`channelNames.${c}`)).join(", "),
+          })}
+        </p>
+      )}
       {!validation.ok && <p className="text-xs text-red-400">{validation.error}</p>}
       <Button
         variant="outline"
@@ -676,6 +693,20 @@ function DealPipelineFields({
 /** Template dropdown showing approved templates by name + language,
  *  storing both template_name and language. Falls back to manual name +
  *  language inputs when no approved templates are synced yet. */
+function TemplateChannelNote({ t }: { t: ReturnType<typeof useTranslations> }) {
+  const unsupported = useScopedChannels().filter(
+    (c) => c !== "whatsapp" && c !== "zernio_whatsapp",
+  )
+  if (unsupported.length === 0) return null
+  return (
+    <p className="rounded-md bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-500">
+      {t("config.templateChannelNote", {
+        channels: unsupported.map((c) => t(`channelNames.${c}`)).join(", "),
+      })}
+    </p>
+  )
+}
+
 function SendTemplateFields({
   templateName,
   language,
@@ -885,6 +916,7 @@ export function AutomationBuilder({ initial }: { initial: BuilderInitial }) {
         <div className="absolute inset-0 bg-[radial-gradient(circle,var(--border)_1px,transparent_1px)] [background-size:20px_20px] pointer-events-none" />
         <div className="relative mx-auto flex max-w-2xl flex-col items-center gap-0 px-4 py-10">
           <ResourcesProvider>
+            <ChannelScopeContext.Provider value={state.channel_types}>
             <TriggerCard
               type={state.trigger_type}
               config={state.trigger_config}
@@ -904,6 +936,7 @@ export function AutomationBuilder({ initial }: { initial: BuilderInitial }) {
               deleteStepAt={deleteStepAt}
               moveStepAt={moveStepAt}
             />
+            </ChannelScopeContext.Provider>
           </ResourcesProvider>
         </div>
       </div>
@@ -1510,12 +1543,15 @@ function StepEditor({
       )
     case "send_template":
       return (
-        <SendTemplateFields
-          templateName={(cfg.template_name as string) ?? ""}
-          language={(cfg.language as string) ?? ""}
-          onChange={(patch) => set(patch)}
-          t={t}
-        />
+        <>
+          <TemplateChannelNote t={t} />
+          <SendTemplateFields
+            templateName={(cfg.template_name as string) ?? ""}
+            language={(cfg.language as string) ?? ""}
+            onChange={(patch) => set(patch)}
+            t={t}
+          />
+        </>
       )
     case "add_tag":
     case "remove_tag":

@@ -3,6 +3,7 @@ import type { ChannelType, InteractiveMessagePayload } from '@/types'
 import { supabaseAdmin } from './admin-client'
 import { channelSupportsInteractive, channelSupportsTemplates, isChannelType } from './channels'
 import { engineSendInteractive, engineSendTemplate, engineSendText } from './meta-send'
+import { interactivePayloadToPlainText } from '@/lib/whatsapp/interactive'
 import { sendOmnichannelText } from '@/lib/omnichannel/outbound-text'
 import { sendZernioTemplateMessage } from '@/lib/zernio/server'
 
@@ -77,9 +78,18 @@ export async function sendAutomationInteractive(
   args: SendArgs & { payload: InteractiveMessagePayload },
 ): Promise<string> {
   if (!channelSupportsInteractive(args.channelType)) {
-    throw new Error(
-      `interactive messages are not available on ${args.channelType}; use a Send Message step for this channel`,
-    )
+    // Only the Meta Cloud API renders real buttons/lists. Everywhere else
+    // the menu is delivered as numbered plain text so the automation still
+    // works instead of failing the step.
+    const text = interactivePayloadToPlainText(args.payload)
+    if (!text.trim()) throw new Error('interactive step has no text to send')
+    const { external_message_id } = await sendOmnichannelText(supabaseAdmin(), {
+      accountId: args.accountId,
+      conversationId: args.conversationId,
+      text,
+      senderType: 'bot',
+    })
+    return `sent as plain text on ${args.channelType} — this channel has no interactive buttons/lists (${external_message_id ?? 'no id'})`
   }
   const { whatsapp_message_id } = await engineSendInteractive({
     accountId: args.accountId,
@@ -95,7 +105,9 @@ export async function sendAutomationTemplate(
   args: SendArgs & { templateName: string; language?: string; params: string[] },
 ): Promise<string> {
   if (!channelSupportsTemplates(args.channelType)) {
-    throw new Error(`templates are not available on ${args.channelType}`)
+    throw new Error(
+      `WhatsApp templates do not exist on ${args.channelType}; use a Send Message step for this channel`,
+    )
   }
 
   if (args.channelType === 'whatsapp') {

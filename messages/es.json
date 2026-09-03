@@ -1003,6 +1003,8 @@
         "interactiveEmpty": "Aún no hay texto del mensaje",
         "interactiveCancel": "Cancelar",
         "interactiveDone": "Listo",
+        "interactiveFallbackNote": "Los botones y listas táctiles solo existen en WhatsApp (Meta directo). En {channels} este paso se envía como texto con opciones numeradas y el cliente responde con un número.",
+        "templateChannelNote": "Las plantillas de WhatsApp no existen en {channels}. En esos canales el paso fallará — usa un paso de Enviar Mensaje.",
         "agentLabel": "Agente",
         "fieldLabel": "Campo",
         "valueLabel": "Valor",

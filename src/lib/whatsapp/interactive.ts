@@ -237,3 +237,35 @@ export function interactivePayloadPreviewText(
   if (body) return body
   return payload.kind === 'buttons' ? '[buttons]' : '[list]'
 }
+
+/**
+ * Flatten an interactive payload into a plain-text message with numbered
+ * options. Only the Meta Cloud API (direct WhatsApp) renders real buttons
+ * and lists; Zernio, Messenger, Instagram and Yeastar Live Chat accept
+ * text only, so the same automation still delivers its menu there and the
+ * customer answers with a number.
+ */
+export function interactivePayloadToPlainText(
+  payload: InteractiveMessagePayload,
+): string {
+  const options =
+    payload.kind === 'buttons'
+      ? payload.buttons.map((b) => b.title)
+      : payload.sections.flatMap((section) =>
+          section.rows.map((row) =>
+            row.description ? `${row.title} — ${row.description}` : row.title,
+          ),
+        );
+
+  const blocks = [
+    payload.header?.trim(),
+    payload.body?.trim(),
+    options
+      .map((title, i) => `${i + 1}. ${title}`.trim())
+      .join('\n'),
+    payload.footer?.trim(),
+  ].filter((block): block is string => Boolean(block && block.length > 0));
+
+  return blocks.join('\n\n');
+}
+

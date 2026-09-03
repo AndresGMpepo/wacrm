@@ -1003,6 +1003,8 @@
         "interactiveEmpty": "아직 메시지 텍스트가 없습니다",
         "interactiveCancel": "취소",
         "interactiveDone": "완료",
+        "interactiveFallbackNote": "탭 가능한 버튼과 목록은 WhatsApp(Meta 직접)에서만 지원됩니다. {channels}에서는 번호가 매겨진 텍스트로 전송되며 고객은 번호로 답변합니다.",
+        "templateChannelNote": "WhatsApp 템플릿은 {channels}에서 사용할 수 없습니다. 해당 채널에서는 이 단계가 실패하므로 메시지 보내기 단계를 사용하세요.",
         "agentLabel": "상담원",
         "fieldLabel": "필드",
         "valueLabel": "값",

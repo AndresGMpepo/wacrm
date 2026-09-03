@@ -1003,6 +1003,8 @@
         "interactiveEmpty": "No message text yet",
         "interactiveCancel": "Cancel",
         "interactiveDone": "Done",
+        "interactiveFallbackNote": "Tappable buttons and lists only exist on WhatsApp (direct Meta). On {channels} this step is delivered as text with numbered options and the customer replies with a number.",
+        "templateChannelNote": "WhatsApp templates do not exist on {channels}. This step will fail on those channels — use a Send Message step instead.",
         "agentLabel": "Agent",
         "fieldLabel": "Field",
         "valueLabel": "Value",
