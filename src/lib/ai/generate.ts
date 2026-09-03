@@ -61,17 +61,23 @@ export async function generateReply(args: GenerateArgs): Promise<GenerateResult>
 }
 
 /**
- * Split the raw model output into `{ text, handoff, usage }`. The
- * sentinel can appear alone or trailing a partial reply; either way we
+ * Split the raw model output into `{ text, handoff, handoffQueue, usage }`.
+ * The sentinel can appear alone or trailing a partial reply; either way we
  * treat the turn as a handoff and strip the marker from any remaining
- * text. `usage` is passed straight through (null when the provider
- * didn't report it).
+ * text. In `ai_queue` mode the model may name the department inside the
+ * marker (`[[HANDOFF:Ventas]]`). `usage` is passed straight through (null
+ * when the provider didn't report it).
  */
 export function parseGeneration(
   raw: string,
   usage: AiUsage | null = null,
 ): GenerateResult {
-  const handoff = raw.includes(HANDOFF_SENTINEL)
-  const text = raw.split(HANDOFF_SENTINEL).join('').trim()
-  return { text, handoff, usage }
+  const withQueue = raw.match(/\[\[HANDOFF:([^\]]{1,80})\]\]/i)
+  const handoff = raw.includes(HANDOFF_SENTINEL) || withQueue !== null
+  const text = raw
+    .replace(/\[\[HANDOFF:[^\]]{1,80}\]\]/gi, '')
+    .split(HANDOFF_SENTINEL)
+    .join('')
+    .trim()
+  return { text, handoff, handoffQueue: withQueue?.[1]?.trim() || null, usage }
 }

@@ -16,13 +16,13 @@ function bad(message: string) {
 }
 
 const CONFIG_COLUMNS =
-  'provider, model, analysis_model, image_analysis_model, voice_transcription_model, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, conversation_analysis_enabled, analysis_on_customer_message, analysis_on_transfer, analysis_on_close, analysis_daily_limit, analysis_monthly_limit, analysis_max_per_conversation, analysis_images_enabled, analysis_voice_notes_enabled, media_analysis_daily_limit, qa_scoring_enabled, qa_scoring_criteria, api_key, embeddings_api_key'
+  'provider, model, analysis_model, image_analysis_model, voice_transcription_model, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, handoff_target, handoff_queue_id, channel_types, conversation_analysis_enabled, analysis_on_customer_message, analysis_on_transfer, analysis_on_close, analysis_daily_limit, analysis_monthly_limit, analysis_max_per_conversation, analysis_images_enabled, analysis_voice_notes_enabled, media_analysis_daily_limit, qa_scoring_enabled, qa_scoring_criteria, api_key, embeddings_api_key'
 
 const LEGACY_CONFIG_COLUMNS =
   'provider, model, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, conversation_analysis_enabled, analysis_on_customer_message, analysis_on_transfer, analysis_on_close, analysis_daily_limit, analysis_monthly_limit, analysis_max_per_conversation, analysis_images_enabled, analysis_voice_notes_enabled, media_analysis_daily_limit, qa_scoring_enabled, qa_scoring_criteria, api_key, embeddings_api_key'
 
 function isMissingModelColumn(error: { code?: string; message?: string }) {
-  return error.code === '42703' || /(?:analysis_model|image_analysis_model|voice_transcription_model)/i.test(error.message ?? '')
+  return error.code === '42703' || /(?:analysis_model|image_analysis_model|voice_transcription_model|handoff_target|handoff_queue_id|channel_types)/i.test(error.message ?? '')
 }
 
 /**
@@ -168,8 +168,51 @@ export async function POST(request: Request) {
       handoffAgentId = rawHandoff
     }
 
-    const rawKey = typeof body.api_key === 'string' ? body.api_key.trim() : ''
+    // Where a handoff lands: nobody, a fixed agent, a fixed queue, or the
+    // queue the model itself picks from the conversation.
+    const handoffTargetRaw =
+      typeof body.handoff_target === 'string' ? body.handoff_target.trim() : ''
+    const handoffTarget = ['unassigned', 'agent', 'queue', 'ai_queue'].includes(handoffTargetRaw)
+      ? handoffTargetRaw
+      : 'agent'
+    const rawHandoffQueue =
+      typeof body.handoff_queue_id === 'string' ? body.handoff_queue_id.trim() : ''
+    let handoffQueueId: string | null = null
+    if (rawHandoffQueue) {
+      const { data: queue } = await supabase
+        .from('conversation_queues')
+        .select('id')
+        .eq('account_id', accountId)
+        .eq('id', rawHandoffQueue)
+        .maybeSingle()
+      if (!queue) return bad('handoff_queue_id must be a queue of this account')
+      handoffQueueId = rawHandoffQueue
+    }
+    if (handoffTarget === 'queue' && !handoffQueueId) {
+      return bad('handoff_queue_id is required when handoff_target is "queue"')
+    }
 
+    // Channels the agent answers on. An empty array (or every channel
+    // selected) is stored as NULL, i.e. "all channels".
+    const ALL_CHANNELS = [
+      'whatsapp',
+      'zernio_whatsapp',
+      'zernio_facebook',
+      'zernio_instagram',
+      'facebook',
+      'instagram',
+      'tiktok',
+      'yeastar_live_chat',
+    ]
+    const requestedChannels = Array.isArray(body.channel_types)
+      ? ALL_CHANNELS.filter((c) => body.channel_types.includes(c))
+      : []
+    const channelTypes =
+      requestedChannels.length === 0 || requestedChannels.length === ALL_CHANNELS.length
+        ? null
+        : requestedChannels
+
+    const rawKey = typeof body.api_key === 'string' ? body.api_key.trim() : ''
     // Embeddings key (optional, for semantic KB search): a non-empty
     // string sets/replaces it; an explicit null clears it; absent leaves
     // it unchanged. The form only sends it when the admin edits it.
@@ -274,6 +317,9 @@ export async function POST(request: Request) {
       media_analysis_daily_limit: mediaAnalysisDailyLimit,
       qa_scoring_enabled: qaScoringEnabled,
       qa_scoring_criteria: qaScoringCriteria,
+      handoff_target: handoffTarget,
+      handoff_queue_id: handoffQueueId,
+      channel_types: channelTypes,
     }
     // Only touch the handoff target when the form actually sent the field,
     // so a partial save (e.g. flipping a toggle) doesn't wipe it.
@@ -286,7 +332,7 @@ export async function POST(request: Request) {
 
     const writeValues = encryptedKey ? { ...shared, api_key: encryptedKey } : shared
     const legacyWriteValues = Object.fromEntries(
-      Object.entries(writeValues).filter(([key]) => !['analysis_model', 'image_analysis_model', 'voice_transcription_model'].includes(key)),
+      Object.entries(writeValues).filter(([key]) => !['analysis_model', 'image_analysis_model', 'voice_transcription_model', 'handoff_target', 'handoff_queue_id', 'channel_types'].includes(key)),
     )
     if (existing) {
       let { error: upErr } = await supabase

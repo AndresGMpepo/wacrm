@@ -14,11 +14,14 @@ interface AiConfigRow {
   auto_reply_enabled: boolean
   auto_reply_max_per_conversation: number
   handoff_agent_id: string | null
+  handoff_target?: 'unassigned' | 'agent' | 'queue' | 'ai_queue' | null
+  handoff_queue_id?: string | null
+  channel_types?: string[] | null
   embeddings_api_key: string | null
 }
 
 const CONFIG_COLUMNS =
-  'provider, model, analysis_model, image_analysis_model, voice_transcription_model, api_key, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, embeddings_api_key'
+  'provider, model, analysis_model, image_analysis_model, voice_transcription_model, api_key, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, handoff_target, handoff_queue_id, channel_types, embeddings_api_key'
 
 // Keep AI operational while a rolling deployment is waiting for migration 101.
 // The dedicated model columns are additive, so the existing general model is a
@@ -27,7 +30,7 @@ const LEGACY_CONFIG_COLUMNS =
   'provider, model, api_key, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, handoff_agent_id, embeddings_api_key'
 
 function isMissingModelColumn(error: { code?: string; message?: string }) {
-  return error.code === '42703' || /(?:analysis_model|image_analysis_model|voice_transcription_model)/i.test(error.message ?? '')
+  return error.code === '42703' || /(?:analysis_model|image_analysis_model|voice_transcription_model|handoff_target|handoff_queue_id|channel_types)/i.test(error.message ?? '')
 }
 
 /**
@@ -109,6 +112,9 @@ export async function loadAiConfig(
     autoReplyEnabled: row.auto_reply_enabled,
     autoReplyMaxPerConversation: row.auto_reply_max_per_conversation,
     handoffAgentId: row.handoff_agent_id,
+    handoffTarget: row.handoff_target ?? 'agent',
+    handoffQueueId: row.handoff_queue_id ?? null,
+    channelTypes: Array.isArray(row.channel_types) && row.channel_types.length > 0 ? row.channel_types : null,
     embeddingsApiKey,
   }
 }

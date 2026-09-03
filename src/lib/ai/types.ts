@@ -32,6 +32,15 @@ export interface AiConfig {
    *  agent's `auth.users.id`, or null to leave it unassigned (drop into
    *  the shared queue). */
   handoffAgentId: string | null
+  /** How a handoff is routed: leave unassigned, a fixed agent, a fixed
+   *  queue, or let the model pick the queue from the conversation.
+   *  Defaults to 'agent' (the pre-107 behaviour). */
+  handoffTarget?: 'unassigned' | 'agent' | 'queue' | 'ai_queue'
+  /** Queue used when `handoffTarget` is 'queue' (also the fallback when
+   *  the model doesn't name a valid one in 'ai_queue' mode). */
+  handoffQueueId?: string | null
+  /** Inbox channels the agent answers on. null = every channel. */
+  channelTypes?: string[] | null
   /** Optional OpenAI-compatible key for embeddings. When set, the
    *  knowledge base is embedded and semantic retrieval turns on; when
    *  null, retrieval falls back to lexical full-text search. */
@@ -67,6 +76,8 @@ export interface GenerateResult {
   text: string
   /** True when the model asked to hand off to a human (auto-reply mode). */
   handoff: boolean
+  /** Queue name the model named in the handoff sentinel, if any. */
+  handoffQueue: string | null
   /** Provider token usage for this call, or null when unavailable. */
   usage: AiUsage | null
 }

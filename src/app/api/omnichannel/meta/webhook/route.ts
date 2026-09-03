@@ -8,6 +8,7 @@ import { isUniqueViolation } from '@/lib/contacts/dedupe'
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
 import { extractMetaAttachment, extractMetaReaction, normalizeMetaText, safeMetaContactName } from '@/lib/omnichannel/webhook-normalizer'
 import { dispatchInboundAutomations } from '@/lib/automations/inbound'
+import { dispatchInboundToAiReply } from '@/lib/ai/auto-reply'
 import type { ChannelType } from '@/types'
 
 export const dynamic = 'force-dynamic'
@@ -325,7 +326,7 @@ async function ingestMessage(db: ReturnType<typeof admin>, connector: Connector,
   if (updateError) throw updateError
   const { error: assignmentError } = await db.rpc('auto_assign_inbound_conversation', { p_account_id: connector.account_id, p_conversation_id: conversation.id })
   if (assignmentError) console.error('[meta] automatic assignment failed:', assignmentError.message)
-  await dispatchInboundAutomations({
+  const { contentAutomationRan } = await dispatchInboundAutomations({
     accountId: connector.account_id,
     contactId,
     conversationId: conversation.id,
@@ -334,6 +335,16 @@ async function ingestMessage(db: ReturnType<typeof admin>, connector: Connector,
     contactCreated,
     isFirstInboundMessage,
   })
+  if (contentText.trim()) {
+    await dispatchInboundToAiReply({
+      accountId: connector.account_id,
+      conversationId: conversation.id,
+      contactId,
+      configOwnerUserId: auditUserId,
+      channelType: connector.provider as ChannelType,
+      automationReplied: contentAutomationRan,
+    })
+  }
   if (created) await dispatchWebhookEvent(db, connector.account_id, 'conversation.created', { conversation_id: conversation.id, contact_id: contactId, channel_type: connector.provider, connector_id: connector.id })
   await dispatchWebhookEvent(db, connector.account_id, 'message.received', { conversation_id: conversation.id, contact_id: contactId, message_id: `meta:${connector.id}:${messageId}`, channel_type: connector.provider, content_type: contentType, text: contentText, media_url: mediaUrl })
   await db.from('omnichannel_webhook_receipts').update({ outcome: 'processed', detail: `Mensaje ${connector.provider} agregado.`, processed_at: now })

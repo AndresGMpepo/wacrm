@@ -8,7 +8,9 @@ import { buildHandoffSummary } from './handoff'
 import { logAiUsage } from './usage'
 import { latestUserMessage } from './query'
 import { engineSendText } from '@/lib/flows/meta-send'
+import { sendOmnichannelText } from '@/lib/omnichannel/outbound-text'
 import { checkRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
+import type { ChannelType } from '@/types'
 
 interface DispatchArgs {
   /** Tenancy key — drives config, contact, and whatsapp_config lookups. */
@@ -18,6 +20,12 @@ interface DispatchArgs {
   /** The account's WhatsApp config owner, used for the outbound send's
    *  audit columns (mirrors how the flow runner passes it through). */
   configOwnerUserId: string
+  /** Inbox channel the inbound arrived on. Checked against the agent's
+   *  configured channel scope. */
+  channelType?: ChannelType
+  /** True when an automation already answered this same inbound, so the
+   *  customer isn't texted twice. */
+  automationReplied?: boolean
 }
 
 /**
@@ -50,22 +58,33 @@ export async function dispatchInboundToAiReply(
     const config = await loadAiConfig(db, accountId)
     if (!config || !config.autoReplyEnabled) return
 
+    // Channel scope: an account can let the agent answer everywhere
+    // (null) or only on the channels it was trained for.
+    if (
+      config.channelTypes &&
+      config.channelTypes.length > 0 &&
+      (!args.channelType || !config.channelTypes.includes(args.channelType))
+    ) {
+      return
+    }
+
     // Deterministic, user-configured responders win over the LLM — the
-    // caller already excludes messages a Flow consumed. Message-level
-    // automations (`new_message_received` / `keyword_match`) are
-    // dispatched independently for this same inbound and may send their
-    // own reply, so if the account has any active one we stand down to
-    // avoid double-texting the customer. (Relationship triggers like
-    // `first_inbound_message` don't count — they're not per-message
-    // auto-responders.)
-    const { data: autoResponders } = await db
-      .from('automations')
-      .select('id')
-      .eq('account_id', accountId)
-      .eq('is_active', true)
-      .in('trigger_type', ['new_message_received', 'keyword_match'])
-      .limit(1)
-    if (autoResponders && autoResponders.length > 0) return
+    // caller already excludes messages a Flow consumed. When the caller
+    // knows whether a message-level automation actually ran for THIS
+    // inbound (every inbound webhook does), we trust that; otherwise we
+    // fall back to the conservative "account has some active
+    // auto-responder" check.
+    if (args.automationReplied) return
+    if (args.automationReplied === undefined) {
+      const { data: autoResponders } = await db
+        .from('automations')
+        .select('id')
+        .eq('account_id', accountId)
+        .eq('is_active', true)
+        .in('trigger_type', ['new_message_received', 'keyword_match'])
+        .limit(1)
+      if (autoResponders && autoResponders.length > 0) return
+    }
 
     const { data: conv, error: convErr } = await db
       .from('conversations')
@@ -106,13 +125,17 @@ export async function dispatchInboundToAiReply(
       latestUserMessage(messages),
     )
 
+    const routableQueues =
+      config.handoffTarget === 'ai_queue' ? await loadQueues(db, accountId) : []
+
     const systemPrompt = buildSystemPrompt({
       userPrompt: config.systemPrompt,
       mode: 'auto_reply',
       knowledge,
+      handoffQueues: routableQueues.map((q) => q.name),
     })
 
-    const { text, handoff, usage } = await generateReply({
+    const { text, handoff, handoffQueue, usage } = await generateReply({
       config,
       systemPrompt,
       messages,
@@ -148,12 +171,37 @@ export async function dispatchInboundToAiReply(
         ai_autoreply_disabled: true,
         ai_handoff_summary: summary,
       }
-      // Only set the assignee when a target is configured AND the thread
-      // isn't already owned — never stomp an existing human assignment.
-      if (config.handoffAgentId && !conv.assigned_agent_id) {
+
+      // Never stomp an existing human assignment.
+      const queueId =
+        config.handoffTarget === 'ai_queue'
+          ? matchQueueId(routableQueues, handoffQueue) ?? config.handoffQueueId ?? null
+          : config.handoffTarget === 'queue'
+            ? config.handoffQueueId ?? null
+            : null
+
+      if (queueId && !conv.assigned_agent_id) {
+        update.queue_id = queueId
+      } else if (
+        (config.handoffTarget ?? 'agent') === 'agent' &&
+        config.handoffAgentId &&
+        !conv.assigned_agent_id
+      ) {
         update.assigned_agent_id = config.handoffAgentId
       }
       await db.from('conversations').update(update).eq('id', conversationId)
+
+      // Let the queue's own rules (round-robin / fewest open chats,
+      // restricted to its members) pick the human.
+      if (queueId && !conv.assigned_agent_id) {
+        const { error: assignErr } = await db.rpc('auto_assign_inbound_conversation', {
+          p_account_id: accountId,
+          p_conversation_id: conversationId,
+        })
+        if (assignErr) {
+          console.error('[ai auto-reply] queue assignment failed:', assignErr.message)
+        }
+      }
       return
     }
 
@@ -179,6 +227,16 @@ export async function dispatchInboundToAiReply(
     }
     if (claimed !== true) return // lost the per-conversation cap race
 
+    if (args.channelType && args.channelType !== 'whatsapp') {
+      await sendOmnichannelText(db, {
+        accountId,
+        conversationId,
+        text,
+        senderType: 'bot',
+      })
+      return
+    }
+
     await engineSendText({
       accountId,
       userId: configOwnerUserId,
@@ -190,4 +248,37 @@ export async function dispatchInboundToAiReply(
   } catch (err) {
     console.error('[ai auto-reply] dispatch failed:', err)
   }
+}
+
+async function loadQueues(
+  db: ReturnType<typeof supabaseAdmin>,
+  accountId: string,
+): Promise<{ id: string; name: string }[]> {
+  const { data, error } = await db
+    .from('conversation_queues')
+    .select('id, name')
+    .eq('account_id', accountId)
+    .order('name')
+  if (error) {
+    console.error('[ai auto-reply] could not load queues:', error.message)
+    return []
+  }
+  return (data ?? []) as { id: string; name: string }[]
+}
+
+/** Match the department the model named against the account's queues,
+ *  case- and accent-insensitively. */
+function matchQueueId(
+  queues: { id: string; name: string }[],
+  named: string | null,
+): string | null {
+  if (!named) return null
+  const normalize = (value: string) =>
+    value
+      .normalize('NFD')
+      .replace(/\p{Diacritic}/gu, '')
+      .trim()
+      .toLowerCase()
+  const target = normalize(named)
+  return queues.find((q) => normalize(q.name) === target)?.id ?? null
 }

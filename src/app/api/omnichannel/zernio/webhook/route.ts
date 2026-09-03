@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 
 import { resolveAuditUserId } from '@/lib/api/v1/contacts'
+import { dispatchInboundToAiReply } from '@/lib/ai/auto-reply'
 import { dispatchInboundAutomations } from '@/lib/automations/inbound'
 import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe'
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
@@ -513,7 +514,7 @@ export async function POST(request: Request) {
         await flagBroadcastReplyIfAny(db, typed.account_id, contactId, conversationRow.id)
       }
       await db.rpc('auto_assign_inbound_conversation', { p_account_id: typed.account_id, p_conversation_id: conversationRow.id })
-      await dispatchInboundAutomations({
+      const { contentAutomationRan } = await dispatchInboundAutomations({
         accountId: typed.account_id,
         contactId,
         conversationId: conversationRow.id,
@@ -522,6 +523,16 @@ export async function POST(request: Request) {
         contactCreated,
         isFirstInboundMessage,
       })
+      if (content.trim()) {
+        await dispatchInboundToAiReply({
+          accountId: typed.account_id,
+          conversationId: conversationRow.id,
+          contactId,
+          configOwnerUserId: auditUserId,
+          channelType: typed.provider as ChannelType,
+          automationReplied: contentAutomationRan,
+        })
+      }
       await db.from('omnichannel_connectors').update({ status: 'active', last_event_at: now, last_error: null, updated_at: now }).eq('id', typed.id)
       if (created) await dispatchWebhookEvent(db, typed.account_id, 'conversation.created', { conversation_id: conversationRow.id, contact_id: contactId, channel_type: typed.provider, connector_id: typed.id })
       await dispatchWebhookEvent(db, typed.account_id, 'message.received', { conversation_id: conversationRow.id, contact_id: contactId, message_id: messageId, channel_type: typed.provider, content_type: contentType, text: content, media_url: mediaUrl })

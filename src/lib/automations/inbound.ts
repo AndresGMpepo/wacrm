@@ -33,14 +33,24 @@ export interface InboundAutomationDispatch {
  * a single automation. Keeping the trigger list in one place means a new
  * connector only has to call this once.
  *
+ * Returns whether a message-level automation actually ran for this inbound,
+ * which is what the AI agent uses to decide if it should stay quiet.
+ *
  * Never throws — callers are webhooks that must still answer 200.
  */
-export async function dispatchInboundAutomations(input: InboundAutomationDispatch): Promise<void> {
+export async function dispatchInboundAutomations(
+  input: InboundAutomationDispatch,
+): Promise<{ contentAutomationRan: boolean }> {
   const triggers: AutomationTriggerType[] = []
   if (!input.flowConsumed) {
     triggers.push('new_message_received', 'keyword_match')
     if (input.interactiveReplyId) triggers.push('interactive_reply')
   }
+  const contentTriggers = new Set<AutomationTriggerType>([
+    'new_message_received',
+    'keyword_match',
+    'interactive_reply',
+  ])
   // `new_contact_created` fires only when the webhook just created the
   // contact row. `first_inbound_message` is the superset that also catches
   // manually-imported contacts writing for the first time. Both are
@@ -48,13 +58,14 @@ export async function dispatchInboundAutomations(input: InboundAutomationDispatc
   if (input.contactCreated) triggers.unshift('new_contact_created')
   if (input.isFirstInboundMessage) triggers.unshift('first_inbound_message')
 
+  let contentAutomationRan = false
   for (const triggerType of triggers) {
     // Awaited on purpose: webhooks run this inside `after()` / a request
     // scope that only stays alive for promises it can see, so a detached
     // dispatch can be frozen half-way through. `runAutomationsForTrigger`
     // owns its own try/catch; the `.catch` keeps one trigger's failure from
     // skipping the rest of the loop.
-    await runAutomationsForTrigger({
+    const executed = await runAutomationsForTrigger({
       accountId: input.accountId,
       triggerType,
       contactId: input.contactId,
@@ -65,6 +76,12 @@ export async function dispatchInboundAutomations(input: InboundAutomationDispatc
         channel_type: input.channelType,
         interactive_reply_id: input.interactiveReplyId ?? undefined,
       },
-    }).catch((err) => console.error('[automations] dispatch failed:', err))
+    }).catch((err) => {
+      console.error('[automations] dispatch failed:', err)
+      return 0
+    })
+    if (executed > 0 && contentTriggers.has(triggerType)) contentAutomationRan = true
   }
+
+  return { contentAutomationRan }
 }

@@ -708,7 +708,7 @@ async function processMessage(
   // The trigger list itself lives in the shared inbound dispatcher, which
   // every channel (WhatsApp, Zernio, Meta, Yeastar Live Chat) calls.
   const inboundText = contentText ?? message.text?.body ?? ''
-  await dispatchInboundAutomations({
+  const { contentAutomationRan } = await dispatchInboundAutomations({
     accountId,
     contactId: contactRecord.id,
     conversationId: conversation.id,
@@ -731,6 +731,8 @@ async function processMessage(
       conversationId: conversation.id,
       contactId: contactRecord.id,
       configOwnerUserId,
+      channelType: 'whatsapp',
+      automationReplied: contentAutomationRan,
     })
   }
 

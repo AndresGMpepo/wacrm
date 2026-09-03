@@ -66,8 +66,10 @@ export function buildSystemPrompt(args: {
     sentiment: string | null
     nextBestAction: string | null
   }
+  /** Queues the model may route the handoff to (auto-reply mode). */
+  handoffQueues?: string[]
 }): string {
-  const { userPrompt, mode, knowledge, copilotContext } = args
+  const { userPrompt, mode, knowledge, copilotContext, handoffQueues } = args
   const parts: string[] = [
     'You are a customer-messaging assistant for a business that uses a WhatsApp CRM. ' +
       'You are shown the recent WhatsApp conversation between the business (assistant) and a customer (user). ' +
@@ -82,6 +84,13 @@ export function buildSystemPrompt(args: {
     parts.push(
       `You are replying automatically with no human in the loop. If you cannot confidently and safely help — the customer explicitly asks for a human, is upset or complaining, or the request needs information you do not have — reply with exactly ${HANDOFF_SENTINEL} and nothing else. A human agent will then take over. Prefer handing off over guessing.`,
     )
+    if (handoffQueues && handoffQueues.length > 0) {
+      parts.push(
+        'When you hand off, route the conversation to the department that fits what the customer needs, using exactly this marker instead: ' +
+          `[[HANDOFF:<department>]] where <department> is one of: ${handoffQueues.join(' | ')}. ` +
+          `Use the name verbatim. If none clearly fits, use ${HANDOFF_SENTINEL}.`,
+      )
+    }
   }
 
   if (userPrompt && userPrompt.trim()) {

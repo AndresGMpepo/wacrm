@@ -41,6 +41,19 @@ const ANALYSIS_MODEL_IDS = ['gpt-5.4-mini', 'gpt-4.1-mini'];
 const IMAGE_MODEL_IDS = ['gpt-4.1-mini', 'gpt-5.4-mini'];
 const TRANSCRIPTION_MODEL_IDS = ['gpt-4o-mini-transcribe', 'gpt-4o-transcribe'];
 
+type HandoffTarget = 'unassigned' | 'agent' | 'queue' | 'ai_queue';
+
+const AI_CHANNELS: { id: string; label: string }[] = [
+  { id: 'whatsapp', label: 'WhatsApp (Meta directo)' },
+  { id: 'zernio_whatsapp', label: 'WhatsApp (conectado)' },
+  { id: 'zernio_facebook', label: 'Facebook (conectado)' },
+  { id: 'zernio_instagram', label: 'Instagram (conectado)' },
+  { id: 'facebook', label: 'Facebook Messenger' },
+  { id: 'instagram', label: 'Instagram' },
+  { id: 'yeastar_live_chat', label: 'Chat web de Yeastar' },
+  { id: 'tiktok', label: 'TikTok' },
+];
+
 export function AiConfig() {
   const { accountId, accountRole, profileLoading } = useAuth();
   const canEdit = accountRole ? canEditSettings(accountRole) : false;
@@ -82,6 +95,10 @@ export function AiConfig() {
   const [maxPerConversation, setMaxPerConversation] = useState(3);
   // Empty string = leave unassigned (shared queue).
   const [handoffAgentId, setHandoffAgentId] = useState('');
+  const [handoffTarget, setHandoffTarget] = useState<HandoffTarget>('agent');
+  const [handoffQueueId, setHandoffQueueId] = useState('');
+  const [channelTypes, setChannelTypes] = useState<string[]>([]);
+  const [queues, setQueues] = useState<{ id: string; name: string }[]>([]);
   const [members, setMembers] = useState<AccountMember[]>([]);
 
   // Guard keyed on the account (not a bare boolean) so an in-place
@@ -123,6 +140,9 @@ export function AiConfig() {
         setQaScoringCriteria(data.qa_scoring_criteria ?? '');
         setMaxPerConversation(data.auto_reply_max_per_conversation ?? 3);
         setHandoffAgentId(data.handoff_agent_id ?? '');
+        setHandoffTarget((data.handoff_target as HandoffTarget) ?? 'agent');
+        setHandoffQueueId(data.handoff_queue_id ?? '');
+        setChannelTypes(Array.isArray(data.channel_types) ? data.channel_types : []);
         setHasStoredKey(Boolean(data.has_key));
         setApiKey(data.has_key ? MASKED_KEY : '');
         setKeyEdited(false);
@@ -145,6 +165,11 @@ export function AiConfig() {
     // older deployment without the endpoint the picker just shows the
     // queue option.
     void fetchAccountMembers().then(setMembers);
+    // Queues feed the handoff routing picker. Best-effort, same as members.
+    void fetch('/api/conversations/queues', { cache: 'no-store' })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => setQueues(data?.queues ?? []))
+      .catch(() => undefined);
   }, [accountId, fetchConfig]);
 
   const keyPayload = () => (keyEdited ? apiKey.trim() : undefined);
@@ -166,6 +191,9 @@ export function AiConfig() {
     auto_reply_enabled: autoReplyEnabled,
     auto_reply_max_per_conversation: maxPerConversation,
     handoff_agent_id: handoffAgentId || null,
+    handoff_target: handoffTarget,
+    handoff_queue_id: handoffQueueId || null,
+    channel_types: channelTypes,
     conversation_analysis_enabled: conversationAnalysisEnabled,
     analysis_on_customer_message: analysisOnCustomerMessage,
     analysis_on_transfer: analysisOnTransfer,
@@ -471,32 +499,120 @@ export function AiConfig() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="ai-handoff">{t('handoffTo')}</Label>
+              <Label>Canales donde responde</Label>
               <p className="text-xs text-muted-foreground">
-                {t('handoffToDesc')}
+                Sin selección, el agente responde en todos los canales de la bandeja.
+              </p>
+              <div className="grid gap-1.5 sm:grid-cols-2">
+                {AI_CHANNELS.map((channel) => (
+                  <label
+                    key={channel.id}
+                    className="flex items-center gap-2 text-sm text-foreground"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={channelTypes.length === 0 || channelTypes.includes(channel.id)}
+                      onChange={() =>
+                        setChannelTypes((current) => {
+                          const base = current.length === 0 ? AI_CHANNELS.map((c) => c.id) : current;
+                          const next = base.includes(channel.id)
+                            ? base.filter((c) => c !== channel.id)
+                            : [...base, channel.id];
+                          return next.length === AI_CHANNELS.length ? [] : next;
+                        })
+                      }
+                      disabled={disabled || !autoReplyEnabled}
+                      className="h-3.5 w-3.5 accent-primary"
+                    />
+                    {channel.label}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="ai-handoff-target">Al transferir a un humano</Label>
+              <p className="text-xs text-muted-foreground">
+                Qué hacer cuando el agente de IA deja la conversación en manos de una persona.
               </p>
               <Select
-                value={handoffAgentId || HANDOFF_QUEUE}
-                onValueChange={(v) =>
-                  setHandoffAgentId(!v || v === HANDOFF_QUEUE ? '' : v)
-                }
+                value={handoffTarget}
+                onValueChange={(v) => setHandoffTarget(v as HandoffTarget)}
                 disabled={disabled || !autoReplyEnabled}
               >
-                <SelectTrigger id="ai-handoff">
+                <SelectTrigger id="ai-handoff-target">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value={HANDOFF_QUEUE}>
-                    {t('handoffQueue')}
+                  <SelectItem value="unassigned">Dejar sin asignar</SelectItem>
+                  <SelectItem value="agent">Asignar a un agente fijo</SelectItem>
+                  <SelectItem value="queue">Enviar a una cola fija</SelectItem>
+                  <SelectItem value="ai_queue">
+                    La IA elige la cola según la conversación
                   </SelectItem>
-                  {members.map((m) => (
-                    <SelectItem key={m.user_id} value={m.user_id}>
-                      {memberLabel(m)}
-                    </SelectItem>
-                  ))}
                 </SelectContent>
               </Select>
             </div>
+
+            {(handoffTarget === 'queue' || handoffTarget === 'ai_queue') && (
+              <div className="space-y-2">
+                <Label htmlFor="ai-handoff-queue">
+                  {handoffTarget === 'ai_queue' ? 'Cola de respaldo' : 'Cola'}
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  {handoffTarget === 'ai_queue'
+                    ? 'Se usa cuando la IA no identifica un departamento claro. La cola asigna al agente con sus propias reglas.'
+                    : 'La cola asigna al agente con sus propias reglas (turnos o menos chats abiertos).'}
+                </p>
+                <Select
+                  value={handoffQueueId || HANDOFF_QUEUE}
+                  onValueChange={(v) => setHandoffQueueId(!v || v === HANDOFF_QUEUE ? '' : v)}
+                  disabled={disabled || !autoReplyEnabled}
+                >
+                  <SelectTrigger id="ai-handoff-queue">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={HANDOFF_QUEUE}>Sin cola</SelectItem>
+                    {queues.map((q) => (
+                      <SelectItem key={q.id} value={q.id}>
+                        {q.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {handoffTarget === 'agent' && (
+              <div className="space-y-2">
+                <Label htmlFor="ai-handoff">{t('handoffTo')}</Label>
+                <p className="text-xs text-muted-foreground">
+                  {t('handoffToDesc')}
+                </p>
+                <Select
+                  value={handoffAgentId || HANDOFF_QUEUE}
+                  onValueChange={(v) =>
+                    setHandoffAgentId(!v || v === HANDOFF_QUEUE ? '' : v)
+                  }
+                  disabled={disabled || !autoReplyEnabled}
+                >
+                  <SelectTrigger id="ai-handoff">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={HANDOFF_QUEUE}>
+                      {t('handoffQueue')}
+                    </SelectItem>
+                    {members.map((m) => (
+                      <SelectItem key={m.user_id} value={m.user_id}>
+                        {memberLabel(m)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </CardContent>
         </Card>
 

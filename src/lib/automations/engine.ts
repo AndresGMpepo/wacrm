@@ -81,8 +81,13 @@ export interface DispatchInput {
  * Must never throw — callers use fire-and-forget from the webhook.
  * All errors are caught and logged; per-automation failures are
  * recorded into automation_logs with status='failed'.
+ *
+ * Returns how many automations actually executed, so a caller can tell
+ * whether the customer already got an answer (the AI agent stands down
+ * in that case).
  */
-export async function runAutomationsForTrigger(input: DispatchInput): Promise<void> {
+export async function runAutomationsForTrigger(input: DispatchInput): Promise<number> {
+  let executed = 0
   try {
     const db = supabaseAdmin()
 
@@ -102,11 +107,11 @@ export async function runAutomationsForTrigger(input: DispatchInput): Promise<vo
         .maybeSingle()
       if (ownErr) {
         console.error('[automations] contact ownership check failed:', ownErr)
-        return
+        return executed
       }
       if (!owned) {
         console.warn('[automations] contact not in account, refusing dispatch', input.contactId)
-        return
+        return executed
       }
     }
 
@@ -119,9 +124,9 @@ export async function runAutomationsForTrigger(input: DispatchInput): Promise<vo
 
     if (error) {
       console.error('[automations] fetch failed:', error)
-      return
+      return executed
     }
-    if (!automations || automations.length === 0) return
+    if (!automations || automations.length === 0) return executed
 
     // Resolve the channel once. The lookup only runs when at least one
     // automation is actually scoped to a channel — accounts that never
@@ -139,6 +144,7 @@ export async function runAutomationsForTrigger(input: DispatchInput): Promise<vo
       if (!triggerMatches(automation, context)) continue
       try {
         await executeAutomation(automation, { ...input, context })
+        executed += 1
       } catch (err) {
         console.error('[automations] execute failed:', automation.id, err)
       }
@@ -146,6 +152,7 @@ export async function runAutomationsForTrigger(input: DispatchInput): Promise<vo
   } catch (err) {
     console.error('[automations] dispatch failed:', err)
   }
+  return executed
 }
 
 /**
