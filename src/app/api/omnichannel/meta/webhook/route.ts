@@ -7,6 +7,8 @@ import { resolveAuditUserId } from '@/lib/api/v1/contacts'
 import { isUniqueViolation } from '@/lib/contacts/dedupe'
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
 import { extractMetaAttachment, extractMetaReaction, normalizeMetaText, safeMetaContactName } from '@/lib/omnichannel/webhook-normalizer'
+import { dispatchInboundAutomations } from '@/lib/automations/inbound'
+import type { ChannelType } from '@/types'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 20
@@ -170,7 +172,7 @@ async function claimReceipt(db: ReturnType<typeof admin>, connector: Connector, 
   return false
 }
 
-async function resolveContact(db: ReturnType<typeof admin>, connector: Connector, externalUserId: string, auditUserId: string, profile?: MetaProfile) {
+async function resolveContact(db: ReturnType<typeof admin>, connector: Connector, externalUserId: string, auditUserId: string, profile?: MetaProfile): Promise<{ contactId: string; created: boolean }> {
   const { data: mapped, error: mapError } = await db.from('omnichannel_contact_identities')
     .select('contact_id').eq('connector_id', connector.id).eq('external_user_id', externalUserId).maybeSingle()
   if (mapError) throw mapError
@@ -187,7 +189,7 @@ async function resolveContact(db: ReturnType<typeof admin>, connector: Connector
       const { error: updateError } = await db.from('contacts').update(update).eq('id', contactId).eq('account_id', connector.account_id)
       if (updateError) throw updateError
     }
-    return contactId
+    return { contactId, created: false }
   }
 
   const placeholderPhone = `meta:${connector.provider}:${externalUserId}`
@@ -195,6 +197,7 @@ async function resolveContact(db: ReturnType<typeof admin>, connector: Connector
     .select('id, name, avatar_url').eq('account_id', connector.account_id).eq('phone', placeholderPhone).maybeSingle()
   if (phoneError) throw phoneError
   let contactId = contactByPhone?.id as string | undefined
+  let contactCreated = false
   if (!contactId) {
     const fallbackName = safeMetaContactName(connector.provider, externalUserId)
     const { data: contact, error: contactError } = await db.from('contacts').insert({
@@ -206,6 +209,7 @@ async function resolveContact(db: ReturnType<typeof admin>, connector: Connector
     }).select('id').single()
     if (contactError || !contact) throw contactError ?? new Error('No se pudo crear el contacto de Meta.')
     contactId = contact.id
+    contactCreated = true
   } else if (contactByPhone && (profile?.name || profile?.avatarUrl)) {
     const fallbackName = safeMetaContactName(connector.provider, externalUserId)
     const update: { name?: string; avatar_url?: string } = {}
@@ -223,9 +227,10 @@ async function resolveContact(db: ReturnType<typeof admin>, connector: Connector
   if (identityError) {
     const { data: concurrent } = await db.from('omnichannel_contact_identities').select('contact_id')
       .eq('connector_id', connector.id).eq('external_user_id', externalUserId).maybeSingle()
-    if (concurrent?.contact_id) return concurrent.contact_id as string
+    if (concurrent?.contact_id) return { contactId: concurrent.contact_id as string, created: false }
   }
-  return contactId
+  if (!contactId) throw new Error('No se pudo resolver el contacto de Meta.')
+  return { contactId, created: contactCreated }
 }
 
 async function persistMetaReaction(
@@ -273,7 +278,7 @@ async function ingestMessage(db: ReturnType<typeof admin>, connector: Connector,
   if (!await claimReceipt(db, connector, messageId)) return { duplicate: true }
   const auditUserId = await resolveAuditUserId(db, connector.account_id)
   const profile = await resolveMetaProfile(connector, senderId)
-  const contactId = await resolveContact(db, connector, senderId, auditUserId, profile)
+  const { contactId, created: contactCreated } = await resolveContact(db, connector, senderId, auditUserId, profile)
   if (!contactId) throw new Error('No se pudo resolver el contacto Meta para la reacción.')
   const { data: rows, error: findError } = await db.from('conversations').select('id, unread_count')
     .eq('account_id', connector.account_id).eq('connector_id', connector.id).eq('external_session_id', senderId).limit(1)
@@ -294,6 +299,12 @@ async function ingestMessage(db: ReturnType<typeof admin>, connector: Connector,
   const contentType = attachment && attachment.kind !== 'text' ? attachment.kind : 'text'
   const mediaUrl = attachment?.url ?? null
   const createdAt = time(event.timestamp)
+  const { count: priorCustomerMessages } = await db
+    .from('messages')
+    .select('id', { count: 'exact', head: true })
+    .eq('conversation_id', conversation.id)
+    .eq('sender_type', 'customer')
+  const isFirstInboundMessage = (priorCustomerMessages ?? 0) === 0
   const { error: messageError } = await db.from('messages').insert({
     conversation_id: conversation.id, sender_type: 'customer', content_type: contentType,
     content_text: contentText, media_url: mediaUrl, message_id: `meta:${connector.id}:${messageId}`, status: 'delivered', created_at: createdAt,
@@ -314,6 +325,15 @@ async function ingestMessage(db: ReturnType<typeof admin>, connector: Connector,
   if (updateError) throw updateError
   const { error: assignmentError } = await db.rpc('auto_assign_inbound_conversation', { p_account_id: connector.account_id, p_conversation_id: conversation.id })
   if (assignmentError) console.error('[meta] automatic assignment failed:', assignmentError.message)
+  await dispatchInboundAutomations({
+    accountId: connector.account_id,
+    contactId,
+    conversationId: conversation.id,
+    channelType: connector.provider as ChannelType,
+    messageText: contentText,
+    contactCreated,
+    isFirstInboundMessage,
+  })
   if (created) await dispatchWebhookEvent(db, connector.account_id, 'conversation.created', { conversation_id: conversation.id, contact_id: contactId, channel_type: connector.provider, connector_id: connector.id })
   await dispatchWebhookEvent(db, connector.account_id, 'message.received', { conversation_id: conversation.id, contact_id: contactId, message_id: `meta:${connector.id}:${messageId}`, channel_type: connector.provider, content_type: contentType, text: contentText, media_url: mediaUrl })
   await db.from('omnichannel_webhook_receipts').update({ outcome: 'processed', detail: `Mensaje ${connector.provider} agregado.`, processed_at: now })
@@ -350,7 +370,7 @@ async function ingestComment(db: ReturnType<typeof admin>, connector: Connector,
   const details = inlineText ? undefined : await resolveMetaCommentDetails(connector, commentId)
 
   const auditUserId = await resolveAuditUserId(db, connector.account_id)
-  const contactId = await resolveContact(db, connector, senderId, auditUserId, {
+  const { contactId, created: contactCreated } = await resolveContact(db, connector, senderId, auditUserId, {
     name: value?.from?.name?.trim() || details?.name,
   })
   const parentId = valueText(value, 'parent_id')
@@ -376,6 +396,12 @@ async function ingestComment(db: ReturnType<typeof admin>, connector: Connector,
   }
   const contentText = inlineText || details?.text || '[Comentario sin texto]'
   const createdAt = time(entry.time)
+  const { count: priorCustomerMessages } = await db
+    .from('messages')
+    .select('id', { count: 'exact', head: true })
+    .eq('conversation_id', conversation.id)
+    .eq('sender_type', 'customer')
+  const isFirstInboundMessage = (priorCustomerMessages ?? 0) === 0
   const { error: messageError } = await db.from('messages').insert({
     conversation_id: conversation.id, sender_type: 'customer', content_type: 'text', content_text: contentText,
     message_id: `meta:comment:${connector.id}:${commentId}`, status: 'delivered', created_at: createdAt,
@@ -389,6 +415,15 @@ async function ingestComment(db: ReturnType<typeof admin>, connector: Connector,
   if (updateError) throw updateError
   const { error: assignmentError } = await db.rpc('auto_assign_inbound_conversation', { p_account_id: connector.account_id, p_conversation_id: conversation.id })
   if (assignmentError) console.error('[meta] automatic assignment failed:', assignmentError.message)
+  await dispatchInboundAutomations({
+    accountId: connector.account_id,
+    contactId,
+    conversationId: conversation.id,
+    channelType: connector.provider as ChannelType,
+    messageText: contentText,
+    contactCreated,
+    isFirstInboundMessage,
+  })
   if (created) await dispatchWebhookEvent(db, connector.account_id, 'conversation.created', { conversation_id: conversation.id, contact_id: contactId, channel_type: connector.provider, connector_id: connector.id, public_comment: true })
   await dispatchWebhookEvent(db, connector.account_id, 'message.received', { conversation_id: conversation.id, contact_id: contactId, message_id: `meta:comment:${connector.id}:${commentId}`, channel_type: connector.provider, content_type: 'text', text: contentText, public_comment: true })
   await db.from('omnichannel_webhook_receipts').update({

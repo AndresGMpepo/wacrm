@@ -49,6 +49,7 @@ import type {
   AccountMember,
   AutomationStepType,
   AutomationTriggerType,
+  ChannelType,
   CustomField,
   InteractiveMessagePayload,
   KeywordMatchTriggerConfig,
@@ -61,6 +62,7 @@ import {
   blankListPayload,
 } from "@/components/interactive/interactive-builder"
 import { interactivePayloadPreviewText } from "@/lib/whatsapp/interactive"
+import { AUTOMATION_CHANNELS } from "@/lib/automations/channels"
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
 
@@ -82,6 +84,8 @@ export interface BuilderInitial {
   description: string
   trigger_type: AutomationTriggerType
   trigger_config: Record<string, unknown>
+  /** Channels this automation reacts to. Empty = every channel. */
+  channel_types: ChannelType[]
   is_active: boolean
   steps: BuilderStep[]
 }
@@ -668,6 +672,7 @@ export function AutomationBuilder({ initial }: { initial: BuilderInitial }) {
         description: state.description || null,
         trigger_type: state.trigger_type,
         trigger_config: state.trigger_config,
+        channel_types: state.channel_types,
         is_active: state.is_active,
         steps: toApiSteps(state.steps),
       }
@@ -755,8 +760,10 @@ export function AutomationBuilder({ initial }: { initial: BuilderInitial }) {
             <TriggerCard
               type={state.trigger_type}
               config={state.trigger_config}
+              channels={state.channel_types}
               onTypeChange={(tVal) => patchTop("trigger_type", tVal)}
               onConfigChange={(c) => patchTop("trigger_config", c)}
+              onChannelsChange={(c) => patchTop("channel_types", c)}
               t={t}
             />
             <StepList
@@ -783,14 +790,18 @@ export function AutomationBuilder({ initial }: { initial: BuilderInitial }) {
 function TriggerCard({
   type,
   config,
+  channels,
   onTypeChange,
   onConfigChange,
+  onChannelsChange,
   t,
 }: {
   type: AutomationTriggerType
   config: Record<string, unknown>
+  channels: ChannelType[]
   onTypeChange: (t: AutomationTriggerType) => void
   onConfigChange: (c: Record<string, unknown>) => void
+  onChannelsChange: (c: ChannelType[]) => void
   t: ReturnType<typeof useTranslations>
 }) {
   const [open, setOpen] = useState(false)
@@ -838,6 +849,7 @@ function TriggerCard({
                 {t(`triggers.${type}.hint`)}
               </p>
             </div>
+            <ChannelScopeConfig channels={channels} onChange={onChannelsChange} t={t} />
             {type === "keyword_match" && (
               <KeywordMatchConfig
                 config={config as unknown as KeywordMatchTriggerConfig}
@@ -881,6 +893,68 @@ function TriggerCard({
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+function ChannelScopeConfig({
+  channels,
+  onChange,
+  t,
+}: {
+  channels: ChannelType[]
+  onChange: (c: ChannelType[]) => void
+  t: ReturnType<typeof useTranslations>
+}) {
+  // Empty selection means "every channel" — that is how automations
+  // authored before omnichannel support behave, and it is the default.
+  const allChannels = channels.length === 0
+  function toggle(channel: ChannelType) {
+    onChange(
+      channels.includes(channel)
+        ? channels.filter((c) => c !== channel)
+        : [...channels, channel],
+    )
+  }
+  return (
+    <div>
+      <label className="mb-1 block text-xs font-medium text-muted-foreground">
+        {t("channels")}
+      </label>
+      <label className="flex items-center gap-2 rounded-md border border-border bg-muted px-2 py-1.5 text-sm text-foreground">
+        <input
+          type="checkbox"
+          checked={allChannels}
+          onChange={() => onChange([])}
+          className="h-3.5 w-3.5 accent-primary"
+        />
+        {t("allChannels")}
+      </label>
+      {!allChannels && (
+        <div className="mt-1 space-y-1 rounded-md border border-border bg-muted px-2 py-1.5">
+          {AUTOMATION_CHANNELS.map((channel) => (
+            <label key={channel} className="flex items-center gap-2 text-sm text-foreground">
+              <input
+                type="checkbox"
+                checked={channels.includes(channel)}
+                onChange={() => toggle(channel)}
+                className="h-3.5 w-3.5 accent-primary"
+              />
+              {t(`channelNames.${channel}`)}
+            </label>
+          ))}
+        </div>
+      )}
+      {allChannels && (
+        <button
+          type="button"
+          onClick={() => onChange(["whatsapp"])}
+          className="mt-1 text-[11px] text-primary hover:text-primary/80"
+        >
+          {t("pickChannels")}
+        </button>
+      )}
+      <p className="mt-1 text-[11px] text-muted-foreground">{t("channelsHint")}</p>
     </div>
   )
 }

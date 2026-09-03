@@ -43,6 +43,7 @@ function NewAutomationPageInner() {
         description: t.description,
         trigger_type: t.trigger_type,
         trigger_config: t.trigger_config as Record<string, unknown>,
+        channel_types: [],
         is_active: false,
         steps,
       }
@@ -52,6 +53,7 @@ function NewAutomationPageInner() {
       description: "",
       trigger_type: "new_message_received" as AutomationTriggerType,
       trigger_config: {},
+      channel_types: [],
       is_active: false,
       steps: [],
     }

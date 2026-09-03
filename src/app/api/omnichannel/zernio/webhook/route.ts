@@ -2,12 +2,14 @@ import { NextResponse } from 'next/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 
 import { resolveAuditUserId } from '@/lib/api/v1/contacts'
+import { dispatchInboundAutomations } from '@/lib/automations/inbound'
 import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe'
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
 import { extractZernioMedia, extractZernioReaction, normalizeMetaText, safeZernioContactName } from '@/lib/omnichannel/webhook-normalizer'
 import { getZernioParticipantPicture, verifyZernioSignature, type ZernioChannel } from '@/lib/zernio/server'
 import { isValidStatusTransition } from '@/lib/whatsapp/recipient-status-ladder'
 import { flagBroadcastReplyIfAny } from '@/lib/whatsapp/broadcast-reply-flag'
+import type { ChannelType } from '@/types'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 20
@@ -73,7 +75,7 @@ async function resolveContact(
   email?: string,
   phone?: string,
   avatarUrl?: string,
-) {
+): Promise<{ contactId: string; created: boolean }> {
   const { data: mapped, error: mapError } = await db
     .from('omnichannel_contact_identities')
     .select('contact_id, avatar_url')
@@ -90,7 +92,7 @@ async function resolveContact(
         .eq('external_user_id', externalUserId)
       if (updateError) throw updateError
     }
-    return contactId
+    return { contactId, created: false }
   }
 
   const channel = connector.provider.replace('zernio_', '') as ZernioChannel
@@ -116,6 +118,7 @@ async function resolveContact(
 
   const existing = phoneMatch ?? emailMatch
   let contactId: string
+  let contactCreated = false
   if (existing) {
     contactId = existing.id
     const update: Record<string, string> = {}
@@ -135,6 +138,7 @@ async function resolveContact(
       .single()
     if (error || !created) throw error ?? new Error('No se pudo crear el contacto del canal conectado.')
     contactId = created.id
+    contactCreated = true
   }
 
   const { error: identityError } = await db.from('omnichannel_contact_identities').insert({
@@ -153,9 +157,9 @@ async function resolveContact(
       .eq('connector_id', connector.id)
       .eq('external_user_id', externalUserId)
       .maybeSingle()
-    if (concurrent?.contact_id) return concurrent.contact_id as string
+    if (concurrent?.contact_id) return { contactId: concurrent.contact_id as string, created: false }
   }
-  return contactId
+  return { contactId, created: contactCreated }
 }
 
 async function registerReceipt(
@@ -409,7 +413,7 @@ export async function POST(request: Request) {
         participant.avatarUrl ?? participant.avatar_url ?? participant.profilePicture ?? participant.profile_picture ?? participant.profileImage ?? participant.profile_image ?? participant.profilePhoto ?? participant.profile_photo ?? participant.picture ?? participant.pictureUrl ?? participant.picture_url ?? participant.imageUrl ?? participant.image_url ?? participant.photoUrl ?? participant.photo_url,
       )
       const contactAvatarUrl = webhookAvatarUrl ?? await getZernioParticipantPicture(externalConversationId, zernioAccountId).catch(() => null)
-      const contactId = await resolveContact(
+      const { contactId, created: contactCreated } = await resolveContact(
         db,
         typed,
         externalUserId,
@@ -450,6 +454,15 @@ export async function POST(request: Request) {
       const platformMessageId = text(incoming.platformMessageId, incoming.platform_message_id, incoming.nativeMessageId, incoming.externalMessageId, externalMessageId)
       const contentType = attachment && attachment.kind !== 'text' ? attachment.kind : 'text'
       const mediaUrl = attachment?.url ?? null
+      // Counted before the insert so `first_inbound_message` automations see
+      // an accurate value (covers contacts imported manually who write for
+      // the first time through this channel).
+      const { count: priorCustomerMessages } = await db
+        .from('messages')
+        .select('id', { count: 'exact', head: true })
+        .eq('conversation_id', conversationRow.id)
+        .eq('sender_type', 'customer')
+      const isFirstInboundMessage = (priorCustomerMessages ?? 0) === 0
       const { error: messageError } = await db.from('messages').insert({
         conversation_id: conversationRow.id,
         sender_type: 'customer',
@@ -500,6 +513,15 @@ export async function POST(request: Request) {
         await flagBroadcastReplyIfAny(db, typed.account_id, contactId, conversationRow.id)
       }
       await db.rpc('auto_assign_inbound_conversation', { p_account_id: typed.account_id, p_conversation_id: conversationRow.id })
+      await dispatchInboundAutomations({
+        accountId: typed.account_id,
+        contactId,
+        conversationId: conversationRow.id,
+        channelType: typed.provider as ChannelType,
+        messageText: content,
+        contactCreated,
+        isFirstInboundMessage,
+      })
       await db.from('omnichannel_connectors').update({ status: 'active', last_event_at: now, last_error: null, updated_at: now }).eq('id', typed.id)
       if (created) await dispatchWebhookEvent(db, typed.account_id, 'conversation.created', { conversation_id: conversationRow.id, contact_id: contactId, channel_type: typed.provider, connector_id: typed.id })
       await dispatchWebhookEvent(db, typed.account_id, 'message.received', { conversation_id: conversationRow.id, contact_id: contactId, message_id: messageId, channel_type: typed.provider, content_type: contentType, text: content, media_url: mediaUrl })

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { requireRole, toErrorResponse } from '@/lib/auth/account'
 import { supabaseAdmin } from '@/lib/automations/admin-client'
+import { normalizeChannelTypes } from '@/lib/automations/channels'
 import {
   loadStepsTree,
   replaceSteps,
@@ -87,6 +88,9 @@ export async function PATCH(
   ] as const) {
     if (k in body) update[k] = body[k]
   }
+  // Normalized separately: the builder posts `[]` for "all channels", which
+  // must be stored as NULL to satisfy the 106 CHECK constraint.
+  if ('channel_types' in body) update.channel_types = normalizeChannelTypes(body.channel_types)
 
   // If this PATCH leaves the automation active (either explicitly
   // activating it OR editing an already-active one), validate the

@@ -4,7 +4,7 @@ import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption'
 import { normalizePhone } from '@/lib/whatsapp/phone-utils'
 import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe'
 import { verifyMetaWebhookSignature } from '@/lib/whatsapp/webhook-signature'
-import { runAutomationsForTrigger } from '@/lib/automations/engine'
+import { dispatchInboundAutomations } from '@/lib/automations/inbound'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
 import { dispatchInboundToAiReply } from '@/lib/ai/auto-reply'
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
@@ -705,58 +705,20 @@ async function processMessage(
   // Fire any automations that react to this webhook event. All dispatches
   // run here (not earlier) so the contact, conversation, and inbound
   // message all exist before any step — including send_message — runs.
-  // Fire-and-forget: a slow or failing automation must not block the
-  // webhook's 200 OK response to Meta.
+  // The trigger list itself lives in the shared inbound dispatcher, which
+  // every channel (WhatsApp, Zernio, Meta, Yeastar Live Chat) calls.
   const inboundText = contentText ?? message.text?.body ?? ''
-  const automationTriggers: (
-    | 'new_contact_created'
-    | 'first_inbound_message'
-    | 'new_message_received'
-    | 'keyword_match'
-    | 'interactive_reply'
-  )[] = []
-  // Content-level triggers are suppressed when a flow consumed the
-  // message — see the comment block above.
-  if (!flowConsumed) {
-    automationTriggers.push('new_message_received', 'keyword_match')
-    // Interactive tap → fire the interactive_reply trigger too (only
-    // meaningful when a button/list reply actually arrived). Enables
-    // automation-only chained menus; when a Flow owns the menu it will
-    // have consumed the reply and this is skipped.
-    if (interactiveReplyId) {
-      automationTriggers.push('interactive_reply')
-    }
-  }
-  // new_contact_created fires only when the webhook just auto-created the
-  // contact row. first_inbound_message fires whenever this is the contact's
-  // first-ever customer-sent message — a superset that also catches
-  // manually-imported contacts sending for the first time. We dispatch both
-  // so users can pick whichever semantic they want; an automation that
-  // listens to only one trigger runs only when that trigger matches.
-  if (contactOutcome.wasCreated) automationTriggers.unshift('new_contact_created')
-  if (isFirstInboundMessage) automationTriggers.unshift('first_inbound_message')
-  // Awaited — not fire-and-forget. We're inside the route's `after()`
-  // block, which only keeps the function alive for promises it can see, so
-  // a detached dispatch can be frozen part-way through: the log row is
-  // inserted, then the steps never run. That is issue #301's failure mode
-  // recurring one level down, and it's what issue #409 reported as runs
-  // logging zero steps. `runAutomationsForTrigger` owns its own try/catch
-  // and never throws; the `.catch` is belt-and-braces so one trigger
-  // type's failure can't skip the rest of the loop.
-  for (const triggerType of automationTriggers) {
-    await runAutomationsForTrigger({
-      accountId,
-      triggerType,
-      contactId: contactRecord.id,
-      context: {
-        message_text: inboundText,
-        conversation_id: conversation.id,
-        // Only set on interactive taps; drives the interactive_reply
-        // trigger's exact-id match.
-        interactive_reply_id: interactiveReplyId ?? undefined,
-      },
-    }).catch((err) => console.error('[automations] dispatch failed:', err))
-  }
+  await dispatchInboundAutomations({
+    accountId,
+    contactId: contactRecord.id,
+    conversationId: conversation.id,
+    channelType: 'whatsapp',
+    messageText: inboundText,
+    interactiveReplyId,
+    contactCreated: contactOutcome.wasCreated,
+    isFirstInboundMessage,
+    flowConsumed,
+  })
 
   // AI auto-reply. Runs only for plain-text inbound the deterministic
   // flow runner did NOT consume (flows win over the LLM), and only when

@@ -7,6 +7,7 @@ import { decrypt } from '@/lib/whatsapp/encryption'
 import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe'
 import { resolveAuditUserId } from '@/lib/api/v1/contacts'
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
+import { dispatchInboundAutomations } from '@/lib/automations/inbound'
 
 // Receiving an image requires a PBX download and a Storage upload before the
 // webhook can be acknowledged. Keep this bounded but above the text-only path.
@@ -151,7 +152,7 @@ async function getPreChatForm(
 async function resolveLiveChatContact(
   db: ReturnType<typeof admin>,
   params: { accountId: string; auditUserId: string; connectorId: string; externalUserId: string; visitorName: string; preChat: YeastarPreChatForm | null },
-) {
+): Promise<{ contactId: string; created: boolean }> {
   const { data: identity, error: identityError } = await db.from('omnichannel_contact_identities')
     .select('contact_id').eq('connector_id', params.connectorId).eq('external_user_id', params.externalUserId).maybeSingle()
   if (identityError) throw identityError
@@ -187,7 +188,7 @@ async function resolveLiveChatContact(
     const { error: identityUpdateError } = await db.from('omnichannel_contact_identities')
       .update({ display_name: name }).eq('connector_id', params.connectorId).eq('external_user_id', params.externalUserId)
     if (identityUpdateError) console.error('[yeastar-live-chat] could not refresh contact identity:', identityUpdateError.message)
-    return identity.contact_id as string
+    return { contactId: identity.contact_id as string, created: false }
   }
 
   // Phone is the strongest identity and wins if phone/email point at different
@@ -208,6 +209,7 @@ async function resolveLiveChatContact(
 
   const existing = phoneMatch ?? emailMatch
   let contactId: string
+  let contactCreated = false
   if (existing) {
     contactId = existing.id
     await enrichContact(existing)
@@ -221,6 +223,7 @@ async function resolveLiveChatContact(
     }).select('id').single()
     if (contactError || !contact) throw contactError ?? new Error('Could not create Live Chat contact')
     contactId = contact.id
+    contactCreated = true
   }
 
   const { error: identityInsertError } = await db.from('omnichannel_contact_identities').insert({
@@ -235,7 +238,7 @@ async function resolveLiveChatContact(
     // recreated with the next event without creating a second conversation.
     console.error('[yeastar-live-chat] could not save contact identity:', identityInsertError.message)
   }
-  return contactId
+  return { contactId, created: contactCreated }
 }
 
 function safeFileName(value: string | undefined) {
@@ -388,7 +391,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
     } catch (error) {
       console.error('[yeastar-live-chat] could not load pre-chat form:', error instanceof Error ? error.message : 'unknown error')
     }
-    const contactId = await resolveLiveChatContact(db, {
+    const { contactId, created: contactCreated } = await resolveLiveChatContact(db, {
       accountId: connector.account_id,
       auditUserId,
       connectorId: connector.id,
@@ -448,6 +451,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
       }
     }
     const createdAt = messageTimestamp(message.send_time)
+    // Counted before the insert so `first_inbound_message` automations see
+    // an accurate value.
+    const { count: priorCustomerMessages } = await db
+      .from('messages')
+      .select('id', { count: 'exact', head: true })
+      .eq('conversation_id', conversation.id)
+      .eq('sender_type', 'customer')
+    const isFirstInboundMessage = (priorCustomerMessages ?? 0) === 0
     const { error: messageError } = await db.from('messages').insert({
       conversation_id: conversation.id,
       sender_type: 'customer',
@@ -477,6 +488,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
       p_conversation_id: conversation.id,
     })
     if (assignmentError) console.error('[yeastar-live-chat] automatic assignment failed:', assignmentError.message)
+
+    await dispatchInboundAutomations({
+      accountId: connector.account_id,
+      contactId,
+      conversationId: conversation.id,
+      channelType: 'yeastar_live_chat',
+      messageText: contentText,
+      contactCreated,
+      isFirstInboundMessage,
+    })
 
     // n8n (and any other account webhook) receives the same normalized
     // vocabulary regardless of whether the customer wrote through WhatsApp

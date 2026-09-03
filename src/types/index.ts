@@ -192,7 +192,7 @@ export interface Conversation {
   ai_last_sentiment_score?: number | null;
   ai_last_analyzed_at?: string | null;
   /** Omnichannel origin captured at conversation creation. */
-  channel_type?: 'whatsapp' | 'yeastar_live_chat' | 'facebook' | 'instagram' | 'tiktok' | 'zernio_whatsapp' | 'zernio_facebook' | 'zernio_instagram';
+  channel_type?: ChannelType;
   connector_id?: string | null;
   external_session_id?: string | null;
   channel_source_label?: string | null;
@@ -477,6 +477,17 @@ export interface BroadcastRecipient {
 // Automations (migration 006)
 // ============================================================
 
+/** Every inbox channel a conversation can originate from. */
+export type ChannelType =
+  | 'whatsapp'
+  | 'zernio_whatsapp'
+  | 'zernio_facebook'
+  | 'zernio_instagram'
+  | 'facebook'
+  | 'instagram'
+  | 'tiktok'
+  | 'yeastar_live_chat';
+
 export type AutomationTriggerType =
   | 'new_message_received'
   | 'first_inbound_message'
@@ -621,6 +632,10 @@ export type AutomationStepConfig =
 
 export interface Automation {
   id: string;
+  /** Inbox channels this automation reacts to. `null` / omitted means
+   *  every channel (migration 106 default), which is how every
+   *  automation authored before omnichannel support behaves. */
+  channel_types?: ChannelType[] | null;
   /** Account tenancy key — every automation belongs to one account
    *  (migration 017 made the column NOT NULL). The engine looks up
    *  active automations by this field on inbound webhook events. */

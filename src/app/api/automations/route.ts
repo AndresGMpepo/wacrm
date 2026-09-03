@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { requireRole, toErrorResponse } from '@/lib/auth/account'
 import { supabaseAdmin } from '@/lib/automations/admin-client'
+import { normalizeChannelTypes } from '@/lib/automations/channels'
 import { getTemplate } from '@/lib/automations/templates'
 import { insertSteps, type BuilderStepInput } from '@/lib/automations/steps-tree'
 import {
@@ -114,6 +115,8 @@ export async function POST(request: Request) {
       description: effectiveDescription ?? null,
       trigger_type: effectiveTriggerType,
       trigger_config: effectiveTriggerConfig ?? {},
+      // null = every channel, which is what pre-omnichannel automations do.
+      channel_types: normalizeChannelTypes(body.channel_types),
       is_active: !!is_active,
     })
     .select()

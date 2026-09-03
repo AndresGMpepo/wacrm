@@ -11,7 +11,7 @@ import {
   type BuilderInitial,
   type ServerStepNode,
 } from "@/components/automations/automation-builder"
-import type { AutomationTriggerType } from "@/types"
+import type { AutomationTriggerType, ChannelType } from "@/types"
 
 export default function EditAutomationPage({
   params,
@@ -40,6 +40,7 @@ export default function EditAutomationPage({
         description: body.automation.description ?? "",
         trigger_type: body.automation.trigger_type as AutomationTriggerType,
         trigger_config: body.automation.trigger_config ?? {},
+        channel_types: (body.automation.channel_types ?? []) as ChannelType[],
         is_active: !!body.automation.is_active,
         steps: fromServerSteps((body.steps ?? []) as ServerStepNode[]),
       })

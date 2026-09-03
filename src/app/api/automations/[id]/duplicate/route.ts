@@ -45,6 +45,7 @@ export async function POST(
       description: original.description,
       trigger_type: original.trigger_type,
       trigger_config: original.trigger_config,
+      channel_types: original.channel_types ?? null,
       is_active: false,
     })
     .select()

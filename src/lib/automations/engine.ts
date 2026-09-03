@@ -18,10 +18,18 @@ import type {
   CreateDealStepConfig,
   AssignConversationStepConfig,
 } from '@/types'
+import type { ChannelType } from '@/types'
 import { supabaseAdmin } from './admin-client'
 import { addContactTagIfAbsent } from '@/lib/contacts/tag-write'
 import { MAX_TAG_CHAIN_DEPTH, getTagChainDepth } from '@/lib/contacts/tag-chain'
-import { engineSendText, engineSendTemplate, engineSendInteractive } from './meta-send'
+import { automationMatchesChannel } from './channels'
+import {
+  resolveContactChannel,
+  resolveConversationChannel,
+  sendAutomationInteractive,
+  sendAutomationTemplate,
+  sendAutomationText,
+} from './channel-send'
 import { validateInteractivePayload } from '@/lib/whatsapp/interactive'
 import { isDeliverableUrl } from '@/lib/webhooks/ssrf'
 
@@ -42,6 +50,11 @@ export interface AutomationContext {
   agent_id?: string
   /** Button / list-row id the customer tapped, for interactive_reply. */
   interactive_reply_id?: string
+  /** Inbox channel the event arrived on. Drives the per-automation
+   *  channel scope and picks the sender for every send-type step.
+   *  Persisted with the context so a resumed `wait` still knows where
+   *  to reply. */
+  channel_type?: ChannelType
 }
 
 export interface DispatchInput {
@@ -53,6 +66,11 @@ export interface DispatchInput {
   accountId: string
   triggerType: AutomationTriggerType
   contactId?: string | null
+  /** Channel the triggering event arrived on. Optional — when omitted it
+   *  is resolved from the conversation/contact so channel-scoped
+   *  automations still behave correctly for non-message triggers such
+   *  as `tag_added`. */
+  channelType?: ChannelType
   context?: AutomationContext
 }
 
@@ -105,10 +123,22 @@ export async function runAutomationsForTrigger(input: DispatchInput): Promise<vo
     }
     if (!automations || automations.length === 0) return
 
-    for (const automation of automations as Automation[]) {
-      if (!triggerMatches(automation, input.context)) continue
+    // Resolve the channel once. The lookup only runs when at least one
+    // automation is actually scoped to a channel — accounts that never
+    // touch the scope pay nothing for it.
+    const rows = automations as Automation[]
+    const needsChannel = rows.some((a) => Array.isArray(a.channel_types) && a.channel_types.length > 0)
+    const channelType =
+      input.channelType ??
+      input.context?.channel_type ??
+      (needsChannel ? await resolveChannel(input) : undefined)
+    const context: AutomationContext = { ...(input.context ?? {}), channel_type: channelType }
+
+    for (const automation of rows) {
+      if (!automationMatchesChannel(automation.channel_types, channelType)) continue
+      if (!triggerMatches(automation, context)) continue
       try {
-        await executeAutomation(automation, input)
+        await executeAutomation(automation, { ...input, context })
       } catch (err) {
         console.error('[automations] execute failed:', automation.id, err)
       }
@@ -365,14 +395,14 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
       const text = interpolate(cfg.text, args)
       if (!text.trim()) throw new Error('send_message has empty text')
       const conversationId = await resolveConversationId(args)
-      const { whatsapp_message_id } = await engineSendText({
+      return sendAutomationText({
         accountId: args.automation.account_id,
         userId: args.automation.user_id,
         conversationId,
         contactId: args.contactId,
+        channelType: await stepChannel(args, conversationId),
         text,
       })
-      return `sent via Meta (${whatsapp_message_id})`
     }
 
     case 'send_buttons':
@@ -385,14 +415,14 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
       const check = validateInteractivePayload(payload)
       if (!check.ok) throw new Error(check.error)
       const conversationId = await resolveConversationId(args)
-      const { whatsapp_message_id } = await engineSendInteractive({
+      return sendAutomationInteractive({
         accountId: args.automation.account_id,
         userId: args.automation.user_id,
         conversationId,
         contactId: args.contactId,
+        channelType: await stepChannel(args, conversationId),
         payload,
       })
-      return `interactive sent via Meta (${whatsapp_message_id})`
     }
 
     case 'send_template': {
@@ -418,16 +448,16 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
             })
             .map((k) => String(cfg.variables![k]))
         : []
-      const { whatsapp_message_id } = await engineSendTemplate({
+      return sendAutomationTemplate({
         accountId: args.automation.account_id,
         userId: args.automation.user_id,
         conversationId,
         contactId: args.contactId,
+        channelType: await stepChannel(args, conversationId),
         templateName: cfg.template_name,
         language: cfg.language,
         params,
       })
-      return `template sent via Meta (${whatsapp_message_id})`
     }
 
     case 'add_tag': {
@@ -627,6 +657,38 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
 // ------------------------------------------------------------
 // Helpers
 // ------------------------------------------------------------
+
+/**
+ * Best-effort channel resolution for a dispatch that didn't carry one
+ * (e.g. `tag_added` fired from the contacts UI). Prefers the conversation
+ * named in the context, then the contact's most recent conversation.
+ */
+async function resolveChannel(input: DispatchInput): Promise<ChannelType | undefined> {
+  if (input.context?.conversation_id) {
+    const fromConversation = await resolveConversationChannel(
+      input.accountId,
+      input.context.conversation_id,
+    )
+    if (fromConversation) return fromConversation
+  }
+  if (input.contactId) {
+    const fromContact = await resolveContactChannel(input.accountId, input.contactId)
+    if (fromContact) return fromContact
+  }
+  return undefined
+}
+
+/**
+ * Channel a send-type step must use. The dispatch context normally already
+ * carries it; resumed `wait` runs on legacy pending rows fall back to a
+ * lookup, and a conversation with no readable channel is treated as the
+ * native WhatsApp connection (the column's own default).
+ */
+async function stepChannel(args: ExecuteArgs, conversationId: string): Promise<ChannelType> {
+  if (args.context.channel_type) return args.context.channel_type
+  const resolved = await resolveConversationChannel(args.automation.account_id, conversationId)
+  return resolved ?? 'whatsapp'
+}
 
 /**
  * Pick the conversation a send-type step should use. Prefer the id the
