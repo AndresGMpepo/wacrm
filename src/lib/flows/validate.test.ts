@@ -77,7 +77,7 @@ describe("validateFlowForActivation — flow-level", () => {
       [],
     );
     expect(
-      issues.some((i) => i.message.includes("at least one node")),
+      issues.some((i) => i.scope === "flow" && !i.field),
     ).toBe(true);
   });
 
@@ -94,7 +94,7 @@ describe("validateFlowForActivation — flow-level", () => {
     expect(
       issues.some(
         (i) =>
-          i.message.includes("Duplicate node_key") &&
+          i.message.includes("está duplicada") &&
           i.node_key === "a",
       ),
     ).toBe(true);
@@ -114,7 +114,7 @@ describe("validateFlowForActivation — trigger", () => {
       issues.some(
         (i) =>
           i.scope === "trigger" &&
-          i.message.includes("at least one keyword"),
+          i.field === "trigger_config.keywords",
       ),
     ).toBe(true);
   });
@@ -140,7 +140,7 @@ describe("validateFlowForActivation — trigger", () => {
         (i) =>
           i.scope === "trigger" &&
           i.severity === "warning" &&
-          i.message.includes("blank"),
+          i.message.includes("vacías"),
       ),
     ).toBe(true);
   });
@@ -229,7 +229,7 @@ describe("validateFlowForActivation — nodes", () => {
         (i) =>
           i.node_key === "b" &&
           i.field === "buttons" &&
-          i.message.includes("at least one"),
+          i.message.includes("al menos un botón"),
       ),
     ).toBe(true);
   });
@@ -261,7 +261,7 @@ describe("validateFlowForActivation — nodes", () => {
         (i) =>
           i.node_key === "b" &&
           i.field === "buttons" &&
-          i.message.includes("at most 3"),
+          i.message.includes("máximo 3"),
       ),
     ).toBe(true);
   });
@@ -291,7 +291,7 @@ describe("validateFlowForActivation — nodes", () => {
         (i) =>
           i.node_key === "b" &&
           i.field === "buttons.0.title" &&
-          i.message.includes("over 20"),
+          i.message.includes("supera 20"),
       ),
     ).toBe(true);
   });
@@ -344,7 +344,7 @@ describe("validateFlowForActivation — nodes", () => {
       nodes,
     );
     expect(
-      issues.some((i) => i.message.includes("Duplicate button reply id")),
+      issues.some((i) => i.message.includes("está duplicado")),
     ).toBe(true);
   });
 
@@ -376,7 +376,7 @@ describe("validateFlowForActivation — nodes", () => {
         (i) =>
           i.node_key === "l" &&
           i.field === "sections" &&
-          i.message.includes("at most 10"),
+          i.message.includes("máximo 10"),
       ),
     ).toBe(true);
   });
@@ -411,7 +411,7 @@ describe("validateFlowForActivation — nodes", () => {
       nodes,
     );
     expect(
-      issues.some((i) => i.message.includes("exceeds 24 chars")),
+      issues.some((i) => i.message.includes("supera 24")),
     ).toBe(true);
   });
 
@@ -431,7 +431,7 @@ describe("validateFlowForActivation — nodes", () => {
         (i) =>
           i.node_key === "orphan" &&
           i.severity === "warning" &&
-          i.message.includes("unreachable"),
+          i.message.includes("no es alcanzable"),
       ),
     ).toBe(true);
   });
@@ -445,7 +445,7 @@ describe("validateFlowForActivation — nodes", () => {
       nodes,
     );
     expect(
-      issues.some((i) => i.message.includes("Unknown node type")),
+      issues.some((i) => i.message.includes("no es reconocido")),
     ).toBe(true);
   });
 });

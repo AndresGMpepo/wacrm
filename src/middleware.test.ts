@@ -32,6 +32,7 @@ vi.mock("@supabase/ssr", () => ({
         return { data: { user: mockUser } };
       },
     },
+    rpc: async () => ({ data: [], error: null }),
   }),
 }));
 

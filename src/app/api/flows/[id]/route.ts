@@ -26,6 +26,7 @@ async function requireOwnership(
   | {
       ok: true
       userId: string
+      accountId: string
       supabase: Awaited<ReturnType<typeof createClient>>
     }
   | { ok: false; status: number; body: { error: string } }
@@ -41,13 +42,13 @@ async function requireOwnership(
   // returns null (404 below).
   const { data: flow } = await supabase
     .from('flows')
-    .select('id')
+    .select('id, account_id')
     .eq('id', flowId)
     .maybeSingle()
   if (!flow) {
     return { ok: false, status: 404, body: { error: 'Not found' } }
   }
-  return { ok: true, userId: user.id, supabase }
+  return { ok: true, userId: user.id, accountId: flow.account_id as string, supabase }
 }
 
 export async function GET(
@@ -126,9 +127,8 @@ export async function PUT(
 
   const admin = supabaseAdmin()
 
-  // Update the flow row first — the body may not include `nodes` (a
-  // header-only save for editing the trigger config without touching
-  // the graph). Skip node replacement in that case.
+  // Header-only saves leave the graph intact. When nodes are present, the
+  // database function below commits the header and complete graph together.
   const flowPatch: Record<string, unknown> = {
     updated_at: new Date().toISOString(),
   }
@@ -147,39 +147,23 @@ export async function PUT(
   if (body.fallback_policy !== undefined)
     flowPatch.fallback_policy = body.fallback_policy
 
-  const { error: updErr } = await admin
-    .from('flows')
-    .update(flowPatch)
-    .eq('id', id)
-  if (updErr) {
-    return NextResponse.json({ error: updErr.message }, { status: 500 })
-  }
-
   if (body.nodes !== undefined) {
-    // Delete-then-insert. Not transactional but the runner handles
-    // mid-edit reads safely (a node_not_found ends the run cleanly).
-    const { error: delErr } = await admin
-      .from('flow_nodes')
-      .delete()
-      .eq('flow_id', id)
-    if (delErr) {
-      return NextResponse.json({ error: delErr.message }, { status: 500 })
+    const { error } = await admin.rpc('replace_flow_graph', {
+      p_account_id: guard.accountId,
+      p_flow_id: id,
+      p_patch: flowPatch,
+      p_nodes: body.nodes,
+    })
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 })
     }
-    if (body.nodes.length > 0) {
-      const { error: insErr } = await admin.from('flow_nodes').insert(
-        body.nodes.map((n) => ({
-          flow_id: id,
-          node_key: n.node_key,
-          node_type: n.node_type,
-          config: n.config,
-          position_x: n.position_x ?? 0,
-          position_y: n.position_y ?? 0,
-        })),
-      )
-      if (insErr) {
-        return NextResponse.json({ error: insErr.message }, { status: 500 })
-      }
-    }
+  } else {
+    const { error } = await admin
+      .from('flows')
+      .update(flowPatch)
+      .eq('id', id)
+      .eq('account_id', guard.accountId)
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
   // Re-fetch and return the new state — the editor uses the response
@@ -217,7 +201,11 @@ export async function DELETE(
   // mechanism in v1, but that's intentional: deleting a flow is a
   // deliberate destructive action and the partial unique index will
   // free up the contact for new triggers immediately.
-  const { error } = await supabaseAdmin().from('flows').delete().eq('id', id)
+  const { error } = await supabaseAdmin()
+    .from('flows')
+    .delete()
+    .eq('id', id)
+    .eq('account_id', guard.accountId)
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
