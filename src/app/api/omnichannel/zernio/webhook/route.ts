@@ -4,6 +4,7 @@ import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { resolveAuditUserId } from '@/lib/api/v1/contacts'
 import { dispatchInboundToAiReply } from '@/lib/ai/auto-reply'
 import { dispatchInboundAutomations } from '@/lib/automations/inbound'
+import { dispatchInboundToFlows } from '@/lib/flows/engine'
 import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe'
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
 import { extractZernioMedia, extractZernioReaction, normalizeMetaText, safeZernioContactName } from '@/lib/omnichannel/webhook-normalizer'
@@ -514,6 +515,16 @@ export async function POST(request: Request) {
         await flagBroadcastReplyIfAny(db, typed.account_id, contactId, conversationRow.id)
       }
       await db.rpc('auto_assign_inbound_conversation', { p_account_id: typed.account_id, p_conversation_id: conversationRow.id })
+      // Flows run before automations and the AI: a customer navigating a bot
+      // menu is not sending a fresh trigger word.
+      const { consumed: flowConsumed } = await dispatchInboundToFlows({
+        accountId: typed.account_id,
+        userId: auditUserId,
+        contactId,
+        conversationId: conversationRow.id,
+        message: { kind: 'text', text: content, meta_message_id: messageId },
+        isFirstInboundMessage,
+      })
       const { contentAutomationRan } = await dispatchInboundAutomations({
         accountId: typed.account_id,
         contactId,
@@ -522,8 +533,9 @@ export async function POST(request: Request) {
         messageText: content,
         contactCreated,
         isFirstInboundMessage,
+        flowConsumed,
       })
-      if (content.trim()) {
+      if (!flowConsumed && content.trim()) {
         await dispatchInboundToAiReply({
           accountId: typed.account_id,
           conversationId: conversationRow.id,

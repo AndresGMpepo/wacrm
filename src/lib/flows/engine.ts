@@ -34,11 +34,12 @@
 
 import { supabaseAdmin } from "./admin-client";
 import {
-  engineSendInteractiveButtons,
-  engineSendInteractiveList,
-  engineSendMedia,
-  engineSendText,
-} from "./meta-send";
+  flowSendButtons,
+  flowSendList,
+  flowSendMedia,
+  flowSendText,
+  matchNumberedOption,
+} from "./channel-send";
 import { decideFallback, resolveFallbackPolicy } from "./fallback";
 import { addContactTagAndDispatch } from "@/lib/contacts/tag-events";
 import { removeContactTag } from "@/lib/contacts/tag-write";
@@ -87,6 +88,28 @@ export function matchReplyId(
     return null;
   }
   return null;
+}
+
+/**
+ * The options of a menu node, in the order they were rendered — which is
+ * the order a numbered plain-text fallback used on channels without
+ * tappable buttons.
+ */
+export function menuOptions(node: {
+  node_type: string;
+  config: Record<string, unknown>;
+}): { id: string; title: string }[] {
+  if (node.node_type === "send_buttons") {
+    const cfg = node.config as unknown as SendButtonsNodeConfig;
+    return (cfg.buttons ?? []).map((b) => ({ id: b.reply_id, title: b.title }));
+  }
+  if (node.node_type === "send_list") {
+    const cfg = node.config as unknown as SendListNodeConfig;
+    return (cfg.sections ?? []).flatMap((section) =>
+      (section.rows ?? []).map((r) => ({ id: r.reply_id, title: r.title })),
+    );
+  }
+  return [];
 }
 
 /**
@@ -360,7 +383,7 @@ async function sendButtonsAndSuspend(
   node: FlowNodeRow,
 ): Promise<{ outcome: "advanced"; node_key: string }> {
   const cfg = node.config as unknown as SendButtonsNodeConfig;
-  const { whatsapp_message_id } = await engineSendInteractiveButtons({
+  const { message_id: whatsapp_message_id } = await flowSendButtons({
     accountId: run.account_id,
     userId: run.user_id,
     conversationId: run.conversation_id!,
@@ -396,7 +419,7 @@ async function sendListAndSuspend(
   node: FlowNodeRow,
 ): Promise<{ outcome: "advanced"; node_key: string }> {
   const cfg = node.config as unknown as SendListNodeConfig;
-  const { whatsapp_message_id } = await engineSendInteractiveList({
+  const { message_id: whatsapp_message_id } = await flowSendList({
     accountId: run.account_id,
     userId: run.user_id,
     conversationId: run.conversation_id!,
@@ -582,9 +605,9 @@ async function advanceFromNodeKey(
     if (node.node_type === "send_message") {
       const cfg = node.config as unknown as SendMessageNodeConfig;
       try {
-        const { whatsapp_message_id } = await engineSendText({
+        const { message_id: whatsapp_message_id } = await flowSendText({
           accountId: run.account_id,
-    userId: run.user_id,
+          userId: run.user_id,
           conversationId: run.conversation_id!,
           contactId: run.contact_id!,
           text: interpolateVars(cfg.text, run.vars),
@@ -607,13 +630,13 @@ async function advanceFromNodeKey(
     if (node.node_type === "send_media") {
       const cfg = node.config as unknown as SendMediaNodeConfig;
       try {
-        const { whatsapp_message_id } = await engineSendMedia({
+        const { message_id: whatsapp_message_id } = await flowSendMedia({
           accountId: run.account_id,
-    userId: run.user_id,
+          userId: run.user_id,
           conversationId: run.conversation_id!,
           contactId: run.contact_id!,
-          kind: cfg.media_type,
-          link: cfg.media_url,
+          mediaType: cfg.media_type,
+          mediaUrl: cfg.media_url,
           caption: cfg.caption
             ? interpolateVars(cfg.caption, run.vars)
             : undefined,
@@ -640,9 +663,9 @@ async function advanceFromNodeKey(
       // wake us up via handleReplyForActiveRun's collect_input branch.
       const cfg = node.config as unknown as CollectInputNodeConfig;
       try {
-        const { whatsapp_message_id } = await engineSendText({
+        const { message_id: whatsapp_message_id } = await flowSendText({
           accountId: run.account_id,
-    userId: run.user_id,
+          userId: run.user_id,
           conversationId: run.conversation_id!,
           contactId: run.contact_id!,
           text: interpolateVars(cfg.prompt_text, run.vars),
@@ -938,6 +961,15 @@ async function handleReplyForActiveRun(
     matched = matchReplyId(currentNode, message.reply_id);
   } else if (
     message.kind === "text" &&
+    (currentNode.node_type === "send_buttons" ||
+      currentNode.node_type === "send_list")
+  ) {
+    // Channels without tappable options got the menu as numbered text, so
+    // the customer answers "2" (or types the option) instead of tapping.
+    const replyId = matchNumberedOption(message.text, menuOptions(currentNode));
+    matched = replyId ? matchReplyId(currentNode, replyId) : null;
+  } else if (
+    message.kind === "text" &&
     currentNode.node_type === "collect_input"
   ) {
     const cfg = currentNode.config as unknown as CollectInputNodeConfig;
@@ -1020,9 +1052,9 @@ async function handleReplyForActiveRun(
       // or var_key missing — rare). Re-send the prompt so they try again.
       const cfg = currentNode.config as unknown as CollectInputNodeConfig;
       try {
-        await engineSendText({
+        await flowSendText({
           accountId: run.account_id,
-    userId: run.user_id,
+          userId: run.user_id,
           conversationId: run.conversation_id!,
           contactId: run.contact_id!,
           text: interpolateVars(cfg.prompt_text, run.vars),

@@ -9,6 +9,7 @@ import { resolveAuditUserId } from '@/lib/api/v1/contacts'
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
 import { dispatchInboundAutomations } from '@/lib/automations/inbound'
 import { dispatchInboundToAiReply } from '@/lib/ai/auto-reply'
+import { dispatchInboundToFlows } from '@/lib/flows/engine'
 
 // Receiving an image requires a PBX download and a Storage upload before the
 // webhook can be acknowledged. Keep this bounded but above the text-only path.
@@ -490,6 +491,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
     })
     if (assignmentError) console.error('[yeastar-live-chat] automatic assignment failed:', assignmentError.message)
 
+    const { consumed: flowConsumed } = await dispatchInboundToFlows({
+      accountId: connector.account_id,
+      userId: auditUserId,
+      contactId,
+      conversationId: conversation.id,
+      message: { kind: 'text', text: contentText, meta_message_id: `yeastar:${connector.id}:${externalMessageId}` },
+      isFirstInboundMessage,
+    })
     const { contentAutomationRan } = await dispatchInboundAutomations({
       accountId: connector.account_id,
       contactId,
@@ -498,8 +507,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ con
       messageText: contentText,
       contactCreated,
       isFirstInboundMessage,
+      flowConsumed,
     })
-    if (contentText.trim()) {
+    if (!flowConsumed && contentText.trim()) {
       await dispatchInboundToAiReply({
         accountId: connector.account_id,
         conversationId: conversation.id,

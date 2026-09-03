@@ -549,7 +549,9 @@ export function ContactDetailView({
 
             {/* Tabs */}
             <Tabs defaultValue="details" className="flex-1 flex flex-col min-h-0">
-              <TabsList className="bg-muted/50 border-b border-border mx-4 mt-3">
+              {/* Wraps instead of overflowing: with seven tabs the sheet is
+                  too narrow to show the last one on a single line. */}
+              <TabsList className="bg-muted/50 border-b border-border mx-4 mt-3 flex h-auto w-auto flex-wrap gap-1 group-data-horizontal/tabs:h-auto">
                 <TabsTrigger
                   value="details"
                   className="data-active:bg-muted data-active:text-primary text-muted-foreground"

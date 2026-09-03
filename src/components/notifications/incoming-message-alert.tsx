@@ -71,6 +71,20 @@ export function IncomingMessageAlert() {
           return;
         }
 
+        if (kind === 'conversation_assigned') {
+          // Descending pair: "this is now yours", distinct from an inbound
+          // message so an agent knows without looking.
+          playTone(1047, context.currentTime, 0.24, 0.3);
+          playTone(784, context.currentTime + 0.26, 0.34, 0.3);
+          return;
+        }
+
+        if (kind === 'conversation_transferred') {
+          // Short single note: a confirmation, not a demand for attention.
+          playTone(880, context.currentTime, 0.18, 0.2);
+          return;
+        }
+
         // Two clear ascending notes are easier to notice than a short beep,
         // without requiring an audio file or producing a harsh alert.
         playTone(784, context.currentTime);
@@ -96,7 +110,9 @@ export function IncomingMessageAlert() {
         notification.type !== 'incoming_message' &&
         notification.type !== 'negative_sentiment' &&
         notification.type !== 'call_follow_up' &&
-        notification.type !== 'nexo_memory_alert'
+        notification.type !== 'nexo_memory_alert' &&
+        notification.type !== 'conversation_assigned' &&
+        notification.type !== 'conversation_transferred'
       ) {
         return;
       }
@@ -117,7 +133,11 @@ export function IncomingMessageAlert() {
         ? toast.error
         : notification.type === 'call_follow_up' || notification.type === 'nexo_memory_alert'
           ? toast.warning
-          : toast;
+          : notification.type === 'conversation_assigned'
+            ? toast.info
+            : notification.type === 'conversation_transferred'
+              ? toast.success
+              : toast;
       notify(notification.title, {
         description: notification.body,
         action: notification.conversation_id

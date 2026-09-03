@@ -12,6 +12,7 @@ import {
   Loader2,
   MessageSquare,
   PhoneCall,
+  Send,
   Siren,
   UserPlus,
 } from 'lucide-react';
@@ -25,6 +26,7 @@ import { emitNotificationsChanged } from '@/lib/notifications/events';
 // (conversation_assigned) but this keeps future types a one-line add.
 const TYPE_ICON: Record<Notification['type'], typeof Bell> = {
   conversation_assigned: UserPlus,
+  conversation_transferred: Send,
   incoming_message: MessageSquare,
   negative_sentiment: Siren,
   call_follow_up: PhoneCall,

@@ -9,6 +9,7 @@ import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
 import { extractMetaAttachment, extractMetaReaction, normalizeMetaText, safeMetaContactName } from '@/lib/omnichannel/webhook-normalizer'
 import { dispatchInboundAutomations } from '@/lib/automations/inbound'
 import { dispatchInboundToAiReply } from '@/lib/ai/auto-reply'
+import { dispatchInboundToFlows } from '@/lib/flows/engine'
 import type { ChannelType } from '@/types'
 
 export const dynamic = 'force-dynamic'
@@ -326,6 +327,14 @@ async function ingestMessage(db: ReturnType<typeof admin>, connector: Connector,
   if (updateError) throw updateError
   const { error: assignmentError } = await db.rpc('auto_assign_inbound_conversation', { p_account_id: connector.account_id, p_conversation_id: conversation.id })
   if (assignmentError) console.error('[meta] automatic assignment failed:', assignmentError.message)
+  const { consumed: flowConsumed } = await dispatchInboundToFlows({
+    accountId: connector.account_id,
+    userId: auditUserId,
+    contactId,
+    conversationId: conversation.id,
+    message: { kind: 'text', text: contentText, meta_message_id: messageId },
+    isFirstInboundMessage,
+  })
   const { contentAutomationRan } = await dispatchInboundAutomations({
     accountId: connector.account_id,
     contactId,
@@ -334,8 +343,9 @@ async function ingestMessage(db: ReturnType<typeof admin>, connector: Connector,
     messageText: contentText,
     contactCreated,
     isFirstInboundMessage,
+    flowConsumed,
   })
-  if (contentText.trim()) {
+  if (!flowConsumed && contentText.trim()) {
     await dispatchInboundToAiReply({
       accountId: connector.account_id,
       conversationId: conversation.id,

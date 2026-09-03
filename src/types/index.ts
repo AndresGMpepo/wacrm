@@ -209,6 +209,8 @@ export interface Conversation {
 
 export type NotificationType =
   | 'conversation_assigned'
+  /** Confirmation for the agent who transferred the conversation away. */
+  | 'conversation_transferred'
   | 'incoming_message'
   | 'negative_sentiment'
   | 'call_follow_up'

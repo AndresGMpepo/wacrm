@@ -1,10 +1,14 @@
 import type { ChannelType, InteractiveMessagePayload } from '@/types'
 
 import { supabaseAdmin } from './admin-client'
-import { channelSupportsInteractive, channelSupportsTemplates, isChannelType } from './channels'
+import { channelSupportsInteractive, channelSupportsTemplates } from './channels'
 import { engineSendInteractive, engineSendTemplate, engineSendText } from './meta-send'
 import { interactivePayloadToPlainText } from '@/lib/whatsapp/interactive'
 import { sendOmnichannelText } from '@/lib/omnichannel/outbound-text'
+import {
+  resolveContactChannel as resolveContactChannelFor,
+  resolveConversationChannel as resolveConversationChannelFor,
+} from '@/lib/omnichannel/resolve-channel'
 import { sendZernioTemplateMessage } from '@/lib/zernio/server'
 
 interface SendArgs {
@@ -21,14 +25,7 @@ export async function resolveConversationChannel(
   accountId: string,
   conversationId: string,
 ): Promise<ChannelType | null> {
-  const { data, error } = await supabaseAdmin()
-    .from('conversations')
-    .select('channel_type')
-    .eq('id', conversationId)
-    .eq('account_id', accountId)
-    .maybeSingle()
-  if (error || !data) return null
-  return isChannelType(data.channel_type) ? data.channel_type : 'whatsapp'
+  return resolveConversationChannelFor(supabaseAdmin(), accountId, conversationId)
 }
 
 /** Same, from the contact's most recent conversation. */
@@ -36,16 +33,7 @@ export async function resolveContactChannel(
   accountId: string,
   contactId: string,
 ): Promise<ChannelType | null> {
-  const { data, error } = await supabaseAdmin()
-    .from('conversations')
-    .select('channel_type')
-    .eq('account_id', accountId)
-    .eq('contact_id', contactId)
-    .order('last_message_at', { ascending: false, nullsFirst: false })
-    .limit(1)
-    .maybeSingle()
-  if (error || !data) return null
-  return isChannelType(data.channel_type) ? data.channel_type : 'whatsapp'
+  return resolveContactChannelFor(supabaseAdmin(), accountId, contactId)
 }
 
 /**
