@@ -88,7 +88,11 @@ export function InteractiveBuilder({
   };
 
   return (
-    <div className="flex flex-col gap-4 md:flex-row">
+    // Container queries, not viewport ones: this builder is embedded in a
+    // wide dialog (inbox composer, quick replies) AND in a ~320px automation
+    // step card, where a viewport-based `md:flex-row` collapsed the form to a
+    // few pixels and stacked the preview on top of it.
+    <div className="@container flex flex-col gap-4 @xl:flex-row">
       <div className="flex min-w-0 flex-1 flex-col gap-3">
         {/* Kind toggle */}
         <div className="flex gap-2">
@@ -114,7 +118,7 @@ export function InteractiveBuilder({
           />
         </Field>
 
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-1 gap-2 @xs:grid-cols-2">
           <Field
             label="Header (optional)"
             counter={`${(value.header ?? "").length}/${INTERACTIVE_LIMITS.headerTextMaxLength}`}
@@ -161,7 +165,7 @@ export function InteractiveBuilder({
       </div>
 
       {showPreview && (
-        <div className="flex shrink-0 flex-col gap-1.5 md:w-[280px]">
+        <div className="flex shrink-0 flex-col gap-1.5 @xl:w-[280px]">
           <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
             Preview
           </span>
@@ -213,14 +217,14 @@ function ButtonsEditor({
         {buttons.map((b, i) => (
           <div
             key={i}
-            className="flex items-center gap-2 rounded-md border border-border bg-muted/40 p-2"
+            className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-muted/40 p-2"
           >
             {advanced && (
               <Input
                 value={b.id}
                 onChange={(e) => update(i, { id: slugify(e.target.value, `btn_${i + 1}`) })}
                 placeholder="id"
-                className="w-28 bg-muted font-mono text-xs"
+                className="w-full bg-muted font-mono text-xs @xs:w-28"
               />
             )}
             <Input
@@ -228,7 +232,7 @@ function ButtonsEditor({
               maxLength={INTERACTIVE_LIMITS.buttonTitleMaxLength}
               onChange={(e) => update(i, { title: e.target.value })}
               placeholder="Button label"
-              className="flex-1 bg-muted"
+              className="w-full min-w-0 flex-1 bg-muted @xs:w-auto"
             />
             <span className="w-10 shrink-0 text-right text-[10px] text-muted-foreground">
               {b.title.length}/{INTERACTIVE_LIMITS.buttonTitleMaxLength}
@@ -356,7 +360,7 @@ function ListEditor({
           <div className="flex flex-col gap-2">
             {section.rows.map((row, rIdx) => (
               <div key={rIdx} className="rounded border border-border bg-card p-2">
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   {advanced && (
                     <Input
                       value={row.id}
@@ -364,7 +368,7 @@ function ListEditor({
                         updateRow(sIdx, rIdx, { id: slugify(e.target.value, `row_${rIdx + 1}`) })
                       }
                       placeholder="id"
-                      className="w-24 bg-muted font-mono text-xs"
+                      className="w-full bg-muted font-mono text-xs @xs:w-24"
                     />
                   )}
                   <Input
@@ -372,7 +376,7 @@ function ListEditor({
                     maxLength={INTERACTIVE_LIMITS.listRowTitleMaxLength}
                     onChange={(e) => updateRow(sIdx, rIdx, { title: e.target.value })}
                     placeholder="Row title"
-                    className="flex-1 bg-muted"
+                    className="w-full min-w-0 flex-1 bg-muted @xs:w-auto"
                   />
                   <span className="w-10 shrink-0 text-right text-[10px] text-muted-foreground">
                     {row.title.length}/{INTERACTIVE_LIMITS.listRowTitleMaxLength}
@@ -458,9 +462,9 @@ function Field({
 }) {
   return (
     <div>
-      <div className="mb-1 flex items-center justify-between">
-        <label className="text-xs text-muted-foreground">{label}</label>
-        {counter && <span className="text-[10px] text-muted-foreground">{counter}</span>}
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <label className="min-w-0 truncate text-xs text-muted-foreground">{label}</label>
+        {counter && <span className="shrink-0 text-[10px] text-muted-foreground">{counter}</span>}
       </div>
       {children}
     </div>
