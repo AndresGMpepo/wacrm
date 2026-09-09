@@ -16,6 +16,14 @@ function apiKey() {
   return key
 }
 
+/** Carries the parsed error body so callers can inspect status-specific fields (e.g. 409's `details.existingProfileId`). */
+export class ZernioApiError extends Error {
+  constructor(message: string, readonly status: number, readonly body: Record<string, unknown> | null) {
+    super(message)
+    this.name = 'ZernioApiError'
+  }
+}
+
 export async function zernioFetch(path: string, init?: RequestInit) {
   const isFormData = typeof FormData !== 'undefined' && init?.body instanceof FormData
   let response: Response
@@ -50,7 +58,7 @@ export async function zernioFetch(path: string, init?: RequestInit) {
           : typeof error.title === 'string' ? error.title
             : `HTTP ${response.status}`
     const code = typeof error.code === 'string' || typeof error.code === 'number' ? ` (${error.code})` : ''
-    throw new Error(`Zernio no pudo completar la solicitud${code}: ${detail}`)
+    throw new ZernioApiError(`Zernio no pudo completar la solicitud${code}: ${detail}`, response.status, body)
   }
   return body ?? {}
 }
@@ -61,6 +69,17 @@ function profileIdFrom(value: Record<string, unknown>) {
   const nestedProfile = data?.profile as Record<string, unknown> | undefined
   const id = profile?._id ?? profile?.id ?? nestedProfile?._id ?? nestedProfile?.id ?? data?._id ?? data?.id ?? value._id ?? value.id
   return typeof id === 'string' && id.trim() ? id : null
+}
+
+async function linkZernioProfile(db: SupabaseClient, accountId: string, profileId: string, userId: string) {
+  const { error: saveError } = await db.from('zernio_profiles').upsert({
+    account_id: accountId,
+    profile_id: profileId,
+    created_by: userId,
+    updated_at: new Date().toISOString(),
+  }, { onConflict: 'account_id' })
+  if (saveError) throw saveError
+  return profileId
 }
 
 export async function ensureZernioProfile(
@@ -77,21 +96,47 @@ export async function ensureZernioProfile(
   if (error) throw error
   if (data?.profile_id) return data.profile_id as string
 
-  const created = await zernioFetch('/profiles', {
-    method: 'POST',
-    body: JSON.stringify({ name: accountName.slice(0, 120) || 'Cuenta NexoOmni' }),
-  })
-  const profileId = profileIdFrom(created)
-  if (!profileId) throw new Error('Zernio no devolvió un identificador de perfil para esta cuenta.')
+  const name = accountName.slice(0, 120) || 'Cuenta NexoOmni'
+  try {
+    const created = await zernioFetch('/profiles', {
+      method: 'POST',
+      headers: { 'Idempotency-Key': crypto.randomUUID() },
+      body: JSON.stringify({ name }),
+    })
+    const profileId = profileIdFrom(created)
+    if (!profileId) throw new Error('Zernio no devolvió un identificador de perfil para esta cuenta.')
+    return await linkZernioProfile(db, accountId, profileId, userId)
+  } catch (createError) {
+    // Names are unique per Zernio team. A 409 here almost always means a
+    // PREVIOUS attempt for this same account created the profile but a
+    // later step failed before we saved `zernio_profiles` locally (e.g. a
+    // dropped connection) — the id to recover is in details.existingProfileId.
+    if (!(createError instanceof ZernioApiError) || createError.status !== 409) throw createError
+    const details = createError.body?.details as Record<string, unknown> | undefined
+    const existingProfileId = details?.existingProfileId
+    if (typeof existingProfileId !== 'string' || !existingProfileId.trim()) throw createError
 
-  const { error: saveError } = await db.from('zernio_profiles').upsert({
-    account_id: accountId,
-    profile_id: profileId,
-    created_by: userId,
-    updated_at: new Date().toISOString(),
-  }, { onConflict: 'account_id' })
-  if (saveError) throw saveError
-  return profileId
+    // Guard against stealing a DIFFERENT account's profile when two tenants
+    // happen to share the same company name — only reuse it if no other
+    // account already owns it.
+    const { data: owner, error: ownerError } = await db
+      .from('zernio_profiles')
+      .select('account_id')
+      .eq('profile_id', existingProfileId)
+      .maybeSingle()
+    if (ownerError) throw ownerError
+    if (owner && owner.account_id !== accountId) {
+      const disambiguated = await zernioFetch('/profiles', {
+        method: 'POST',
+        headers: { 'Idempotency-Key': crypto.randomUUID() },
+        body: JSON.stringify({ name: `${name} (${accountId.slice(0, 8)})`.slice(0, 120) }),
+      })
+      const profileId = profileIdFrom(disambiguated)
+      if (!profileId) throw new Error('Zernio no devolvió un identificador de perfil para esta cuenta.')
+      return await linkZernioProfile(db, accountId, profileId, userId)
+    }
+    return await linkZernioProfile(db, accountId, existingProfileId, userId)
+  }
 }
 
 export async function getZernioConnectUrl(channel: ZernioChannel, profileId: string, redirectUrl: string) {
