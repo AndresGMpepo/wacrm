@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { Camera, CheckCircle2, ImageDown, Link2, Loader2, MessageCircle, MessagesSquare, Pause, Play, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -45,10 +46,32 @@ function connectorChannel(provider: string): Channel | null {
 }
 
 export function ZernioConnectConfig({ channels }: { channels: Channel[] }) {
+  const router = useRouter()
+  const searchParams = useSearchParams()
   const [connectors, setConnectors] = useState<Connector[]>([])
   const [configured, setConfigured] = useState(true)
   const [loading, setLoading] = useState(true)
   const [pending, setPending] = useState<string | null>(null)
+
+  // The connect-start and OAuth-callback routes redirect back here with
+  // `zernio`/`zernio_message` on failure (they can't return JSON since
+  // they're loaded via a full-page navigation). Surface it once, then
+  // strip the params so a refresh doesn't re-show the same toast.
+  useEffect(() => {
+    const status = searchParams.get('zernio')
+    if (!status) return
+    const message = searchParams.get('zernio_message')
+    if (status === 'connected') {
+      toast.success('Canal conectado correctamente.')
+    } else if (status === 'error') {
+      toast.error(message || 'No fue posible completar la conexión. Inténtalo nuevamente.')
+    }
+    const params = new URLSearchParams(searchParams.toString())
+    params.delete('zernio')
+    params.delete('zernio_message')
+    router.replace(`/settings?${params.toString()}`, { scroll: false })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const load = useCallback(async () => {
     try {
