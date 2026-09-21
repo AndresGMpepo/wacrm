@@ -109,7 +109,7 @@ async function sendBroadcastViaZernio(args: {
     .eq('provider', 'zernio_whatsapp')
     .maybeSingle()
   if (!connector?.zernio_account_id) {
-    return NextResponse.json({ error: 'No se encontró esa conexión de WhatsApp vía Zernio.' }, { status: 400 })
+    return NextResponse.json({ error: 'No se encontró esa conexión de WhatsApp.' }, { status: 400 })
   }
   if (connector.status === 'paused') {
     return NextResponse.json({ error: 'Esa conexión de WhatsApp está pausada.' }, { status: 409 })
@@ -136,7 +136,7 @@ async function sendBroadcastViaZernio(args: {
   // (Zernio docs: header, then body, then URL-button values).
   if (recipients.some((r) => r.messageParams?.buttonParams)) {
     return NextResponse.json(
-      { error: 'Las plantillas con variables en los botones aún no están soportadas al enviar vía Zernio — usa solo variables en el encabezado o el cuerpo.' },
+      { error: 'Las plantillas con variables en los botones aún no están soportadas al enviar por este canal — usa solo variables en el encabezado o el cuerpo.' },
       { status: 400 },
     )
   }

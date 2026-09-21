@@ -170,7 +170,7 @@ export async function POST() {
       return NextResponse.json(
         {
           error:
-            'No hay ningún WhatsApp conectado (ni directo ni vía Zernio). Conecta uno en Configuración antes de sincronizar.',
+            'No hay ningún WhatsApp conectado. Conecta uno en Configuración antes de sincronizar.',
         },
         { status: 400 },
       )

@@ -102,7 +102,7 @@ export async function PATCH(
 
     if (existing.connector_id) {
       return NextResponse.json(
-        { error: 'Editar plantillas de un número conectado vía Zernio aún no está soportado. Elimínala y créala de nuevo.' },
+        { error: 'Editar plantillas de un número conectado aún no está soportado. Elimínala y créala de nuevo.' },
         { status: 400 },
       )
     }

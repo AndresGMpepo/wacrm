@@ -45,7 +45,7 @@ export async function GET(
 
     const channelType = conversation.channel_type as string | null
     if (!channelType?.startsWith('zernio_') || !message.media_url) {
-      return NextResponse.json({ error: 'This message has no Zernio media.' }, { status: 400 })
+      return NextResponse.json({ error: 'This message has no media.' }, { status: 400 })
     }
     const zernioChannel = channelType.slice('zernio_'.length) as ZernioChannel
 

@@ -111,7 +111,7 @@ export function Step1ChooseTemplate({ selectedTemplate, onSelect, onNext, onBack
                   <span>{template.language ?? 'en_US'}</span>
                   {template.connector_id && (
                     <span className="inline-flex items-center rounded-full border border-emerald-600/30 bg-emerald-600/20 px-2 py-0.5 text-emerald-400">
-                      Zernio
+                      WhatsApp conectado
                     </span>
                   )}
                   {/* Status is omitted on purpose — every template

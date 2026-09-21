@@ -72,10 +72,10 @@ export async function POST(request: Request) {
         .maybeSingle();
 
       if (connectorError || !connector) {
-        return NextResponse.json({ error: 'Zernio channel configuration not found' }, { status: 400 });
+        return NextResponse.json({ error: 'Connected channel configuration not found' }, { status: 400 });
       }
       if (!connector.zernio_account_id || connector.status === 'paused') {
-        return NextResponse.json({ error: 'Zernio channel is paused or missing an account' }, { status: 409 });
+        return NextResponse.json({ error: 'Connected channel is paused or missing an account' }, { status: 409 });
       }
       externalRecipient = conversation.external_session_id ?? null;
       accessToken = connector.zernio_account_id;

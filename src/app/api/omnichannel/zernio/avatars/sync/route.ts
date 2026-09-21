@@ -39,7 +39,7 @@ export async function POST(request: Request) {
       .maybeSingle()
     if (connectorError) throw connectorError
     if (!connector?.zernio_account_id) {
-      return NextResponse.json({ error: 'La conexión no tiene una cuenta de Zernio disponible.' }, { status: 409 })
+      return NextResponse.json({ error: 'La conexión no tiene una cuenta disponible.' }, { status: 409 })
     }
 
     const { data, error } = await db

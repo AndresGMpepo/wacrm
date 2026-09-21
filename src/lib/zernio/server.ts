@@ -12,7 +12,7 @@ function apiUrl() {
 
 function apiKey() {
   const key = process.env.ZERNIO_API_KEY?.trim()
-  if (!key) throw new Error('La conexión guiada no está disponible todavía. El administrador debe configurar ZERNIO_API_KEY en el servidor.')
+  if (!key) throw new Error('La conexión guiada no está disponible todavía. El administrador debe configurar la integración en el servidor.')
   return key
 }
 
@@ -45,9 +45,9 @@ export async function zernioFetch(path: string, init?: RequestInit) {
     })
   } catch (error) {
     if (error instanceof Error && error.name === 'TimeoutError') {
-      throw new Error('Zernio no respondió a tiempo. Intenta de nuevo en unos segundos.')
+      throw new Error('El canal conectado no respondió a tiempo. Intenta de nuevo en unos segundos.')
     }
-    throw new Error(`No se pudo contactar a Zernio: ${error instanceof Error ? error.message : 'error de red'}`)
+    throw new Error(`No se pudo contactar al canal conectado: ${error instanceof Error ? error.message : 'error de red'}`)
   }
   const body = await response.json().catch(() => null) as Record<string, unknown> | null
   if (!response.ok) {
@@ -58,7 +58,7 @@ export async function zernioFetch(path: string, init?: RequestInit) {
           : typeof error.title === 'string' ? error.title
             : `HTTP ${response.status}`
     const code = typeof error.code === 'string' || typeof error.code === 'number' ? ` (${error.code})` : ''
-    throw new ZernioApiError(`Zernio no pudo completar la solicitud${code}: ${detail}`, response.status, body)
+    throw new ZernioApiError(`No se pudo completar la solicitud${code}: ${detail}`, response.status, body)
   }
   return body ?? {}
 }
@@ -104,7 +104,7 @@ export async function ensureZernioProfile(
       body: JSON.stringify({ name }),
     })
     const profileId = profileIdFrom(created)
-    if (!profileId) throw new Error('Zernio no devolvió un identificador de perfil para esta cuenta.')
+    if (!profileId) throw new Error('No se recibió un identificador de perfil para esta cuenta.')
     return await linkZernioProfile(db, accountId, profileId, userId)
   } catch (createError) {
     // Names are unique per Zernio team. A 409 here almost always means a
@@ -132,7 +132,7 @@ export async function ensureZernioProfile(
         body: JSON.stringify({ name: `${name} (${accountId.slice(0, 8)})`.slice(0, 120) }),
       })
       const profileId = profileIdFrom(disambiguated)
-      if (!profileId) throw new Error('Zernio no devolvió un identificador de perfil para esta cuenta.')
+      if (!profileId) throw new Error('No se recibió un identificador de perfil para esta cuenta.')
       return await linkZernioProfile(db, accountId, profileId, userId)
     }
     return await linkZernioProfile(db, accountId, existingProfileId, userId)
@@ -145,7 +145,7 @@ export async function getZernioConnectUrl(channel: ZernioChannel, profileId: str
   const data = response.data as Record<string, unknown> | undefined
   const authUrl = response.authUrl ?? response.url ?? data?.authUrl ?? data?.url
   if (typeof authUrl !== 'string' || !authUrl.startsWith('https://')) {
-    throw new Error('Zernio no devolvió la URL segura de conexión.')
+    throw new Error('No se recibió la URL segura de conexión.')
   }
   return authUrl
 }
@@ -272,7 +272,7 @@ function isBlockedMediaHostname(hostname: string) {
 export async function downloadZernioInboundMedia(urlValue: string, channel: ZernioChannel) {
   const url = new URL(urlValue)
   if (url.protocol !== 'https:' || isBlockedMediaHostname(url.hostname)) {
-    throw new Error('La URL de medio entrante de Zernio no es segura.')
+    throw new Error('La URL de medio entrante del canal conectado no es segura.')
   }
 
   const base = new URL(apiUrl())
@@ -280,7 +280,7 @@ export async function downloadZernioInboundMedia(urlValue: string, channel: Zern
   if (authenticatedWhatsAppMedia) {
     const apiPath = base.pathname.replace(/\/$/, '')
     if (url.origin !== base.origin || !url.pathname.startsWith(`${apiPath}/whatsapp/media/`)) {
-      throw new Error('La URL de medio de WhatsApp no pertenece a Zernio.')
+      throw new Error('La URL de medio de WhatsApp no pertenece al canal conectado.')
     }
   }
 
@@ -289,14 +289,14 @@ export async function downloadZernioInboundMedia(urlValue: string, channel: Zern
     redirect: 'error',
     signal: AbortSignal.timeout(15_000),
   })
-  if (!response.ok) throw new Error(`No se pudo descargar el medio de Zernio (${response.status}).`)
+  if (!response.ok) throw new Error(`No se pudo descargar el medio del canal conectado (${response.status}).`)
   const declaredLength = Number(response.headers.get('content-length'))
   const maxBytes = 15 * 1024 * 1024
   if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
-    throw new Error('El medio de Zernio supera el máximo de 15 MB para análisis.')
+    throw new Error('El medio del canal conectado supera el máximo de 15 MB para análisis.')
   }
   const bytes = Buffer.from(await response.arrayBuffer())
-  if (bytes.length > maxBytes) throw new Error('El medio de Zernio supera el máximo de 15 MB para análisis.')
+  if (bytes.length > maxBytes) throw new Error('El medio del canal conectado supera el máximo de 15 MB para análisis.')
   return { bytes, mimeType: response.headers.get('content-type') || null }
 }
 
@@ -328,7 +328,7 @@ export async function resolveZernioAttachmentUrl(
   const query = new URLSearchParams({ accountId: zernioAccountId, format: 'json' })
   const payload = await zernioFetch(`/inbox/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(platformMessageId)}/attachments/${index}?${query.toString()}`)
   const url = secureUrl(payload.url)
-  if (!url) throw new Error('Zernio no devolvió una URL de medio válida.')
+  if (!url) throw new Error('No se recibió una URL de medio válida.')
   return url
 }
 
@@ -362,7 +362,7 @@ export async function uploadZernioMedia(file: Blob, contentType?: string) {
     : typeof data.url === 'string'
       ? data.url
       : null
-  if (!url) throw new Error('Zernio no devolvió una URL pública para el archivo adjunto.')
+  if (!url) throw new Error('No se recibió una URL pública para el archivo adjunto.')
   return url
 }
 
@@ -525,12 +525,21 @@ export async function createZernioWhatsAppTemplate(
   })
   const template = record(response.template ?? response)
   const id = asText(template.id)
-  if (!id) throw new Error('Zernio no devolvió el identificador de la plantilla creada.')
+  if (!id) throw new Error('No se recibió el identificador de la plantilla creada.')
   return { id, status: asText(template.status) || 'PENDING' }
 }
 
+/**
+ * Deletes by Meta's numeric template id, not by name — `existing.meta_template_id`
+ * is what we store locally. Zernio has two distinct delete routes:
+ * `/whatsapp/templates/{templateName}` (name, must match `^[a-z][...]`) and
+ * `/whatsapp/templates/id/{templateId}` (numeric Meta id). Using the
+ * name-shaped route with a numeric id here used to fail (Zernio/Meta
+ * rejected the malformed "name" upstream, surfaced to us as a bare 502
+ * with no JSON body).
+ */
 export async function deleteZernioWhatsAppTemplate(zernioAccountId: string, templateId: string): Promise<void> {
-  await zernioFetch(`/whatsapp/templates/${encodeURIComponent(templateId)}?${new URLSearchParams({ accountId: zernioAccountId })}`, { method: 'DELETE' })
+  await zernioFetch(`/whatsapp/templates/id/${encodeURIComponent(templateId)}?${new URLSearchParams({ accountId: zernioAccountId })}`, { method: 'DELETE' })
 }
 
 // ------------------------------------------------------------
@@ -565,7 +574,7 @@ export async function sendZernioTemplateMessage(args: {
   })
   const data = record(response.data ?? response)
   const messageId = asText(data.messageId)
-  if (!messageId) throw new Error('Zernio no devolvió el identificador del mensaje enviado.')
+  if (!messageId) throw new Error('No se recibió el identificador del mensaje enviado.')
   return { messageId, conversationId: asText(data.conversationId) || null }
 }
 

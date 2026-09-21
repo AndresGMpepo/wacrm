@@ -1371,7 +1371,7 @@
       "labelTooLong": "La etiqueta debe tener {max} caracteres o menos",
       "copied": "Enlace de invitación copiado",
       "clipboardBlocked": "Portapapeles bloqueado — copia el enlace manualmente",
-      "whatsappMessage": "Únete a {accountName} en wacrm usando este enlace (válido por {expiresInDays} días): {url}"
+      "whatsappMessage": "Únete a {accountName} en NexoOmni usando este enlace (válido por {expiresInDays} días): {url}"
     },
     "tagsAndFields": {
       "title": "Campos y etiquetas",
@@ -1482,8 +1482,8 @@
       "saveResubmit": "Guardar y Reenviar",
       "submitApproval": "Enviar para Aprobación",
       "deleteDialogTitle": "¿Eliminar plantilla?",
-      "deleteMetaDesc": "\"{name}\" será eliminada de Meta y de wacrm. Las difusiones activas que usen esta plantilla fallarán en su próximo envío. Esto no se puede deshacer.",
-      "deleteLocalDesc": "\"{name}\" será eliminada de wacrm. Nunca se envió a Meta, por lo que no requiere limpieza remota.",
+      "deleteMetaDesc": "\"{name}\" será eliminada de Meta y de NexoOmni. Las difusiones activas que usen esta plantilla fallarán en su próximo envío. Esto no se puede deshacer.",
+      "deleteLocalDesc": "\"{name}\" será eliminada de NexoOmni. Nunca se envió a Meta, por lo que no requiere limpieza remota.",
       "deleting": "Eliminando…",
       "delete": "Eliminar",
       "toastLoadFailed": "Error al cargar las plantillas",

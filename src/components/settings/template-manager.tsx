@@ -594,7 +594,7 @@ export function TemplateManager() {
                       )}
                       {template.connector_id && (
                         <Badge className="text-xs border bg-emerald-600/20 text-emerald-400 border-emerald-600/30">
-                          {connectors.find((c) => c.id === template.connector_id)?.displayName ?? 'Zernio'}
+                          {connectors.find((c) => c.id === template.connector_id)?.displayName ?? 'Número conectado'}
                         </Badge>
                       )}
                       {template.quality_score && (
@@ -749,7 +749,7 @@ export function TemplateManager() {
                     </SelectItem>
                     {connectors.map((connector) => (
                       <SelectItem key={connector.id} value={connector.id} className="text-popover-foreground focus:bg-muted focus:text-popover-foreground">
-                        {connector.displayName} (Zernio)
+                        {connector.displayName} (conectado)
                       </SelectItem>
                     ))}
                   </SelectContent>

@@ -161,7 +161,7 @@ export async function POST(request: Request) {
       // specific and not wired up for this path yet.
       if (payload.header_type === 'image' || payload.header_type === 'video' || payload.header_type === 'document') {
         return NextResponse.json(
-          { error: 'Los encabezados con imagen/video/documento aún no están soportados al crear plantillas vía Zernio. Usa un encabezado de texto o sin encabezado.' },
+          { error: 'Los encabezados con imagen/video/documento aún no están soportados al crear plantillas en este canal. Usa un encabezado de texto o sin encabezado.' },
           { status: 400 },
         )
       }
@@ -173,7 +173,7 @@ export async function POST(request: Request) {
         .eq('provider', 'zernio_whatsapp')
         .maybeSingle()
       if (connectorError || !connector?.zernio_account_id) {
-        return NextResponse.json({ error: 'No se encontró esa conexión de WhatsApp vía Zernio.' }, { status: 400 })
+        return NextResponse.json({ error: 'No se encontró esa conexión de WhatsApp.' }, { status: 400 })
       }
       if (connector.status === 'paused') {
         return NextResponse.json({ error: 'Esa conexión de WhatsApp está pausada.' }, { status: 409 })
