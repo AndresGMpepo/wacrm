@@ -4,6 +4,8 @@ import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
 import { Contact, MessageTemplate } from '@/types';
+import { extractVariableIndices } from '@/lib/whatsapp/template-validators';
+import { HEADER_VARIABLE_KEY } from '@/components/broadcasts/step3-personalize';
 
 export type CustomFieldOperator = 'is' | 'is_not' | 'contains';
 
@@ -85,6 +87,10 @@ type CustomValueIndex = Map<string, Map<string, string>>;
  * Per-contact resolution of custom-field placeholders. Static and
  * built-in-field mappings resolve synchronously; custom fields read
  * from a pre-built index to avoid N+1 queries during the send loop.
+ *
+ * `HEADER_VARIABLE_KEY` is deliberately excluded here — it's resolved
+ * separately by `resolveHeaderVariable` and must never be mixed into
+ * the numeric-keyed body array (it would shift every {{N}} position).
  */
 export function resolveVariables(
   variables: Record<string, VariableMapping>,
@@ -93,30 +99,47 @@ export function resolveVariables(
 ): string[] {
   // Keys are typically "1","2",... — numeric-aware sort keeps
   // {{1}} before {{10}}.
-  const keys = Object.keys(variables).sort((a, b) => {
-    const an = Number(a);
-    const bn = Number(b);
-    if (Number.isFinite(an) && Number.isFinite(bn)) return an - bn;
-    return a.localeCompare(b);
-  });
+  const keys = Object.keys(variables)
+    .filter((key) => key !== HEADER_VARIABLE_KEY)
+    .sort((a, b) => {
+      const an = Number(a);
+      const bn = Number(b);
+      if (Number.isFinite(an) && Number.isFinite(bn)) return an - bn;
+      return a.localeCompare(b);
+    });
 
-  return keys.map((key) => {
-    const v = variables[key];
-    if (v.type === 'static') return v.value;
+  return keys.map((key) => resolveSingleVariable(variables[key], contact, customValues));
+}
 
-    if (v.type === 'field') {
-      const fieldMap: Record<string, string | undefined> = {
-        name: contact.name,
-        phone: contact.phone,
-        email: contact.email,
-        company: contact.company,
-      };
-      return fieldMap[v.value] ?? '';
-    }
+/** Resolves the TEXT-header {{1}} variable, when the template's header has one. */
+export function resolveHeaderVariable(
+  variables: Record<string, VariableMapping>,
+  contact: Contact,
+  customValues?: Map<string, string>,
+): string {
+  return resolveSingleVariable(variables[HEADER_VARIABLE_KEY], contact, customValues);
+}
 
-    // custom_field
-    return customValues?.get(v.value) ?? '';
-  });
+function resolveSingleVariable(
+  v: VariableMapping | undefined,
+  contact: Contact,
+  customValues?: Map<string, string>,
+): string {
+  if (!v) return '';
+  if (v.type === 'static') return v.value;
+
+  if (v.type === 'field') {
+    const fieldMap: Record<string, string | undefined> = {
+      name: contact.name,
+      phone: contact.phone,
+      email: contact.email,
+      company: contact.company,
+    };
+    return fieldMap[v.value] ?? '';
+  }
+
+  // custom_field
+  return customValues?.get(v.value) ?? '';
 }
 
 /**
@@ -458,26 +481,49 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
         headerType === 'video' ||
         headerType === 'document';
       const headerMediaUrl = payload.headerMediaUrl?.trim();
-      const messageParams =
+      const staticMessageParams =
         isMediaHeader && headerMediaUrl ? { headerMediaUrl } : undefined;
+
+      // TEXT headers with a {{1}} variable need a per-recipient value
+      // too — previously never resolved, so the header {{1}} silently
+      // went out missing and both Meta and Zernio rejected the send
+      // (Zernio: "templateParams supplies N value(s) but this template
+      // takes N+1 ... in header -> body -> URL-button order").
+      const hasHeaderVariable =
+        headerType === 'text' &&
+        extractVariableIndices(payload.template.header_content ?? '').length > 0;
 
       for (let i = 0; i < recipients.length; i += SEND_BATCH_SIZE) {
         const batch = recipients.slice(i, i + SEND_BATCH_SIZE);
 
         const apiRecipients = batch
           .filter((r) => r.contact?.phone)
-          .map((r) => ({
-            phone: r.contact!.phone as string,
-            contactId: r.contact!.id,
-            params: r.contact
-              ? resolveVariables(
-                  payload.variables,
-                  r.contact,
-                  customValueIndex.get(r.contact.id),
-                )
-              : [],
-            ...(messageParams ? { messageParams } : {}),
-          }));
+          .map((r) => {
+            const headerText =
+              hasHeaderVariable && r.contact
+                ? resolveHeaderVariable(
+                    payload.variables,
+                    r.contact,
+                    customValueIndex.get(r.contact.id),
+                  )
+                : undefined;
+            const messageParams =
+              staticMessageParams || headerText
+                ? { ...staticMessageParams, ...(headerText ? { headerText } : {}) }
+                : undefined;
+            return {
+              phone: r.contact!.phone as string,
+              contactId: r.contact!.id,
+              params: r.contact
+                ? resolveVariables(
+                    payload.variables,
+                    r.contact,
+                    customValueIndex.get(r.contact.id),
+                  )
+                : [],
+              ...(messageParams ? { messageParams } : {}),
+            };
+          });
 
         if (apiRecipients.length === 0) continue;
 

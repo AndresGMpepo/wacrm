@@ -130,13 +130,13 @@ async function sendBroadcastViaZernio(args: {
     )
   }
 
-  // Only body {{n}} placeholders are supported on this path for now —
-  // header-text and dynamic-URL-button variables need a differently
-  // ordered flat array (header, then body, then buttons) that the
-  // broadcast wizard doesn't build yet.
-  if (recipients.some((r) => r.messageParams?.headerText || r.messageParams?.buttonParams)) {
+  // Dynamic-URL-button variables aren't collected by the broadcast
+  // wizard yet (needs a differently-shaped `buttonParams` UI) — header
+  // text and body {{n}} ARE supported below via one flat, ordered array
+  // (Zernio docs: header, then body, then URL-button values).
+  if (recipients.some((r) => r.messageParams?.buttonParams)) {
     return NextResponse.json(
-      { error: 'Las plantillas con variables en el encabezado o en botones aún no están soportadas al enviar vía Zernio — usa solo variables en el cuerpo.' },
+      { error: 'Las plantillas con variables en los botones aún no están soportadas al enviar vía Zernio — usa solo variables en el encabezado o el cuerpo.' },
       { status: 400 },
     )
   }
@@ -154,17 +154,22 @@ async function sendBroadcastViaZernio(args: {
       continue
     }
     try {
+      const bodyParams = recipient.messageParams?.body ?? recipient.params ?? []
+      const headerText = recipient.messageParams?.headerText
+      // Zernio's flat templateParams array is positional: header
+      // variable(s) first, then body — omitting the header value when
+      // the template has one shifts every later value out of place.
+      const templateParams = headerText ? [headerText, ...bodyParams] : bodyParams
       const result = await sendZernioTemplateMessage({
         zernioAccountId: connector.zernio_account_id,
         phone: sanitized,
         templateName,
         templateLanguage,
-        templateParams: recipient.messageParams?.body ?? recipient.params ?? [],
+        templateParams,
       })
       results.push({ phone: recipient.phone, status: 'sent', whatsapp_message_id: result.messageId })
       sentCount++
       if (recipient.contactId) {
-        const bodyParams = recipient.messageParams?.body ?? recipient.params ?? []
         await recordBroadcastMessage({
           db: supabase,
           accountId,
@@ -187,6 +192,7 @@ async function sendBroadcastViaZernio(args: {
     }
     if (i < recipients.length - 1) await sleep(INTER_RECIPIENT_DELAY_MS)
   }
+
 
   return NextResponse.json({ success: true, total: recipients.length, sent: sentCount, failed: failedCount, results })
 }

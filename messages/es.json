@@ -774,6 +774,8 @@
         "subtitle": "Asigna tus variables de plantilla a campos de contacto o proporciona valores estáticos.",
         "headerImage": "Imagen de Encabezado",
         "headerImageDesc": "Esta plantilla requiere una imagen de encabezado.",
+        "headerVariable": "Variable del Encabezado",
+        "headerVariableDesc": "El encabezado de esta plantilla tiene una variable — define su valor.",
         "imageUrl": "URL de la Imagen",
         "imageUrlPlaceholder": "https://ejemplo.com/imagen.jpg",
         "variables": "Variables",

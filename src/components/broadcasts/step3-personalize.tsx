@@ -40,6 +40,11 @@ function isMediaHeaderType(value: unknown): value is MediaHeaderType {
   return MEDIA_HEADER_TYPES.includes(value as MediaHeaderType);
 }
 
+// Meta only allows a single {{1}} variable in a TEXT header (enforced by
+// validateHeader at template-creation time) — a dedicated key keeps it
+// out of the numeric-keyed body `variables` sort order.
+export const HEADER_VARIABLE_KEY = 'header';
+
 function isValidHttpUrl(value: string): boolean {
   try {
     const u = new URL(value);
@@ -143,6 +148,13 @@ export function Step3Personalize({
     ? template.header_type
     : null;
 
+  // TEXT headers with a {{1}} variable need a value at send time too —
+  // previously the wizard only ever collected body placeholders, so a
+  // header variable silently went out empty/missing and Meta (or
+  // Zernio, which validates the flat param count) rejected the send.
+  const hasHeaderVariable =
+    template.header_type === 'text' && /\{\{1\}\}/.test(template.header_content ?? '');
+
   // Seed the field with the template's stored sample URL the first time
   // we land on a media-header template, so the common "reuse the
   // approved media" case needs no typing. Only seeds when empty to avoid
@@ -170,6 +182,12 @@ export function Step3Personalize({
    */
   const unmappedKeys = useMemo(() => {
     const missing: string[] = [];
+    if (hasHeaderVariable) {
+      const mapping = variables[HEADER_VARIABLE_KEY];
+      if (!mapping || !mapping.value?.trim()) {
+        missing.push('header {{1}}');
+      }
+    }
     for (const placeholder of placeholders) {
       const key = placeholder.replace(/^\{\{|\}\}$/g, '');
       const mapping = variables[key];
@@ -178,7 +196,7 @@ export function Step3Personalize({
       }
     }
     return missing;
-  }, [placeholders, variables]);
+  }, [hasHeaderVariable, placeholders, variables]);
 
   function updateVariable(key: string, patch: Partial<VariableMapping>) {
     const current = variables[key] ?? { type: 'static' as VariableType, value: '' };
@@ -285,7 +303,97 @@ export function Step3Personalize({
         </div>
       )}
 
-      {placeholders.length === 0 && !mediaHeaderType ? (
+      {hasHeaderVariable && (() => {
+        const mapping = variables[HEADER_VARIABLE_KEY] ?? { type: 'static' as VariableType, value: '' };
+        return (
+          <div className="rounded-xl border border-border bg-card/50 p-4">
+            <div className="mb-3 flex items-center gap-2">
+              <span className="inline-flex items-center rounded-md bg-primary/10 px-2 py-0.5 text-xs font-mono font-medium text-primary">
+                {'{{1}}'}
+              </span>
+              <p className="text-sm font-medium text-foreground">{t('personalize.headerVariable')}</p>
+            </div>
+            <p className="mb-3 text-xs text-muted-foreground">{t('personalize.headerVariableDesc')}</p>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                  {t('personalize.type')}
+                </label>
+                <Select
+                  value={mapping.type}
+                  onValueChange={(val) =>
+                    updateVariable(HEADER_VARIABLE_KEY, { type: val as VariableType, value: '' })
+                  }
+                >
+                  <SelectTrigger className="w-full border-border bg-muted text-foreground">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="border-border bg-popover">
+                    <SelectItem value="static">{t('personalize.typeStatic')}</SelectItem>
+                    <SelectItem value="field">{t('personalize.typeContact')}</SelectItem>
+                    <SelectItem value="custom_field">{t('personalize.typeCustom')}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                  {mapping.type === 'static' ? t('personalize.staticValue') : t('personalize.contactField')}
+                </label>
+                {mapping.type === 'static' ? (
+                  <Input
+                    value={mapping.value}
+                    onChange={(e) => updateVariable(HEADER_VARIABLE_KEY, { value: e.target.value })}
+                    placeholder="Enter value..."
+                    className="border-border bg-muted text-foreground placeholder:text-muted-foreground"
+                  />
+                ) : mapping.type === 'field' ? (
+                  <Select
+                    value={mapping.value || undefined}
+                    onValueChange={(val) => updateVariable(HEADER_VARIABLE_KEY, { value: val || '' })}
+                  >
+                    <SelectTrigger className="w-full border-border bg-muted text-foreground">
+                      <SelectValue placeholder={t('personalize.selectContactField')} />
+                    </SelectTrigger>
+                    <SelectContent className="border-border bg-popover">
+                      {contactFields.map((field) => (
+                        <SelectItem key={field.value} value={field.value}>
+                          {t(`personalize.fieldMap.${field.labelKey}`)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <Select
+                    value={mapping.value || undefined}
+                    onValueChange={(val) => updateVariable(HEADER_VARIABLE_KEY, { value: val || '' })}
+                  >
+                    <SelectTrigger className="w-full border-border bg-muted text-foreground">
+                      <SelectValue
+                        placeholder={
+                          loadingFields
+                            ? 'Loading…'
+                            : customFields.length === 0
+                              ? 'No custom fields'
+                              : 'Select custom field…'
+                        }
+                      />
+                    </SelectTrigger>
+                    <SelectContent className="border-border bg-popover">
+                      {customFields.map((f) => (
+                        <SelectItem key={f.id} value={f.id}>
+                          {f.field_name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {placeholders.length === 0 && !mediaHeaderType && !hasHeaderVariable ? (
         <div className="rounded-xl border border-border bg-card/50 p-6 text-center">
           <p className="text-sm text-muted-foreground">
             {t('personalize.noPreview')}

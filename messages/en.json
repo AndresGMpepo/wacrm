@@ -774,6 +774,8 @@
         "subtitle": "Map your template variables to contact fields or provide static values.",
         "headerImage": "Header Image",
         "headerImageDesc": "This template requires a header image.",
+        "headerVariable": "Header Variable",
+        "headerVariableDesc": "This template's header text has a variable — set its value.",
         "imageUrl": "Image URL",
         "imageUrlPlaceholder": "https://example.com/image.jpg",
         "variables": "Variables",
