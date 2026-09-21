@@ -486,7 +486,12 @@ export interface ZernioTemplateSubmitPayload {
  * Zernio's create-template endpoint validates against its own lowercase
  * discriminator ('header' | 'body' | 'footer' | 'buttons' | ...) and
  * rejects the uppercase Meta casing outright — lowercase both fields
- * before sending.
+ * before sending. This ALSO applies one level deeper: a BUTTONS
+ * component's own `buttons[].type` ('QUICK_REPLY' | 'URL' |
+ * 'PHONE_NUMBER' | 'COPY_CODE') is the same kind of Zernio discriminator
+ * and was previously left uppercase, which made Zernio reject every
+ * template that had buttons (the outer `type: 'buttons'` alone wasn't
+ * enough to pass validation).
  */
 function toZernioComponents(components: unknown[]): unknown[] {
   return components.map((component) => {
@@ -495,6 +500,17 @@ function toZernioComponents(components: unknown[]): unknown[] {
       ...c,
       ...(typeof c.type === 'string' ? { type: c.type.toLowerCase() } : {}),
       ...(typeof c.format === 'string' ? { format: c.format.toLowerCase() } : {}),
+      ...(Array.isArray(c.buttons)
+        ? {
+            buttons: c.buttons.map((button) => {
+              const b = record(button)
+              return {
+                ...b,
+                ...(typeof b.type === 'string' ? { type: b.type.toLowerCase() } : {}),
+              }
+            }),
+          }
+        : {}),
     }
   })
 }
