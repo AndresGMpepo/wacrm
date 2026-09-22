@@ -468,6 +468,35 @@ export async function POST(request: Request) {
       // relationship cycle, so welcome flows run again.
       const isFirstInboundMessage =
         (priorCustomerMessages ?? 0) === 0 || conversationRow.status === 'closed'
+      // Swipe-reply/quote context — same purpose as the native WhatsApp
+      // webhook's `message.context.id` handling (renders a quoted preview
+      // above the bubble, e.g. "replying to: [Plantilla] Hola SPA...").
+      // Zernio's exact metadata key isn't pinned down in their docs beyond
+      // "present when the message is ... a quote-reply to an earlier
+      // message" — checked defensively against every plausible shape; a
+      // miss just leaves reply_to_message_id null like before, no
+      // regression either way.
+      const replyMetadata = record(incoming.metadata)
+      const replyContext = record(replyMetadata.context ?? replyMetadata.quoted ?? replyMetadata.repliedTo)
+      const quotedPlatformMessageId = text(
+        replyMetadata.replyTo,
+        replyMetadata.replyToId,
+        replyMetadata.quotedMessageId,
+        replyMetadata.quoted_message_id,
+        replyContext.id,
+        replyContext.platformMessageId,
+      )
+      let replyToInternalId: string | null = null
+      if (quotedPlatformMessageId) {
+        const { data: quotedRow, error: quotedError } = await db
+          .from('messages')
+          .select('id')
+          .eq('conversation_id', conversationRow.id)
+          .or(`platform_message_id.eq.${quotedPlatformMessageId},message_id.eq.zernio:${typed.id}:${quotedPlatformMessageId}`)
+          .maybeSingle()
+        if (quotedError) console.error('[zernio] reply context lookup failed:', quotedError.message)
+        else replyToInternalId = quotedRow?.id ?? null
+      }
       const { error: messageError } = await db.from('messages').insert({
         conversation_id: conversationRow.id,
         sender_type: 'customer',
@@ -476,6 +505,7 @@ export async function POST(request: Request) {
         media_url: mediaUrl,
         message_id: messageId,
         platform_message_id: platformMessageId,
+        reply_to_message_id: replyToInternalId,
         status: 'delivered',
         created_at: now,
       })

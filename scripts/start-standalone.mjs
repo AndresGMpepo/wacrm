@@ -21,6 +21,9 @@ let flowsCronRunning = false;
 let webhookDeliveryTimer = null;
 let initialWebhookDeliveryTimer = null;
 let webhookDeliveryRunning = false;
+let retentionTimer = null;
+let initialRetentionTimer = null;
+let retentionRunning = false;
 const canRunAnalysisWorker = Boolean(
   process.env.APP_URL && process.env.AI_ANALYSIS_WORKER_SECRET,
 );
@@ -64,6 +67,23 @@ const runWebhookDeliveryWorker = () => {
   worker.on('exit', () => { webhookDeliveryRunning = false; });
 };
 
+// Platform-operator-only purge — inert until an operator sets a retention
+// window on the Platform page (message_retention_days), regardless of
+// whether the secret is configured.
+const canRunRetentionCron = Boolean(
+  process.env.APP_URL && process.env.MESSAGE_RETENTION_CRON_SECRET,
+);
+const runRetentionCron = () => {
+  if (!canRunRetentionCron || retentionRunning) return;
+  retentionRunning = true;
+  const worker = spawn(process.execPath, ['scripts/run-message-retention-cron.mjs'], {
+    stdio: 'inherit',
+    env: process.env,
+  });
+  worker.on('error', (error) => console.error('[message retention] spawn failed:', error));
+  worker.on('exit', () => { retentionRunning = false; });
+};
+
 if (canRunAnalysisWorker) {
   // Give Next enough time to accept the first local/public request, then
   // continue at the policy's one-minute cadence.
@@ -87,6 +107,13 @@ if (canRunWebhookDeliveryWorker) {
   console.info('[webhook delivery worker] disabled: APP_URL or WEBHOOK_DELIVERY_WORKER_SECRET is missing.');
 }
 
+if (canRunRetentionCron) {
+  initialRetentionTimer = setTimeout(runRetentionCron, 40_000);
+  retentionTimer = setInterval(runRetentionCron, 24 * 60 * 60_000);
+} else {
+  console.info('[message retention] disabled: APP_URL or MESSAGE_RETENTION_CRON_SECRET is missing.');
+}
+
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, () => {
     if (workerTimer) clearInterval(workerTimer);
@@ -95,6 +122,8 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
     if (initialFlowsCronTimer) clearTimeout(initialFlowsCronTimer);
     if (webhookDeliveryTimer) clearInterval(webhookDeliveryTimer);
     if (initialWebhookDeliveryTimer) clearTimeout(initialWebhookDeliveryTimer);
+    if (retentionTimer) clearInterval(retentionTimer);
+    if (initialRetentionTimer) clearTimeout(initialRetentionTimer);
     child.kill(signal);
   });
 }

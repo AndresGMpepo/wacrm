@@ -66,4 +66,10 @@ docker run -d --env-file .env.local -e PORT=3000 -p 3000:3000 wacrm
   503 until that variable is set. For webhook deliveries, POST once per minute
   to `/api/internal/webhook-delivery-worker` with header
   `x-webhook-delivery-worker-secret` set to
-  `WEBHOOK_DELIVERY_WORKER_SECRET`.
+  `WEBHOOK_DELIVERY_WORKER_SECRET`. For the platform operator's optional
+  message-retention purge, POST once a day to
+  `/api/internal/message-retention` with header
+  `x-retention-cron-secret` set to `MESSAGE_RETENTION_CRON_SECRET` (or run
+  `scripts/run-message-retention-cron.mjs`, which needs `APP_URL` too) —
+  it's a no-op until an operator sets a retention window on the Platform
+  page.

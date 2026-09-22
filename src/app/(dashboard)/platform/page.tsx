@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { Building2, CirclePause, CirclePlay, LifeBuoy, LoaderCircle, Pencil, Send, ShieldCheck, Trash2, UserCog, UserPlus, UsersRound } from 'lucide-react'
+import { Building2, CirclePause, CirclePlay, Eraser, LifeBuoy, LoaderCircle, Pencil, Send, ShieldCheck, Trash2, UserCog, UserPlus, UsersRound } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
@@ -68,6 +68,18 @@ export default function PlatformPage() {
   const [managingAccount, setManagingAccount] = useState<PlatformAccount | null>(null)
   const [supportAccount, setSupportAccount] = useState<PlatformAccount | null>(null)
   const [memberForm, setMemberForm] = useState({ full_name: '', email: '', role: 'agent' as 'admin' | 'agent' | 'viewer' })
+  const [retentionDays, setRetentionDays] = useState('')
+  const [retentionSaving, setRetentionSaving] = useState(false)
+
+  const loadRetention = useCallback(async () => {
+    try {
+      const response = await fetch('/api/platform/settings/retention', { cache: 'no-store' })
+      const json = await response.json()
+      if (response.ok) setRetentionDays(json.message_retention_days ? String(json.message_retention_days) : '')
+    } catch {
+      // Non-critical — the field just starts empty if this fails.
+    }
+  }, [])
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true)
@@ -90,6 +102,7 @@ export default function PlatformPage() {
   }, [])
 
   useEffect(() => { void load() }, [load])
+  useEffect(() => { void loadRetention() }, [loadRetention])
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault()
@@ -193,6 +206,38 @@ export default function PlatformPage() {
       toast.error(error instanceof Error ? error.message : 'No se pudo eliminar la cuenta.')
     } finally {
       setActionId(null)
+    }
+  }
+
+  const wipeAccountData = async (account: PlatformAccount) => {
+    if (!window.confirm(`¿Vaciar los datos operativos de “${account.name}” (contactos, conversaciones, mensajes, deals, difusiones, citas, notificaciones)? La conexión de WhatsApp/Zernio, las plantillas aprobadas, los usuarios y las automatizaciones/flujos se conservan. Esto no se puede deshacer.`)) return
+    setActionId(`wipe:${account.id}`)
+    try {
+      const response = await fetch(`/api/platform/accounts/${account.id}/wipe-data`, { method: 'POST' })
+      const json = await response.json()
+      if (!response.ok) throw new Error(json.error ?? 'No se pudo vaciar la cuenta.')
+      toast.success(json.message ?? 'Datos operativos eliminados.')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'No se pudo vaciar la cuenta.')
+    } finally {
+      setActionId(null)
+    }
+  }
+
+  const saveRetention = async () => {
+    setRetentionSaving(true)
+    try {
+      const response = await fetch('/api/platform/settings/retention', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message_retention_days: retentionDays.trim() === '' ? null : Number(retentionDays) }),
+      })
+      const json = await response.json()
+      if (!response.ok) throw new Error(json.error ?? 'No se pudo guardar la retención.')
+      toast.success(json.message)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'No se pudo guardar la retención.')
+    } finally {
+      setRetentionSaving(false)
     }
   }
 
@@ -316,9 +361,21 @@ export default function PlatformPage() {
       </Card> : null}
 
       <Card>
+        <CardHeader><CardTitle className="flex items-center gap-2"><Eraser className="size-5" />Mantenimiento</CardTitle><CardDescription>Retención automática de mensajes — solo visible para el operador de plataforma, nunca para los tenants.</CardDescription></CardHeader>
+        <CardContent className="flex flex-wrap items-end gap-3">
+          <div className="space-y-2">
+            <Label htmlFor="retention-days">Borrar mensajes con más de (días)</Label>
+            <Input id="retention-days" type="number" min={30} max={3650} placeholder="Ej. 365 = 1 año — vacío desactiva" className="w-64" value={retentionDays} onChange={(event) => setRetentionDays(event.target.value)} />
+          </div>
+          <Button type="button" onClick={saveRetention} disabled={retentionSaving}>{retentionSaving ? <LoaderCircle className="animate-spin" /> : null}Guardar</Button>
+          <p className="w-full text-xs text-muted-foreground">Se aplica una vez al día mediante el cron interno (`/api/internal/message-retention`) a TODAS las cuentas. Vacío = desactivado.</p>
+        </CardContent>
+      </Card>
+
+      <Card>
         <CardHeader><CardTitle className="flex items-center gap-2"><Building2 className="size-5" />Clientes aprovisionados</CardTitle><CardDescription>Usuarios usados frente a los asientos contratados.</CardDescription></CardHeader>
         <CardContent>
-          {loading ? <div className="flex justify-center py-8"><LoaderCircle className="animate-spin text-muted-foreground" /></div> : accounts.length === 0 ? <p className="py-4 text-sm text-muted-foreground">Aún no hay clientes aprovisionados.</p> : <div className="divide-y rounded-lg border">{accounts.map((account) => <div key={account.id} className="grid gap-3 px-4 py-3 lg:grid-cols-[minmax(0,1fr)_auto_auto_auto] lg:items-center lg:gap-4"><div className="min-w-0"><p className="truncate font-medium">{account.name}</p><p className="truncate text-sm text-muted-foreground">{account.owner?.full_name ?? 'Propietario pendiente'} · {account.owner?.email ?? 'sin correo'}</p>{account.subscription?.ends_at ? <p className="mt-1 text-xs text-amber-500">Acceso hasta {new Date(account.subscription.ends_at).toLocaleDateString('es-MX')}</p> : null}</div><div><p className="text-sm text-muted-foreground">{account.subscription ? PLAN_LABELS[account.subscription.plan_code] : 'Sin plan'}</p><p className={isAccessExpired(account.subscription) || account.subscription?.status === 'suspended' || account.subscription?.status === 'cancelled' ? 'text-sm font-medium text-destructive' : isInGrace(account.subscription) ? 'text-sm font-medium text-amber-500' : 'text-sm font-medium text-emerald-500'}>{displayStatus(account.subscription)}</p></div><p className="text-sm font-medium">{account.members}/{account.subscription?.seat_limit ?? 0} usuarios</p><div className="flex flex-wrap gap-2"><Button type="button" size="sm" variant="outline" onClick={() => { setManagingAccount(account); setMemberForm({ full_name: '', email: '', role: 'agent' }) }} disabled={actionId === account.id}><UserCog />Usuarios</Button><Button type="button" size="sm" variant="outline" onClick={() => setSupportAccount(account)} disabled={actionId === account.id}><LifeBuoy />Soporte</Button><Button type="button" size="sm" variant="outline" onClick={() => beginEdit(account)} disabled={actionId === account.id}><Pencil />Editar</Button>{account.subscription?.status === 'active' || account.subscription?.status === 'trial' ? <Button type="button" size="sm" variant="outline" onClick={() => setAccessStatus(account, 'suspended')} disabled={actionId === account.id}><CirclePause />Pausar</Button> : <Button type="button" size="sm" variant="outline" onClick={() => setAccessStatus(account, 'active')} disabled={actionId === account.id}><CirclePlay />Reactivar</Button>}<Button type="button" size="sm" variant="outline" onClick={() => resendInvitation(account)} disabled={actionId === account.id}>{actionId === account.id ? <LoaderCircle className="animate-spin" /> : <Send />}Reenviar</Button><Button type="button" size="sm" variant="destructive" onClick={() => removeAccount(account)} disabled={actionId === account.id}><Trash2 />Borrar</Button></div></div>)}</div>}
+          {loading ? <div className="flex justify-center py-8"><LoaderCircle className="animate-spin text-muted-foreground" /></div> : accounts.length === 0 ? <p className="py-4 text-sm text-muted-foreground">Aún no hay clientes aprovisionados.</p> : <div className="divide-y rounded-lg border">{accounts.map((account) => <div key={account.id} className="grid gap-3 px-4 py-3 lg:grid-cols-[minmax(0,1fr)_auto_auto_auto] lg:items-center lg:gap-4"><div className="min-w-0"><p className="truncate font-medium">{account.name}</p><p className="truncate text-sm text-muted-foreground">{account.owner?.full_name ?? 'Propietario pendiente'} · {account.owner?.email ?? 'sin correo'}</p>{account.subscription?.ends_at ? <p className="mt-1 text-xs text-amber-500">Acceso hasta {new Date(account.subscription.ends_at).toLocaleDateString('es-MX')}</p> : null}</div><div><p className="text-sm text-muted-foreground">{account.subscription ? PLAN_LABELS[account.subscription.plan_code] : 'Sin plan'}</p><p className={isAccessExpired(account.subscription) || account.subscription?.status === 'suspended' || account.subscription?.status === 'cancelled' ? 'text-sm font-medium text-destructive' : isInGrace(account.subscription) ? 'text-sm font-medium text-amber-500' : 'text-sm font-medium text-emerald-500'}>{displayStatus(account.subscription)}</p></div><p className="text-sm font-medium">{account.members}/{account.subscription?.seat_limit ?? 0} usuarios</p><div className="flex flex-wrap gap-2"><Button type="button" size="sm" variant="outline" onClick={() => { setManagingAccount(account); setMemberForm({ full_name: '', email: '', role: 'agent' }) }} disabled={actionId === account.id}><UserCog />Usuarios</Button><Button type="button" size="sm" variant="outline" onClick={() => setSupportAccount(account)} disabled={actionId === account.id}><LifeBuoy />Soporte</Button><Button type="button" size="sm" variant="outline" onClick={() => beginEdit(account)} disabled={actionId === account.id}><Pencil />Editar</Button>{account.subscription?.status === 'active' || account.subscription?.status === 'trial' ? <Button type="button" size="sm" variant="outline" onClick={() => setAccessStatus(account, 'suspended')} disabled={actionId === account.id}><CirclePause />Pausar</Button> : <Button type="button" size="sm" variant="outline" onClick={() => setAccessStatus(account, 'active')} disabled={actionId === account.id}><CirclePlay />Reactivar</Button>}<Button type="button" size="sm" variant="outline" onClick={() => resendInvitation(account)} disabled={actionId === account.id}>{actionId === account.id ? <LoaderCircle className="animate-spin" /> : <Send />}Reenviar</Button><Button type="button" size="sm" variant="outline" onClick={() => wipeAccountData(account)} disabled={actionId === `wipe:${account.id}`}>{actionId === `wipe:${account.id}` ? <LoaderCircle className="animate-spin" /> : <Eraser />}Vaciar datos</Button><Button type="button" size="sm" variant="destructive" onClick={() => removeAccount(account)} disabled={actionId === account.id}><Trash2 />Borrar</Button></div></div>)}</div>}
         </CardContent>
       </Card>
 
