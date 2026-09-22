@@ -249,8 +249,13 @@ export function MessageThread({
     conversation?.channel_type,
     Boolean(conversation?.social_comment_id),
   );
+  // Template sending is wired for native WhatsApp AND Zernio-connected
+  // WhatsApp — previously hardcoded to native-only, which hid the
+  // "Plantillas" button entirely for zernio_whatsapp conversations even
+  // though sending templates there is fully supported below.
   const canUseWhatsAppTemplates =
-    conversation?.channel_type === "whatsapp" && !conversation?.social_comment_id;
+    (conversation?.channel_type === "whatsapp" || conversation?.channel_type === "zernio_whatsapp") &&
+    !conversation?.social_comment_id;
 
   // Meta's 24-hour customer service window applies to private WhatsApp,
   // Messenger and Instagram messages. Public comments and Yeastar web chat
@@ -704,7 +709,8 @@ export function MessageThread({
       onNewMessage(optimisticMsg);
 
       try {
-        const res = await fetch("/api/whatsapp/send", {
+        const isZernioConversation = conversation.channel_type?.startsWith("zernio_");
+        const res = await fetch(isZernioConversation ? "/api/omnichannel/zernio/send" : "/api/whatsapp/send", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -1219,6 +1225,8 @@ export function MessageThread({
         open={templateModalOpen}
         onOpenChange={setTemplateModalOpen}
         onSelect={handleSendTemplate}
+        connectorId={conversation.connector_id ?? null}
+        channelType={conversation.channel_type}
       />
     </div>
   );

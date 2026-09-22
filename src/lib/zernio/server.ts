@@ -332,6 +332,51 @@ export async function resolveZernioAttachmentUrl(
   return url
 }
 
+/**
+ * Sends an approved template into an ALREADY-OPEN conversation (inbox
+ * reply, as opposed to `sendZernioTemplateMessage`'s "Create conversation"
+ * call used for cold/broadcast sends). Per docs.zernio.com/platforms/
+ * whatsapp/inbox#send-a-template this uses the same `/messages` endpoint
+ * as a plain text send, but with a `template.elements[0]` reference
+ * instead of `message` — `components` mirrors Meta's own send-time shape
+ * (header/body parameter arrays), same as the native direct-Meta path.
+ */
+export async function sendZernioTemplateToConversation(args: {
+  conversationId: string
+  zernioAccountId: string
+  templateName: string
+  templateLanguage: string
+  bodyParams?: string[]
+  headerText?: string
+}): Promise<string | null> {
+  const components: Record<string, unknown>[] = []
+  if (args.headerText?.trim()) {
+    components.push({ type: 'header', parameters: [{ type: 'text', text: args.headerText.trim() }] })
+  }
+  if (args.bodyParams?.length) {
+    components.push({ type: 'body', parameters: args.bodyParams.map((text) => ({ type: 'text', text })) })
+  }
+  const payload = await zernioFetch(`/inbox/conversations/${encodeURIComponent(args.conversationId)}/messages`, {
+    method: 'POST',
+    headers: { 'Idempotency-Key': crypto.randomUUID() },
+    body: JSON.stringify({
+      accountId: args.zernioAccountId,
+      template: {
+        elements: [{
+          name: args.templateName,
+          language: args.templateLanguage,
+          ...(components.length ? { components } : {}),
+        }],
+      },
+    }),
+  })
+  const data = payload.data as Record<string, unknown> | undefined
+  const message = payload.message as Record<string, unknown> | undefined
+  const nestedMessage = data?.message as Record<string, unknown> | undefined
+  const id = message?.id ?? message?._id ?? nestedMessage?.id ?? nestedMessage?._id ?? data?.messageId ?? data?.id ?? payload.messageId ?? payload.id
+  return typeof id === 'string' && id.trim() ? id : null
+}
+
 export async function sendZernioText(conversationId: string, zernioAccountId: string, text: string) {
   const payload = await zernioFetch(`/inbox/conversations/${encodeURIComponent(conversationId)}/messages`, {
     method: 'POST',

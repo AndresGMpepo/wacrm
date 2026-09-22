@@ -34,6 +34,10 @@ interface TemplatePickerProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSelect: (template: MessageTemplate, values: TemplateSendValues) => void;
+  /** Scopes the template list to the number the conversation is actually on
+   *  — null/undefined means the native (direct Meta) WhatsApp connection. */
+  connectorId?: string | null;
+  channelType?: string | null;
 }
 
 function renderBodyPreview(body: string, params: string[]): string {
@@ -78,6 +82,8 @@ export function TemplatePicker({
   open,
   onOpenChange,
   onSelect,
+  connectorId,
+  channelType,
 }: TemplatePickerProps) {
   const t = useTranslations("Inbox.templatePicker");
 
@@ -111,11 +117,22 @@ export function TemplatePicker({
       // user_id. Templates are account-owned, so filtering on the caller's
       // user_id hid templates that a teammate created — leaving them unable
       // to send approved templates in a shared account.
-      const { data, error } = await supabase
+      //
+      // Also scope by connector: previously this always fetched EVERY
+      // approved template account-wide, so a Zernio-connected number and
+      // the native number showed the exact same list (including
+      // same-named duplicates) regardless of which conversation you were
+      // in — picking the wrong one meant the send route (scoped to the
+      // actual channel) couldn't find a matching template.
+      let query = supabase
         .from("message_templates")
         .select("*")
         .eq("status", "APPROVED")
         .order("created_at", { ascending: false });
+      query = channelType === "zernio_whatsapp" && connectorId
+        ? query.eq("connector_id", connectorId)
+        : query.is("connector_id", null);
+      const { data, error } = await query;
 
       if (cancelled) return;
       if (error) {
@@ -130,7 +147,7 @@ export function TemplatePicker({
     return () => {
       cancelled = true;
     };
-  }, [open]);
+  }, [open, connectorId, channelType]);
 
   function resetSelection() {
     setSelected(null);
