@@ -161,6 +161,8 @@ export default function BroadcastDetailPage() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [confirmStop, setConfirmStop] = useState(false);
+  const [stopping, setStopping] = useState(false);
 
   const fetchData = useCallback(async () => {
     try {
@@ -345,6 +347,49 @@ export default function BroadcastDetailPage() {
     router.push('/broadcasts');
   }
 
+  /**
+   * Recovery path for a broadcast abandoned by a client-side send loop
+   * (tab closed/reloaded mid-send — see use-broadcast-sending.ts) —
+   * marks any still-`pending` recipients as failed so the row is no
+   * longer stuck at "sending" forever, which also unblocks delete.
+   */
+  async function handleStopSending() {
+    setStopping(true);
+    const supabase = createClient();
+    const { error: recErr } = await supabase
+      .from('broadcast_recipients')
+      .update({ status: 'failed', error_message: 'Difusión detenida manualmente' })
+      .eq('broadcast_id', broadcastId)
+      .eq('status', 'pending');
+    if (recErr) {
+      setStopping(false);
+      toast.error(t('toastFailedStop', { error: recErr.message }));
+      return;
+    }
+    // The aggregate trigger (migration 003) recomputes sent_count/
+    // failed_count off that update — read it back to decide sent vs failed.
+    const { data: refreshed } = await supabase
+      .from('broadcasts')
+      .select('failed_count, total_recipients')
+      .eq('id', broadcastId)
+      .single();
+    const finalStatus =
+      refreshed && refreshed.failed_count >= refreshed.total_recipients ? 'failed' : 'sent';
+    const { error: bcErr } = await supabase
+      .from('broadcasts')
+      .update({ status: finalStatus })
+      .eq('id', broadcastId)
+      .eq('status', 'sending');
+    setStopping(false);
+    setConfirmStop(false);
+    if (bcErr) {
+      toast.error(t('toastFailedStop', { error: bcErr.message }));
+      return;
+    }
+    toast.success(t('toastStopped'));
+    await fetchData();
+  }
+
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center">
@@ -416,6 +461,45 @@ export default function BroadcastDetailPage() {
             <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
             {t('refresh')}
           </Button>
+
+          {/* Stop — recovers a broadcast abandoned by a closed/reloaded
+              send tab (stuck at "sending" with pending recipients that
+              will never be processed). Only shown while actively sending. */}
+          {broadcast.status === 'sending' && (
+            confirmStop ? (
+              <div className="flex items-center gap-2 rounded-md border border-yellow-500/30 bg-yellow-500/10 px-3 py-1.5 text-sm">
+                <span className="text-yellow-300">{t('stopPrompt')}</span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setConfirmStop(false)}
+                  disabled={stopping}
+                  className="h-7 border-border bg-transparent text-muted-foreground hover:bg-muted"
+                >
+                  {t('cancel')}
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={handleStopSending}
+                  disabled={stopping}
+                  className="h-7 bg-yellow-600 text-white hover:bg-yellow-700 disabled:opacity-50"
+                >
+                  {stopping ? t('stopping') : t('confirm')}
+                </Button>
+              </div>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setConfirmStop(true)}
+                title={t('stopHover')}
+                className="border-yellow-500/30 bg-transparent text-yellow-400 hover:bg-yellow-500/10"
+              >
+                <AlertCircle className="h-3.5 w-3.5" />
+                {t('stop')}
+              </Button>
+            )
+          )}
 
           {/* Delete — inline-confirm pattern matches the pipeline-settings
               "Delete Pipeline" flow. Mid-send broadcasts can't be deleted
