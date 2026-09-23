@@ -351,6 +351,9 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
       if (parseError) throw new Error(parseError);
       const credentials = data as { extension?: string; secret?: string; pbxUrl?: string; error?: string };
       if (!response.ok) throw new Error(credentials.error ?? 'No se pudo conectar el softphone.');
+      if (!credentials.extension || !credentials.secret || !credentials.pbxUrl) {
+        throw new Error('Configuración de softphone incompleta.');
+      }
 
       destroy.current?.();
       const sdk = await import('ys-webrtc-sdk-core');
