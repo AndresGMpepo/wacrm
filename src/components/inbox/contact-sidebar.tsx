@@ -20,6 +20,13 @@ import { ConversationInternalNotes } from './conversation-internal-notes';
 import { NexoMemoryPanel } from '@/components/contacts/nexo-memory-panel';
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { addContactTag, deleteContactTag } from "@/lib/contacts/tag-api";
 import { format } from "date-fns";
 import { useTranslations } from "next-intl";
 
@@ -70,6 +77,8 @@ export function ContactSidebar({ contact, conversationId, internalNotesOpenSigna
   const [deals, setDeals] = useState<Deal[]>([]);
   const [notes, setNotes] = useState<ContactNote[]>([]);
   const [tags, setTags] = useState<(Tag & { contact_tag_id: string })[]>([]);
+  const [allTags, setAllTags] = useState<Tag[]>([]);
+  const [savingTagId, setSavingTagId] = useState<string | null>(null);
   const [history, setHistory] = useState<ContactHistoryItem[]>([]);
   const [newNote, setNewNote] = useState("");
   const [addingNote, setAddingNote] = useState(false);
@@ -82,7 +91,7 @@ export function ContactSidebar({ contact, conversationId, internalNotesOpenSigna
     // The contact, not a provider-specific visitor label, is the stable
     // identity. This lets a known customer see their WhatsApp and Live Chat
     // threads together without ever merging conversations automatically.
-    const [dealsRes, notesRes, tagsRes, conversationsRes, callsRes] = await Promise.all([
+    const [dealsRes, notesRes, tagsRes, allTagsRes, conversationsRes, callsRes] = await Promise.all([
       supabase
         .from("deals")
         .select("*, stage:pipeline_stages(*)")
@@ -97,6 +106,7 @@ export function ContactSidebar({ contact, conversationId, internalNotesOpenSigna
         .from("contact_tags")
         .select("id, tag_id, tags(*)")
         .eq("contact_id", contact.id),
+      supabase.from("tags").select("*").order("name"),
       supabase
         .from("conversations")
         .select("id, status, last_message_text, last_message_at, channel_type, channel_source_label")
@@ -113,6 +123,7 @@ export function ContactSidebar({ contact, conversationId, internalNotesOpenSigna
 
     if (dealsRes.data) setDeals(dealsRes.data);
     if (notesRes.data) setNotes(notesRes.data);
+    if (allTagsRes.data) setAllTags(allTagsRes.data);
     if (tagsRes.data) {
       const mapped = tagsRes.data
         .filter((ct: Record<string, unknown>) => ct.tags)
@@ -216,6 +227,30 @@ export function ContactSidebar({ contact, conversationId, internalNotesOpenSigna
     setAddingNote(false);
   }, [contact, newNote, accountId]);
 
+  const handleToggleTag = useCallback(
+    async (tag: Tag) => {
+      if (!contact) return;
+      const existing = tags.find((t) => t.id === tag.id);
+      setSavingTagId(tag.id);
+      try {
+        if (existing) {
+          await deleteContactTag(contact.id, tag.id);
+          setTags((prev) => prev.filter((t) => t.id !== tag.id));
+        } else {
+          const result = await addContactTag(contact.id, tag.id);
+          if (result.added !== false) {
+            setTags((prev) => [...prev, { ...tag, contact_tag_id: `${contact.id}:${tag.id}` }]);
+          }
+        }
+      } catch {
+        // Best-effort — the dropdown stays open so the agent can retry.
+      } finally {
+        setSavingTagId(null);
+      }
+    },
+    [contact, tags],
+  );
+
   if (!contact) {
     return (
       <div className="flex h-full w-80 items-center justify-center border-l border-border bg-card">
@@ -302,9 +337,48 @@ export function ContactSidebar({ contact, conversationId, internalNotesOpenSigna
 
           {/* Tags */}
           <div>
-            <div className="flex items-center gap-2 px-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              <TagIcon className="h-3 w-3" />
-              {tSidebar("tags")}
+            <div className="flex items-center justify-between gap-2 px-1">
+              <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                <TagIcon className="h-3 w-3" />
+                {tSidebar("tags")}
+              </div>
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-5 w-5 text-muted-foreground hover:text-foreground"
+                      title={tSidebar("addTag")}
+                    />
+                  }
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="border-border bg-popover">
+                  {allTags.length === 0 ? (
+                    <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                      {tSidebar("noTagsAvailable")}
+                    </div>
+                  ) : (
+                    allTags.map((tag) => (
+                      <DropdownMenuCheckboxItem
+                        key={tag.id}
+                        checked={tags.some((t) => t.id === tag.id)}
+                        disabled={savingTagId === tag.id}
+                        onCheckedChange={() => handleToggleTag(tag)}
+                        className="text-popover-foreground"
+                      >
+                        <span
+                          className="mr-1.5 inline-block h-2 w-2 rounded-full"
+                          style={{ backgroundColor: tag.color }}
+                        />
+                        {tag.name}
+                      </DropdownMenuCheckboxItem>
+                    ))
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
             <div className="mt-2 flex flex-wrap gap-1">
               {tags.length === 0 ? (

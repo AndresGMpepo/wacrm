@@ -188,9 +188,11 @@
     "composer": {
       "draftHint": "Tap the ✨ to draft a reply with AI — you can edit it before sending",
       "sessionExpiredHint": "24-hour session expired. Use a template to re-engage.",
+      "conversationClosedHint": "This conversation is closed. Reopen it from the status menu to reply.",
       "templates": "Templates",
       "readOnlyPlaceholder": "Read-only — viewers can browse but not reply",
       "sessionExpiredPlaceholder": "Session expired - use a template",
+      "conversationClosedPlaceholder": "Conversation closed — reopen it to reply",
       "typeMessagePlaceholder": "Type a message... (Shift+Enter for new line)",
       "readOnlyTitle": "Read-only — your role can't send messages",
       "recording": "Recording… {current} / {max}",
@@ -271,6 +273,8 @@
       "notes": "Notes",
       "deals": "Deals",
       "noTags": "No tags",
+      "addTag": "Add tag",
+      "noTagsAvailable": "No tags created yet",
       "noDeals": "No deals",
       "addNotePlaceholder": "Add a note..."
     },

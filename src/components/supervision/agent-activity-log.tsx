@@ -69,6 +69,19 @@ const RANGES = [
   { value: '90', label: 'Últimos 90 días' },
 ]
 
+const DETAIL_KEY_LABELS: Record<string, string> = {
+  from_agent: 'de',
+  to_agent: 'a',
+  from: 'de',
+  to: 'a',
+  tag: 'etiqueta',
+  stage: 'etapa',
+  title: 'título',
+  value: 'valor',
+  starts_at: 'fecha',
+  queue: 'cola',
+}
+
 /** What the team actually did, and how much of it — the two questions a
  *  supervisor asks that the conversation list can't answer. */
 export function AgentActivityLog() {
@@ -262,7 +275,7 @@ export function AgentActivityLog() {
                         <p className="break-words text-[11px] text-muted-foreground">
                           {Object.entries(event.details)
                             .filter(([, value]) => value !== null && value !== undefined && value !== '')
-                            .map(([key, value]) => `${key}: ${String(value)}`)
+                            .map(([key, value]) => `${DETAIL_KEY_LABELS[key] ?? key}: ${String(value)}`)
                             .join(' · ')}
                         </p>
                       ) : null}

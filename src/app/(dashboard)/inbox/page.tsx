@@ -457,6 +457,27 @@ function InboxPageInner() {
   }, []);
 
   /**
+   * Poll safety net for the open conversation. A supervisor/owner watching
+   * an agent's chat live is the one case where two different users
+   * routinely have the SAME conversation open at once — if Realtime drops
+   * an event for that second viewer (WS hiccup, throttled background tab,
+   * etc.) they'd otherwise only catch up on next reload. Cheap since the
+   * message-thread auto-scroll is now keyed off the last message id, not
+   * array identity, so a no-op resync never yanks their scroll position.
+   */
+  useEffect(() => {
+    const conversationId = activeConversation?.id;
+    if (!conversationId) return;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        setResyncToken((n) => n + 1);
+      }
+    }, 6_000);
+    return () => window.clearInterval(timer);
+  }, [activeConversation?.id]);
+
+
+  /**
    * Manual refresh trigger for the thread-header refresh button.
    * Bumps the same resyncToken the reconnect / visibility paths use,
    * so it goes through the existing dedupe & refetch plumbing — no

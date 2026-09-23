@@ -464,8 +464,15 @@ export function MessageThread({
       });
   }, [conversationId, hasUnread]);
 
-  // Auto-scroll to bottom on new messages
+  // Auto-scroll to bottom on new messages. Keyed off the last message's id
+  // (not the array reference) so a resync/poll replacing the array with
+  // identical content never yanks the user back to bottom while they're
+  // scrolled up reading history.
+  const lastMessageIdRef = useRef<string | null>(null);
   useEffect(() => {
+    const lastId = messages.length ? messages[messages.length - 1].id : null;
+    if (lastId === lastMessageIdRef.current) return;
+    lastMessageIdRef.current = lastId;
     if (scrollRef.current) {
       const el = scrollRef.current;
       el.scrollTop = el.scrollHeight;
@@ -1210,6 +1217,7 @@ export function MessageThread({
         conversationId={conversation.id}
         channelType={conversation.channel_type}
         sessionExpired={isMetaDirectConversation && sessionInfo.expired}
+        conversationClosed={conversation.status === "closed"}
         onSend={handleSend}
         onSendMedia={handleSendMedia}
         onSendInteractive={handleSendInteractive}

@@ -113,6 +113,8 @@ interface MediaDraft {
 interface MessageComposerProps {
   conversationId: string;
   sessionExpired: boolean;
+  /** Closed conversations block every send action until reopened (status dropdown). */
+  conversationClosed?: boolean;
   onSend: (text: string, replyToId?: string) => void;
   onSendMedia: (payload: SendMediaPayload) => void;
   onSendInteractive: (payload: InteractiveMessagePayload, replyToId?: string) => void;
@@ -162,6 +164,7 @@ const OPUS_ENCODER_PATH = "/opus/encoderWorker.min.js";
 export function MessageComposer({
   conversationId,
   sessionExpired,
+  conversationClosed = false,
   onSend,
   onSendMedia,
   onSendInteractive,
@@ -228,7 +231,9 @@ export function MessageComposer({
   const canSend = useCan("send-messages");
   const readOnly = !canSend;
   // Media (like free-form text) is only allowed inside the 24h window.
-  const inputsDisabled = readOnly || sessionExpired;
+  // A closed conversation blocks everything until reopened via the status
+  // dropdown — there's no partial-send state for a closed thread.
+  const inputsDisabled = readOnly || sessionExpired || conversationClosed;
 
   const clearTimer = useCallback(() => {
     if (timerRef.current !== null) {
@@ -260,7 +265,7 @@ export function MessageComposer({
 
   const handleSend = useCallback(async () => {
     const trimmed = text.trim();
-    if (!trimmed || sending || sessionExpired) return;
+    if (!trimmed || sending || sessionExpired || conversationClosed) return;
 
     setSending(true);
     try {
@@ -272,7 +277,7 @@ export function MessageComposer({
     } finally {
       setSending(false);
     }
-  }, [text, sending, sessionExpired, onSend, replyTo?.id]);
+  }, [text, sending, sessionExpired, conversationClosed, onSend, replyTo?.id]);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -642,7 +647,11 @@ export function MessageComposer({
           />
         </div>
       )}
-      {sessionExpired && (
+      {conversationClosed ? (
+        <div className="mb-2 rounded-lg bg-muted px-3 py-2">
+          <p className="text-xs text-muted-foreground">{t("conversationClosedHint")}</p>
+        </div>
+      ) : sessionExpired && (
         <div className="mb-2 flex items-center justify-between rounded-lg bg-amber-500/10 px-3 py-2">
           <p className="text-xs text-amber-400">
             {sessionExpiredHint ?? t("sessionExpiredHint")}
@@ -799,7 +808,7 @@ export function MessageComposer({
             <GatedButton
               variant="ghost"
               size="sm"
-              canAct={!readOnly}
+              canAct={!readOnly && !conversationClosed}
               gateReason="send messages"
               title={readOnly ? undefined : t("sendTemplate")}
               className="h-9 w-9 shrink-0 p-0 text-muted-foreground hover:text-foreground"
@@ -812,7 +821,7 @@ export function MessageComposer({
           <GatedButton
             variant="ghost"
             size="sm"
-            canAct={!readOnly}
+            canAct={!readOnly && !conversationClosed}
             gateReason="send messages"
             disabled={drafting}
             title={readOnly ? undefined : t("draftWithAI")}
@@ -834,11 +843,13 @@ export function MessageComposer({
             placeholder={
               readOnly
                 ? t("readOnlyPlaceholder")
-                : sessionExpired
-                  ? t("sessionExpiredPlaceholder")
-                  : t("typeMessagePlaceholder")
+                : conversationClosed
+                  ? t("conversationClosedPlaceholder")
+                  : sessionExpired
+                    ? t("sessionExpiredPlaceholder")
+                    : t("typeMessagePlaceholder")
             }
-            disabled={sessionExpired || readOnly}
+            disabled={inputsDisabled}
             rows={1}
             // Textarea keeps its own inline title — the GatedButton
             // wrapping pattern doesn't apply to non-button inputs.
@@ -846,7 +857,7 @@ export function MessageComposer({
             title={readOnly ? t("readOnlyTitle") : undefined}
             className={cn(
               "flex-1 resize-none rounded-xl border border-border bg-muted px-4 py-2.5 text-sm text-foreground placeholder-muted-foreground outline-none transition-colors focus:border-primary/50",
-              (sessionExpired || readOnly) && "cursor-not-allowed opacity-50"
+              inputsDisabled && "cursor-not-allowed opacity-50"
             )}
           />
 
@@ -854,7 +865,7 @@ export function MessageComposer({
             size="sm"
             canAct={!readOnly}
             gateReason="send messages"
-            disabled={!text.trim() || sessionExpired || sending}
+            disabled={!text.trim() || inputsDisabled || sending}
             onClick={handleSend}
             className="h-9 w-9 shrink-0 bg-primary p-0 hover:bg-primary/90 disabled:opacity-40"
           >

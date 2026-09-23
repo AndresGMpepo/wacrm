@@ -77,11 +77,24 @@ export async function GET(request: Request) {
       contactName.set(contact.id as string, ((contact.name as string) || (contact.phone as string) || 'Contacto') as string)
     }
 
-    const events = rows.map((row) => ({
-      ...row,
-      agent: row.actor_user_id ? agentName.get(row.actor_user_id) ?? row.actor_user_id : null,
-      contact: row.contact_id ? contactName.get(row.contact_id) ?? null : null,
-    }))
+    const events = rows.map((row) => {
+      // `conversation_assigned`/`conversation_released` store the raw
+      // to_agent/from_agent UUIDs in `details` — resolve them to display
+      // names too so the bitácora never surfaces a raw ID to a supervisor.
+      const details = { ...row.details }
+      for (const key of ['from_agent', 'to_agent'] as const) {
+        const raw = details[key]
+        if (typeof raw === 'string') {
+          details[key] = agentName.get(raw) ?? raw
+        }
+      }
+      return {
+        ...row,
+        details,
+        agent: row.actor_user_id ? agentName.get(row.actor_user_id) ?? row.actor_user_id : null,
+        contact: row.contact_id ? contactName.get(row.contact_id) ?? null : null,
+      }
+    })
 
     if (url.searchParams.get('format') === 'csv') {
       const header = ['fecha', 'agente', 'accion', 'entidad', 'contacto', 'detalle']
