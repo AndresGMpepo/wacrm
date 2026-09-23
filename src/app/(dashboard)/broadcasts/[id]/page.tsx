@@ -38,6 +38,7 @@ import { toast } from 'sonner';
 import {
   getBroadcastStatus,
   getRecipientStatus,
+  reconcileStuckBroadcasts,
 } from '@/lib/broadcast-status';
 import { useTranslations } from 'next-intl';
 
@@ -172,7 +173,8 @@ export default function BroadcastDetailPage() {
         .single();
 
       if (bcError) throw bcError;
-      setBroadcast(bc);
+      const [reconciled] = await reconcileStuckBroadcasts(supabase, [bc]);
+      setBroadcast(reconciled);
 
       const { data: recs, error: recsError } = await supabase
         .from('broadcast_recipients')

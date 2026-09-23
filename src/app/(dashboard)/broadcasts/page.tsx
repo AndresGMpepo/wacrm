@@ -16,7 +16,7 @@ import {
 import { Radio, Plus, Loader2 } from 'lucide-react';
 import { useCan } from '@/hooks/use-can';
 import { GatedButton } from '@/components/ui/gated-button';
-import { getBroadcastStatus } from '@/lib/broadcast-status';
+import { getBroadcastStatus, reconcileStuckBroadcasts } from '@/lib/broadcast-status';
 import { useTranslations } from 'next-intl';
 
 /**
@@ -78,7 +78,7 @@ export default function BroadcastsPage() {
         .order('created_at', { ascending: false });
 
       if (fetchError) throw fetchError;
-      setBroadcasts(data ?? []);
+      setBroadcasts(await reconcileStuckBroadcasts(supabase, data ?? []));
     } catch (err) {
       setError(err instanceof Error ? err.message : t('errorLoad'));
     } finally {

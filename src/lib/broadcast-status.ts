@@ -11,7 +11,8 @@
  * light mode (a solid slate-400 would be too faint on white).
  */
 
-import type { BroadcastStatus, RecipientStatus } from "@/types";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Broadcast, BroadcastStatus, RecipientStatus } from "@/types";
 
 export interface StatusDisplay {
   label: string;
@@ -90,5 +91,50 @@ export function getRecipientStatus(status: string): StatusDisplay {
   return (
     recipientStatusConfig[status as RecipientStatus] ??
     recipientStatusConfig.pending
+  );
+}
+
+/**
+ * `createAndSendBroadcast` (use-broadcast-sending.ts) sends entirely
+ * client-side in a loop with a final `status: 'sent'|'failed'` update
+ * at the end — if the tab reloads/closes/loses connectivity after the
+ * last recipient send but before that final update, the row is stuck
+ * at "sending" forever even though every message actually went out.
+ * A broadcast genuinely in-flight always has recipients still
+ * `pending`, so any "sending" row whose recipients are ALL terminal
+ * (sent/failed) is safe to finalize here. Runs on every list/detail
+ * load as a self-healing backstop.
+ */
+export async function reconcileStuckBroadcasts<T extends Broadcast>(
+  supabase: SupabaseClient,
+  broadcasts: T[],
+): Promise<T[]> {
+  const stuck = broadcasts.filter(
+    (b) =>
+      b.status === "sending" &&
+      b.total_recipients > 0 &&
+      b.sent_count + b.failed_count >= b.total_recipients,
+  );
+  if (stuck.length === 0) return broadcasts;
+
+  const resolved = new Map<string, BroadcastStatus>();
+  await Promise.all(
+    stuck.map(async (b) => {
+      const finalStatus: BroadcastStatus =
+        b.failed_count >= b.total_recipients ? "failed" : "sent";
+      const { error } = await supabase
+        .from("broadcasts")
+        .update({ status: finalStatus })
+        // Guards against a race with a still-running tab that hasn't
+        // hit the "all terminal" condition from its own perspective yet.
+        .eq("id", b.id)
+        .eq("status", "sending");
+      if (!error) resolved.set(b.id, finalStatus);
+    }),
+  );
+
+  if (resolved.size === 0) return broadcasts;
+  return broadcasts.map((b) =>
+    resolved.has(b.id) ? { ...b, status: resolved.get(b.id)! } : b,
   );
 }

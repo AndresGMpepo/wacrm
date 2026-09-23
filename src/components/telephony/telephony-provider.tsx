@@ -125,6 +125,25 @@ function isSameSession(first: Session | null | undefined, second: Session | null
   return first === second || Boolean(firstCallId && secondCallId && firstCallId === secondCallId);
 }
 
+/**
+ * A stale/expired auth session makes these API routes 302 to the
+ * login page instead of returning JSON — `response.json()` then
+ * throws the cryptic "Unexpected token '<', "<!DOCTYPE "... is not
+ * valid JSON". Detected via content-type so callers can surface a
+ * clear message instead.
+ */
+async function parseJsonResponse(response: Response): Promise<{ data: unknown; error?: string }> {
+  const contentType = response.headers.get('content-type') ?? '';
+  if (!contentType.includes('application/json')) {
+    return { data: null, error: 'Tu sesión expiró. Recarga la página para reconectar el softphone.' };
+  }
+  try {
+    return { data: await response.json() };
+  } catch {
+    return { data: null, error: 'Respuesta inválida del servidor. Recarga la página para reconectar el softphone.' };
+  }
+}
+
 export function TelephonyProvider({ children }: { children: ReactNode }) {
   const [configured, setConfigured] = useState(false);
   const [connected, setConnected] = useState(false);
@@ -328,8 +347,10 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
     setConnecting(true);
     try {
       const response = await fetch('/api/telephony/yeastar/signature', { method: 'POST' });
-      const credentials = await response.json();
-      if (!response.ok) throw new Error(credentials.error);
+      const { data, error: parseError } = await parseJsonResponse(response);
+      if (parseError) throw new Error(parseError);
+      const credentials = data as { extension?: string; secret?: string; pbxUrl?: string; error?: string };
+      if (!response.ok) throw new Error(credentials.error ?? 'No se pudo conectar el softphone.');
 
       destroy.current?.();
       const sdk = await import('ys-webrtc-sdk-core');
@@ -421,13 +442,16 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
   const refreshConfiguration = useCallback(async () => {
     try {
       const response = await fetch('/api/telephony/config');
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error);
-      const ready = Boolean(data.config?.extension);
+      const { data, error: parseError } = await parseJsonResponse(response);
+      if (parseError) throw new Error(parseError);
+      const config = data as { config?: { extension?: string }; error?: string };
+      if (!response.ok) throw new Error(config.error ?? 'No se pudo cargar la configuración del softphone.');
+      const ready = Boolean(config.config?.extension);
       setConfigured(ready);
       if (ready) await connect();
-    } catch {
+    } catch (error) {
       setConfigured(false);
+      setStatus(error instanceof Error ? error.message : 'Error de conexión');
     }
   }, [connect]);
 
