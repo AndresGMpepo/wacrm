@@ -299,15 +299,21 @@ export function MessageThread({
   // separate from the unread-reset effect so that incoming messages
   // arriving while the thread is open don't trigger a full refetch —
   // they only flip hasUnread, which only the reset effect listens to.
+  const loadedConversationIdRef = useRef<string | null>(null);
   useEffect(() => {
     if (!conversationId) return;
 
     const supabase = createClient();
     let cancelled = false;
+    // Only the FIRST load of a given conversation should show the
+    // spinner — a `resyncToken` bump (reconnect/visibility/poll
+    // safety-net) refetches silently in the background, otherwise the
+    // whole thread blanks out every few seconds and looks like the
+    // platform is broken.
+    const isFirstLoad = loadedConversationIdRef.current !== conversationId;
+    if (isFirstLoad) setLoading(true);
 
     (async () => {
-      setLoading(true);
-
       const { data, error } = await supabase
         .from("messages")
         .select("*")
@@ -320,9 +326,10 @@ export function MessageThread({
         console.error("Failed to fetch messages:", error);
       } else {
         onMessagesLoadedRef.current(data ?? []);
+        loadedConversationIdRef.current = conversationId;
       }
 
-      if (!cancelled) setLoading(false);
+      if (!cancelled && isFirstLoad) setLoading(false);
     })();
 
     return () => {
@@ -333,6 +340,7 @@ export function MessageThread({
     // realtime is best-effort and any message events sent while the WS
     // was disconnected or throttled are otherwise lost.
   }, [conversationId, resyncToken]);
+
 
   // Reactions fetch — pulls the current state from the DB. Kept separate
   // from the channel subscription below so a `resyncToken` bump just
