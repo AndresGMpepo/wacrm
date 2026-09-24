@@ -30,6 +30,39 @@ export function admin() {
   return createAdminClient(url, key, { auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false } })
 }
 
+/**
+ * This report fires 15+ Supabase queries concurrently — under a burst like
+ * that, a self-hosted Postgres/PostgREST gateway occasionally drops one
+ * connection and returns its own HTML error page instead of JSON (confirmed
+ * via production logs: `<!DOCTYPE html>...Service is not reachable...`).
+ * postgrest-js doesn't throw for that, it returns `{ data: null, error:
+ * { message: '<!DOCTYPE html>...' } }` — retrying just that one query is
+ * enough to recover instead of failing the whole report.
+ */
+function isTransientQueryError(message: string | undefined): boolean {
+  if (!message) return false
+  const trimmed = message.trimStart()
+  return (
+    trimmed.startsWith('<!DOCTYPE') ||
+    trimmed.startsWith('<html') ||
+    /fetch failed|ECONNRESET|ETIMEDOUT|network|socket hang up/i.test(message)
+  )
+}
+
+async function withRetry<T extends { error: { message?: string } | null }>(
+  run: () => PromiseLike<T>,
+  attempts = 3,
+  delayMs = 400,
+): Promise<T> {
+  let last: T
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    last = await run()
+    if (!last.error || !isTransientQueryError(last.error.message)) return last
+    if (attempt < attempts - 1) await new Promise((resolve) => setTimeout(resolve, delayMs * (attempt + 1)))
+  }
+  return last!
+}
+
 function dayStart(value: string) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null
   const date = new Date(`${value}T00:00:00.000Z`)
@@ -95,11 +128,11 @@ export type ExecutiveReportRange = ReturnType<typeof computeRange>
 async function messageRowsForConversations(db: ReturnType<typeof admin>, ids: string[]) {
   const rows: MessageRow[] = []
   for (let start = 0; start < ids.length; start += 500) {
-    const { data, error } = await db
+    const { data, error } = await withRetry(() => db
       .from('messages')
       .select('conversation_id, sender_type, created_at')
       .in('conversation_id', ids.slice(start, start + 500))
-      .order('created_at', { ascending: true })
+      .order('created_at', { ascending: true }))
     if (error) throw error
     rows.push(...(data as MessageRow[] ?? []))
   }
@@ -114,27 +147,27 @@ export async function buildExecutiveReport(accountId: string, range: ExecutiveRe
   const db = admin()
 
   const [accountResult, conversationResult, previousConversationResult, backlogResult, resolvedResult, profilesResult, openConversationsResult, analysesResult, dealsResult, openDealsResult, broadcastsResult, contactMemoryResult, contactObjectionsResult, overdueCommitmentsResult, appointmentsResult] = await Promise.all([
-    db.from('accounts').select('operating_mode, default_currency').eq('id', accountId).single(),
-    db.from('conversations').select('id, assigned_agent_id, status, channel_type, created_at').eq('account_id', accountId).gte('created_at', range.from).lt('created_at', range.toExclusive).order('created_at'),
-    db.from('conversations').select('*', { count: 'exact', head: true }).eq('account_id', accountId).gte('created_at', range.previousFrom).lt('created_at', range.previousToExclusive),
-    db.from('conversations').select('*', { count: 'exact', head: true }).eq('account_id', accountId).in('status', ['open', 'pending']),
-    db.from('conversations').select('id, assigned_agent_id, status, channel_type, created_at').eq('account_id', accountId).eq('status', 'closed').gte('updated_at', range.from).lt('updated_at', range.toExclusive),
-    db.from('profiles').select('user_id, full_name').eq('account_id', accountId).order('full_name'),
-    db.from('conversations').select('assigned_agent_id').eq('account_id', accountId).in('status', ['open', 'pending']),
-    db.from('ai_conversation_analyses').select('conversation_id, sentiment, sentiment_score, qa_score').eq('account_id', accountId).eq('status', 'completed').gte('analyzed_at', range.from).lt('analyzed_at', range.toExclusive),
-    db.from('deals').select('value, status, updated_at, source_broadcast_id, source_channel, stage:pipeline_stages(name, position)').eq('account_id', accountId).gte('updated_at', range.from).lt('updated_at', range.toExclusive),
-    db.from('deals').select('value').eq('account_id', accountId).eq('status', 'open'),
-    db.from('broadcasts').select('id, name, template_name, status, created_at, total_recipients, sent_count, delivered_count, read_count, replied_count, failed_count').eq('account_id', accountId).gte('created_at', range.from).lt('created_at', range.toExclusive).order('created_at', { ascending: false }).limit(12),
+    withRetry(() => db.from('accounts').select('operating_mode, default_currency').eq('id', accountId).single()),
+    withRetry(() => db.from('conversations').select('id, assigned_agent_id, status, channel_type, created_at').eq('account_id', accountId).gte('created_at', range.from).lt('created_at', range.toExclusive).order('created_at')),
+    withRetry(() => db.from('conversations').select('*', { count: 'exact', head: true }).eq('account_id', accountId).gte('created_at', range.previousFrom).lt('created_at', range.previousToExclusive)),
+    withRetry(() => db.from('conversations').select('*', { count: 'exact', head: true }).eq('account_id', accountId).in('status', ['open', 'pending'])),
+    withRetry(() => db.from('conversations').select('id, assigned_agent_id, status, channel_type, created_at').eq('account_id', accountId).eq('status', 'closed').gte('updated_at', range.from).lt('updated_at', range.toExclusive)),
+    withRetry(() => db.from('profiles').select('user_id, full_name').eq('account_id', accountId).order('full_name')),
+    withRetry(() => db.from('conversations').select('assigned_agent_id').eq('account_id', accountId).in('status', ['open', 'pending'])),
+    withRetry(() => db.from('ai_conversation_analyses').select('conversation_id, sentiment, sentiment_score, qa_score').eq('account_id', accountId).eq('status', 'completed').gte('analyzed_at', range.from).lt('analyzed_at', range.toExclusive)),
+    withRetry(() => db.from('deals').select('value, status, updated_at, source_broadcast_id, source_channel, stage:pipeline_stages(name, position)').eq('account_id', accountId).gte('updated_at', range.from).lt('updated_at', range.toExclusive)),
+    withRetry(() => db.from('deals').select('value').eq('account_id', accountId).eq('status', 'open')),
+    withRetry(() => db.from('broadcasts').select('id, name, template_name, status, created_at, total_recipients, sent_count, delivered_count, read_count, replied_count, failed_count').eq('account_id', accountId).gte('created_at', range.from).lt('created_at', range.toExclusive).order('created_at', { ascending: false }).limit(12)),
     // Nexo Memory is a live snapshot ("current state of the relationship"),
     // not date-ranged like the rest of this report — a contact's risk
     // doesn't reset just because the report window changed.
-    db.from('contact_memory').select('risk_level, opportunity_score').eq('account_id', accountId),
-    db.from('contact_facts').select('fact').eq('account_id', accountId).eq('category', 'objection').eq('status', 'active').limit(2_000),
-    db.from('contact_commitments').select('id', { count: 'exact', head: true }).eq('account_id', accountId).eq('status', 'overdue'),
+    withRetry(() => db.from('contact_memory').select('risk_level, opportunity_score').eq('account_id', accountId)),
+    withRetry(() => db.from('contact_facts').select('fact').eq('account_id', accountId).eq('category', 'objection').eq('status', 'active').limit(2_000)),
+    withRetry(() => db.from('contact_commitments').select('id', { count: 'exact', head: true }).eq('account_id', accountId).eq('status', 'overdue')),
     // Appointments are date-ranged by created_at (when the booking
     // happened), not starts_at (when it's scheduled for) — that's what
     // "conversion in this period" and "cancellation rate this period" mean.
-    db.from('appointments').select('status, contact_id, created_at').eq('account_id', accountId).gte('created_at', range.from).lt('created_at', range.toExclusive),
+    withRetry(() => db.from('appointments').select('status, contact_id, created_at').eq('account_id', accountId).gte('created_at', range.from).lt('created_at', range.toExclusive)),
   ])
 
   for (const result of [accountResult, conversationResult, previousConversationResult, backlogResult, resolvedResult, profilesResult, openConversationsResult, analysesResult, dealsResult, openDealsResult, broadcastsResult, contactMemoryResult, contactObjectionsResult, overdueCommitmentsResult, appointmentsResult]) {
@@ -204,7 +237,7 @@ export async function buildExecutiveReport(accountId: string, range: ExecutiveRe
   const analysisConversationIds = [...new Set(analyses.map((row) => row.conversation_id))]
   const agentByAnalysisConversation = new Map<string, string | null>()
   for (let start = 0; start < analysisConversationIds.length; start += 500) {
-    const { data, error } = await db.from('conversations').select('id, assigned_agent_id').eq('account_id', accountId).in('id', analysisConversationIds.slice(start, start + 500))
+    const { data, error } = await withRetry(() => db.from('conversations').select('id, assigned_agent_id').eq('account_id', accountId).in('id', analysisConversationIds.slice(start, start + 500)))
     if (error) throw error
     for (const row of data ?? []) agentByAnalysisConversation.set(row.id, row.assigned_agent_id)
   }
@@ -259,7 +292,7 @@ export async function buildExecutiveReport(accountId: string, range: ExecutiveRe
   const broadcasts = (broadcastsResult.data ?? []) as BroadcastRow[]
   const attributedBroadcastIds = [...new Set(deals.map((deal) => deal.source_broadcast_id).filter((id): id is string => Boolean(id)))]
   const attributedBroadcastsResult = attributedBroadcastIds.length
-    ? await db.from('broadcasts').select('id, name, template_name, status, created_at, total_recipients, sent_count, delivered_count, read_count, replied_count, failed_count').eq('account_id', accountId).in('id', attributedBroadcastIds)
+    ? await withRetry(() => db.from('broadcasts').select('id, name, template_name, status, created_at, total_recipients, sent_count, delivered_count, read_count, replied_count, failed_count').eq('account_id', accountId).in('id', attributedBroadcastIds))
     : { data: [] as BroadcastRow[], error: null }
   if (attributedBroadcastsResult.error) throw attributedBroadcastsResult.error
   const reportBroadcasts = new Map<string, BroadcastRow>()
@@ -303,7 +336,7 @@ export async function buildExecutiveReport(accountId: string, range: ExecutiveRe
   // appointment that came from a conversation rather than a walk-in/manual
   // booking. Good enough to spot the trend without an expensive per-row join.
   const { data: contactsWithConversations, error: contactsWithConversationsError } = appointmentContactIds.length
-    ? await db.from('conversations').select('contact_id').eq('account_id', accountId).in('contact_id', appointmentContactIds)
+    ? await withRetry(() => db.from('conversations').select('contact_id').eq('account_id', accountId).in('contact_id', appointmentContactIds))
     : { data: [] as { contact_id: string }[], error: null }
   if (contactsWithConversationsError) throw contactsWithConversationsError
   const contactIdsWithConversation = new Set((contactsWithConversations ?? []).map((row) => row.contact_id))
