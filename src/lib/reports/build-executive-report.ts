@@ -125,13 +125,20 @@ export function computeRange(fromParam: string | null, toParam: string | null) {
 
 export type ExecutiveReportRange = ReturnType<typeof computeRange>
 
+// A `.in('conversation_id', [...])` filter puts every id in the query
+// string — with ~100+ conversations that URL grows large enough that the
+// self-hosted Kong/nginx gateway rejects the UPSTREAM response with
+// "upstream sent too big header" (502), confirmed in production logs.
+// Keeping batches small avoids that regardless of how busy an account is.
+const ID_QUERY_BATCH_SIZE = 40
+
 async function messageRowsForConversations(db: ReturnType<typeof admin>, ids: string[]) {
   const rows: MessageRow[] = []
-  for (let start = 0; start < ids.length; start += 500) {
+  for (let start = 0; start < ids.length; start += ID_QUERY_BATCH_SIZE) {
     const { data, error } = await withRetry(() => db
       .from('messages')
       .select('conversation_id, sender_type, created_at')
-      .in('conversation_id', ids.slice(start, start + 500))
+      .in('conversation_id', ids.slice(start, start + ID_QUERY_BATCH_SIZE))
       .order('created_at', { ascending: true }))
     if (error) throw error
     rows.push(...(data as MessageRow[] ?? []))
@@ -236,8 +243,8 @@ export async function buildExecutiveReport(accountId: string, range: ExecutiveRe
   // the owning agent for exactly the conversations these analyses touch.
   const analysisConversationIds = [...new Set(analyses.map((row) => row.conversation_id))]
   const agentByAnalysisConversation = new Map<string, string | null>()
-  for (let start = 0; start < analysisConversationIds.length; start += 500) {
-    const { data, error } = await withRetry(() => db.from('conversations').select('id, assigned_agent_id').eq('account_id', accountId).in('id', analysisConversationIds.slice(start, start + 500)))
+  for (let start = 0; start < analysisConversationIds.length; start += ID_QUERY_BATCH_SIZE) {
+    const { data, error } = await withRetry(() => db.from('conversations').select('id, assigned_agent_id').eq('account_id', accountId).in('id', analysisConversationIds.slice(start, start + ID_QUERY_BATCH_SIZE)))
     if (error) throw error
     for (const row of data ?? []) agentByAnalysisConversation.set(row.id, row.assigned_agent_id)
   }
