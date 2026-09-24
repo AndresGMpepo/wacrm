@@ -44,12 +44,17 @@ export async function POST() {
     const cacheKey = `${accountId}:${userId}`;
     const cached = credentialCache.get(cacheKey);
     const now = Math.floor(Date.now() / 1000);
-    if (cached && cached.extension === extension && cached.pbxUrl === config.pbx_url && cached.signatureExpiresAt > now + 30) {
+    // Both the signature AND the access token are only valid for the PBX/
+    // extension they were issued against — re-registering a different PBX
+    // (new pbx_url) must never reuse a token minted by the old one, even
+    // though it hasn't technically expired yet.
+    const cacheMatches = cached && cached.extension === extension && cached.pbxUrl === config.pbx_url;
+    if (cacheMatches && cached.signatureExpiresAt > now + 30) {
       return NextResponse.json({ extension: cached.extension, pbxUrl: cached.pbxUrl, secret: cached.signature, expiresAt: cached.signatureExpiresAt });
     }
     const accessId = decrypt(config.yeastar_access_id);
     const accessKey = decrypt(config.yeastar_access_key);
-    let accessToken = cached && cached.accessExpiresAt > now + 60 ? cached.accessToken : null;
+    let accessToken = cacheMatches && cached.accessExpiresAt > now + 60 ? cached.accessToken : null;
     if (!accessToken) {
     const tokenResponse = await fetch(`${config.pbx_url}/openapi/v1.0/get_token`, {
       method: 'POST',
