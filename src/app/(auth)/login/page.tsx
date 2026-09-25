@@ -15,7 +15,10 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { MessageSquare, UsersRound } from "lucide-react";
+
+// Official sales WhatsApp number — wa.me needs the full international
+// number (country code, no leading + or 0).
+const SALES_WHATSAPP_URL = `https://wa.me/525599595570?text=${encodeURIComponent("Estoy interesado en contratar NexoOmni")}`;
 
 // `useSearchParams` opts the component out of static prerendering
 // unless it sits under a Suspense boundary. We split the form into
@@ -78,13 +81,11 @@ function LoginPageInner() {
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <Card className="w-full max-w-md border-border bg-card">
         <CardHeader className="items-center text-center">
-          <div className="mb-2 flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
-            {inviteToken ? (
-              <UsersRound className="h-6 w-6 text-primary" />
-            ) : (
-              <MessageSquare className="h-6 w-6 text-primary" />
-            )}
-          </div>
+          <img
+            src="/nexoomni-guino-azul.gif"
+            alt="NexoOmni"
+            className="mb-2 h-16 w-16 object-contain"
+          />
           <CardTitle className="text-xl text-foreground">
             {inviteToken ? t('titleAccept') : t('titleWelcome')}
           </CardTitle>
@@ -150,17 +151,26 @@ function LoginPageInner() {
           </form>
 
           <p className="mt-6 text-center text-sm text-muted-foreground">
-            {t('noAccount')}{" "}
-            <Link
-              href={
-                inviteToken
-                  ? `/signup?invite=${encodeURIComponent(inviteToken)}`
-                  : "/signup"
-              }
-              className="text-primary hover:text-primary/80"
-            >
-              {t('createAccount')}
-            </Link>
+            {inviteToken ? (
+              <>
+                {t('noAccount')}{" "}
+                <Link
+                  href={`/signup?invite=${encodeURIComponent(inviteToken)}`}
+                  className="text-primary hover:text-primary/80"
+                >
+                  {t('createAccount')}
+                </Link>
+              </>
+            ) : (
+              <a
+                href={SALES_WHATSAPP_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary hover:text-primary/80"
+              >
+                {t('noAccount')} {t('createAccount')}
+              </a>
+            )}
           </p>
         </CardContent>
       </Card>

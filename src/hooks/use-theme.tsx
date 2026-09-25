@@ -65,6 +65,10 @@ function readInitialTheme(): ThemeId {
 
 function readInitialMode(): Mode {
   if (typeof window === "undefined") return DEFAULT_MODE;
+  // Whatever the boot script applied is the truth. Fall back to
+  // localStorage / the OS's own light-dark preference if for some
+  // reason the attribute is missing (e.g. someone bypassed the boot
+  // script in a custom layout).
   const fromAttr = document.documentElement.dataset.mode;
   if (isMode(fromAttr)) return fromAttr;
   try {
@@ -72,6 +76,9 @@ function readInitialMode(): Mode {
     if (isMode(stored)) return stored;
   } catch {
     // localStorage can throw in private-browsing / sandboxed contexts.
+  }
+  if (typeof window.matchMedia === "function") {
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
   }
   return DEFAULT_MODE;
 }

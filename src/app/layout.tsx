@@ -60,10 +60,17 @@ const THEME_BOOT_SCRIPT = `
     d.dataset.theme = THEMES.indexOf(savedTheme) !== -1 ? savedTheme : THEME_DEFAULT;
 
     var MODE_KEY = ${JSON.stringify(MODE_STORAGE_KEY)};
-    var MODE_DEFAULT = ${JSON.stringify(DEFAULT_MODE)};
     var MODES = ${JSON.stringify(MODES)};
     var savedMode = localStorage.getItem(MODE_KEY);
-    d.dataset.mode = MODES.indexOf(savedMode) !== -1 ? savedMode : MODE_DEFAULT;
+    if (MODES.indexOf(savedMode) !== -1) {
+      d.dataset.mode = savedMode;
+    } else {
+      // No saved preference yet (new client) — honor the OS/browser's
+      // own light/dark setting instead of forcing MODE_DEFAULT on
+      // everyone.
+      var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+      d.dataset.mode = prefersDark ? 'dark' : 'light';
+    }
   } catch (_e) {
     d.dataset.theme = ${JSON.stringify(DEFAULT_THEME)};
     d.dataset.mode = ${JSON.stringify(DEFAULT_MODE)};
