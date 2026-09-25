@@ -219,12 +219,13 @@ async function handleAccountLifecycleEvent(
 }
 
 /**
- * Mirrors an OUTBOUND WhatsApp delivery-status webhook onto
- * broadcast_recipients — the same mirror the native (direct Meta)
- * webhook does, so a broadcast sent through a Zernio-connected number
- * gets the same delivered/read/failed stats. Zernio doesn't emit these
- * for arbitrary messages we didn't record; only broadcast sends set
- * `whatsapp_message_id`, so the lookup below naturally scopes itself.
+ * Mirrors an OUTBOUND WhatsApp delivery-status webhook onto both
+ * `messages` (the ticks shown in the inbox thread — ✓ sent, ✓✓
+ * delivered, blue ✓✓ read) and `broadcast_recipients` (mass-send stats).
+ * Zernio reports this lifecycle for every outbound message, not just
+ * broadcast sends, so both mirrors are attempted independently — a miss
+ * on one (e.g. a regular 1:1 send has no broadcast_recipients row) must
+ * not skip the other.
  * https://docs.zernio.com/webhooks/inbox
  */
 async function handleOutboundStatusEvent(
@@ -247,6 +248,29 @@ async function handleOutboundStatusEvent(
   const status = eventType === 'message.delivered' ? 'delivered' : eventType === 'message.read' ? 'read' : 'failed'
   const now = new Date().toISOString()
 
+  // 1) Mirror onto the message itself — this is what the inbox thread's
+  //    ticks actually render (message-bubble.tsx's StatusIcon). Every
+  //    outbound Zernio send stores its `platform_message_id` (see
+  //    zernio/send/route.ts), so this matches regardless of whether the
+  //    message also belongs to a broadcast.
+  const { data: matchedMessage, error: messageFetchError } = await db
+    .from('messages')
+    .select('id, status')
+    .eq('sender_type', 'agent')
+    .in('platform_message_id', candidateIds)
+    .limit(1)
+    .maybeSingle()
+  if (messageFetchError) {
+    console.error('[zernio] could not look up message for status update:', messageFetchError.message)
+  } else if (matchedMessage && isValidStatusTransition(matchedMessage.status, status)) {
+    // `messages` has no error_message column (unlike broadcast_recipients)
+    // — the failure reason is only ever surfaced on the broadcast mirror.
+    const { error: messageUpdateError } = await db.from('messages').update({ status }).eq('id', matchedMessage.id)
+    if (messageUpdateError) console.error('[zernio] could not update message status:', messageUpdateError.message)
+  }
+
+  // 2) Mirror onto broadcast_recipients — only present for broadcast
+  //    sends, so a miss here is expected and not logged as an error.
   const { data: recipients, error: fetchError } = await db
     .from('broadcast_recipients')
     .select('id, status')
@@ -257,10 +281,7 @@ async function handleOutboundStatusEvent(
     return
   }
   const recipient = recipients?.[0]
-  if (!recipient) {
-    console.warn(`[zernio] ${eventType} webhook matched no broadcast recipient for ids:`, candidateIds)
-    return
-  }
+  if (!recipient) return
   if (!isValidStatusTransition(recipient.status, status)) {
     console.warn(`[zernio] ${eventType} webhook ignored — invalid transition ${recipient.status} -> ${status} for recipient ${recipient.id}`)
     return
@@ -274,6 +295,7 @@ async function handleOutboundStatusEvent(
   const { error: updateError } = await db.from('broadcast_recipients').update(update).eq('id', recipient.id)
   if (updateError) console.error('[zernio] could not update broadcast recipient status:', updateError.message)
 }
+
 
 export async function POST(request: Request) {
   const raw = await request.text()
