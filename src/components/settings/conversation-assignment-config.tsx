@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { GitPullRequestArrow, Loader2, Save, UsersRound } from 'lucide-react'
+import { GitPullRequestArrow, Loader2, Save, ShieldCheck, UsersRound } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -11,12 +11,15 @@ import { cn } from '@/lib/utils'
 import { SettingsPanelHead } from './settings-panel-head'
 
 type AssignmentMode = 'round_robin' | 'least_open'
+type Agent = { user_id: string; full_name: string }
 
 export function ConversationAssignmentConfig() {
   const { profile } = useAuth()
   const canManage = profile?.account_role === 'owner' || profile?.account_role === 'admin'
   const [enabled, setEnabled] = useState(false)
   const [mode, setMode] = useState<AssignmentMode>('round_robin')
+  const [backupAgentId, setBackupAgentId] = useState<string>('')
+  const [agents, setAgents] = useState<Agent[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
@@ -27,6 +30,8 @@ export function ConversationAssignmentConfig() {
       if (!response.ok) throw new Error(payload.error)
       setEnabled(Boolean(payload.policy?.enabled))
       setMode(payload.policy?.mode === 'least_open' ? 'least_open' : 'round_robin')
+      setBackupAgentId(payload.policy?.backup_agent_id ?? '')
+      setAgents(payload.agents ?? [])
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'No se pudo cargar la política de asignación.')
     } finally {
@@ -45,7 +50,7 @@ export function ConversationAssignmentConfig() {
       const response = await fetch('/api/conversations/assignment-policy', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled, mode }),
+        body: JSON.stringify({ enabled, mode, backup_agent_id: backupAgentId || null }),
       })
       const payload = await response.json()
       if (!response.ok) throw new Error(payload.error)
@@ -101,6 +106,22 @@ export function ConversationAssignmentConfig() {
           </div>
 
           <p className="rounded-md border border-emerald-500/25 bg-emerald-500/10 p-3 text-xs text-emerald-700 dark:text-emerald-400">La disponibilidad se valida con el pulso de sesión: ausente o desconectado significa que no recibe asignaciones automáticas.</p>
+
+          <div className="space-y-2 rounded-lg border border-border p-4">
+            <p className="flex items-center gap-2 text-sm font-medium"><ShieldCheck className="size-4" /> Enrutamiento continuo y agente de respaldo</p>
+            <p className="text-xs text-muted-foreground">Un cliente que vuelve a escribir se asigna automáticamente al mismo agente que lo atendió antes. Si ese agente está inactivo, dado de baja o desconectado, el chat pasa al agente de respaldo configurado aquí.</p>
+            <select
+              value={backupAgentId}
+              onChange={(event) => setBackupAgentId(event.target.value)}
+              disabled={loading || saving || !canManage}
+              className="mt-2 w-full rounded-md border border-border bg-background px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-55"
+            >
+              <option value="">Sin agente de respaldo</option>
+              {agents.map((agent) => (
+                <option key={agent.user_id} value={agent.user_id}>{agent.full_name}</option>
+              ))}
+            </select>
+          </div>
 
           {!canManage ? <p className="text-xs text-muted-foreground">Solo el propietario o un administrador puede modificar esta política.</p> : null}
 

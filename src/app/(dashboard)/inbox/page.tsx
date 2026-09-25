@@ -499,6 +499,20 @@ function InboxPageInner() {
   const handleConversationsLoaded = useCallback(
     (loaded: Conversation[]) => {
       setConversations(loaded);
+      // A manual click's router.replace(?c=<id>) hasn't necessarily landed
+      // in `deepLinkConvId` yet by the time this fires — the 6s poll safety
+      // net (and reconnect/visibility resyncs) can call this mid-flight.
+      // Without this guard, the block below sees the STALE deepLinkConvId
+      // (still the previous conversation), resets
+      // `autoSelectedForDeepLinkRef` to it, and snaps `activeConversation`
+      // back to the thread the user just navigated away from (bug: viewing
+      // a chat reverts to the previous one on its own).
+      if (
+        manualSelectionRef.current &&
+        manualSelectionRef.current !== deepLinkConvId
+      ) {
+        return;
+      }
       // Resolve a pending deep-link here rather than in an effect — this
       // is an event handler, so the setState calls below are allowed by
       // react-hooks/set-state-in-effect. Runs once per ?c=<id> URL value
@@ -712,6 +726,7 @@ function InboxPageInner() {
             resyncToken={resyncToken}
             channelFilter={channelFilter}
             onChannelFilterChange={handleChannelFilterChange}
+            onAssignChange={handleAssignChange}
           />
         </div>
 

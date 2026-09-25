@@ -155,7 +155,15 @@
       "clearAll": "Borrar todo",
       "noConversations": "No se encontraron conversaciones",
       "noMessagesYet": "Aún no hay mensajes",
-      "unknown": "Desconocido"
+      "unknown": "Desconocido",
+      "scopeMine": "Mías",
+      "scopeAll": "Todas",
+      "scopeUnassigned": "Sin asignar",
+      "takeConversation": "Tomar conversación",
+      "takeConversationSuccess": "Conversación asignada a ti.",
+      "takeConversationError": "No se pudo tomar la conversación.",
+      "campaignAll": "Todas las campañas",
+      "campaignLabel": "Campaña"
     },
     "messageThread": {
       "backToConversations": "Volver a conversaciones",
@@ -185,7 +193,11 @@
       "expired": "Expirada",
       "xhRemaining": "{hours}h restantes",
       "xmRemaining": "{minutes}m restantes",
-      "noCustomerMessages": "No hay mensajes del cliente"
+      "noCustomerMessages": "No hay mensajes del cliente",
+      "lastActivityJustNow": "Última actividad justo ahora",
+      "lastActivityMinutes": "Última actividad hace {minutes} min",
+      "lastActivityHours": "Última actividad hace {hours} h",
+      "lastActivityDays": "Última actividad hace {days} d"
     },
     "composer": {
       "draftHint": "Toca el ✨ para una respuesta de IA con el contexto, tono y siguiente acción — podrás editarla antes de enviar",

@@ -155,7 +155,15 @@
       "clearAll": "Clear all",
       "noConversations": "No conversations found",
       "noMessagesYet": "No messages yet",
-      "unknown": "Unknown"
+      "unknown": "Unknown",
+      "scopeMine": "Mine",
+      "scopeAll": "All",
+      "scopeUnassigned": "Unassigned",
+      "takeConversation": "Take conversation",
+      "takeConversationSuccess": "Conversation assigned to you.",
+      "takeConversationError": "Could not take the conversation.",
+      "campaignAll": "All campaigns",
+      "campaignLabel": "Campaign"
     },
     "messageThread": {
       "backToConversations": "Back to conversations",
@@ -185,7 +193,11 @@
       "expired": "Expired",
       "xhRemaining": "{hours}h remaining",
       "xmRemaining": "{minutes}m remaining",
-      "noCustomerMessages": "No customer messages"
+      "noCustomerMessages": "No customer messages",
+      "lastActivityJustNow": "Last activity just now",
+      "lastActivityMinutes": "Last activity {minutes, plural, =1 {1 minute} other {# minutes}} ago",
+      "lastActivityHours": "Last activity {hours, plural, =1 {1 hour} other {# hours}} ago",
+      "lastActivityDays": "Last activity {days, plural, =1 {1 day} other {# days}} ago"
     },
     "composer": {
       "draftHint": "Tap the ✨ to draft a reply with AI — you can edit it before sending",

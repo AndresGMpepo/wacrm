@@ -2,14 +2,16 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { toast } from "sonner";
 import {
   CONVERSATION_SELECT,
   matchesContactFilters,
   normalizeConversations,
 } from "@/lib/inbox/conversations";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/hooks/use-auth";
 import type { Conversation, ConversationStatus, Tag } from "@/types";
-import { Search, ChevronDown, Siren, X } from "lucide-react";
+import { Search, ChevronDown, Siren, UserPlus, X } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { useTranslations } from "next-intl";
 import { Input } from "@/components/ui/input";
@@ -36,7 +38,24 @@ interface ConversationListProps {
   resyncToken?: number;
   channelFilter?: InboxChannelFilter;
   onChannelFilterChange?: (channel: InboxChannelFilter) => void;
+  /**
+   * REQ-04: fired after a successful self-assign ("Tomar conversación")
+   * so the parent's `conversations` / `activeConversation` state reflects
+   * the new owner without waiting for a realtime round-trip.
+   */
+  onAssignChange?: (conversationId: string, assignedAgentId: string | null) => void;
 }
+
+/**
+ * REQ-04: what slice of the account's conversations this view shows.
+ *  - 'mine'       — only conversations assigned to the signed-in user.
+ *  - 'unassigned' — conversations with no agent yet (quick filter +
+ *                    "Tomar conversación" self-assign).
+ *  - 'all'        — every conversation the caller's RLS grants (role
+ *                    superiores only — agents never see 'all' since the
+ *                    database itself only returns their own + unassigned).
+ */
+type AssignmentScope = "mine" | "unassigned" | "all";
 
 const STATUS_COLORS: Record<ConversationStatus, string> = {
   open: "bg-primary",
@@ -78,9 +97,12 @@ export function ConversationList({
   resyncToken = 0,
   channelFilter = "all",
   onChannelFilterChange,
+  onAssignChange,
 }: ConversationListProps) {
   const t = useTranslations("Inbox.conversationList");
-  
+  const { user, accountRole } = useAuth();
+  const isAgentRole = accountRole === "agent";
+
   const FILTER_OPTIONS: { label: string; value: InboxFilter }[] = useMemo(() => [
     { label: t("filterAll"), value: "all" },
     { label: t("filterUnread"), value: "unread" },
@@ -88,6 +110,28 @@ export function ConversationList({
     { label: t("filterPending"), value: "pending" },
     { label: t("filterClosed"), value: "closed" },
   ], [t]);
+
+  // REQ-04: agents default to "Mine" (the DB itself only ever returns
+  // their assigned + unassigned rows — see migration 123); roles
+  // superiores default to "All" and never enter automatic rotation, but
+  // can switch to "Mine" to see chats they took manually.
+  const SCOPE_OPTIONS: { label: string; value: AssignmentScope }[] = useMemo(() => [
+    ...(isAgentRole ? [] : [{ label: t("scopeAll"), value: "all" as const }]),
+    { label: t("scopeMine"), value: "mine" as const },
+    { label: t("scopeUnassigned"), value: "unassigned" as const },
+  ], [t, isAgentRole]);
+  const [assignmentScope, setAssignmentScope] = useState<AssignmentScope>(
+    isAgentRole ? "mine" : "all",
+  );
+  // Reset the scope default once the role resolves (it's null on first
+  // render until useAuth's profile fetch settles).
+  const scopeInitializedRef = useRef(false);
+  useEffect(() => {
+    if (scopeInitializedRef.current) return;
+    if (accountRole === null) return;
+    scopeInitializedRef.current = true;
+    setAssignmentScope(accountRole === "agent" ? "mine" : "all");
+  }, [accountRole]);
 
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<InboxFilter>("all");
@@ -98,6 +142,12 @@ export function ConversationList({
   const [tags, setTags] = useState<Tag[]>([]);
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [selectedCompany, setSelectedCompany] = useState<string | null>(null);
+  // REQ-04: filter by the broadcast campaign a contact came from.
+  const [campaigns, setCampaigns] = useState<{ id: string; name: string }[]>([]);
+  const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
+  const [campaignContactIds, setCampaignContactIds] = useState<Set<string> | null>(null);
+  const [takingConversationId, setTakingConversationId] = useState<string | null>(null);
+
 
   // Keep the latest callback in a ref so the fetch effect below can
   // have a stable, empty-dep identity. Previously the fetch useCallback
@@ -166,6 +216,51 @@ export function ConversationList({
     };
   }, []);
 
+  // REQ-04: broadcast campaigns available to filter by — loaded once,
+  // most recent first, same pattern as the tags picker above.
+  useEffect(() => {
+    const supabase = createClient();
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from("broadcasts")
+        .select("id, name")
+        .order("created_at", { ascending: false })
+        .limit(100);
+      if (!cancelled && data) setCampaigns(data as { id: string; name: string }[]);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Resolve the selected campaign into the set of contact ids it reached,
+  // via broadcast_recipients (conversations have no direct campaign link).
+  useEffect(() => {
+    if (!selectedCampaignId) {
+      setCampaignContactIds(null);
+      return;
+    }
+    const supabase = createClient();
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase
+        .from("broadcast_recipients")
+        .select("contact_id")
+        .eq("broadcast_id", selectedCampaignId);
+      if (cancelled) return;
+      if (error) {
+        console.error("Failed to fetch campaign recipients:", error.message);
+        setCampaignContactIds(new Set());
+        return;
+      }
+      setCampaignContactIds(new Set((data ?? []).map((row) => row.contact_id as string)));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedCampaignId]);
+
   // Company options are derived from the loaded conversations — there's no
   // separate companies table, and only companies with a live conversation
   // are worth offering as an inbox filter.
@@ -197,6 +292,21 @@ export function ConversationList({
       result = result.filter((c) => normalizedChannel(c.channel_type) === channelFilter);
     }
 
+    // REQ-04: assignment-scope quick filter. Agents' underlying data is
+    // already limited to their own + unassigned rows by RLS (migration
+    // 123) — this just decides which slice of THAT to show. Roles
+    // superiores get the full account here, since their query isn't
+    // restricted server-side.
+    if (assignmentScope === "mine") {
+      result = result.filter((c) => c.assigned_agent_id === user?.id);
+    } else if (assignmentScope === "unassigned") {
+      result = result.filter((c) => !c.assigned_agent_id);
+    }
+
+    if (selectedCampaignId && campaignContactIds) {
+      result = result.filter((c) => c.contact_id && campaignContactIds.has(c.contact_id));
+    }
+
     // Contact-based filters (tags via OR logic, exact company match).
     if (selectedTagIds.length > 0 || selectedCompany !== null) {
       result = result.filter((c) =>
@@ -218,7 +328,35 @@ export function ConversationList({
     }
 
     return result;
-  }, [conversations, filter, channelFilter, search, selectedTagIds, selectedCompany]);
+  }, [conversations, filter, channelFilter, search, selectedTagIds, selectedCompany, assignmentScope, user?.id, selectedCampaignId, campaignContactIds]);
+
+  // REQ-04: self-assign an unassigned chat ("Tomar conversación"). Any
+  // signed-in member with agent+ role can do this — conversations_update's
+  // RLS already allows it; this is purely the client-side action + the
+  // optimistic state patch via onAssignChange.
+  const handleTakeConversation = useCallback(
+    async (conversationId: string) => {
+      if (!user?.id) return;
+      setTakingConversationId(conversationId);
+      try {
+        const supabase = createClient();
+        const { error } = await supabase
+          .from("conversations")
+          .update({ assigned_agent_id: user.id })
+          .eq("id", conversationId)
+          .is("assigned_agent_id", null);
+        if (error) throw error;
+        onAssignChange?.(conversationId, user.id);
+        toast.success(t("takeConversationSuccess"));
+      } catch (error) {
+        console.error("Failed to take conversation:", error);
+        toast.error(t("takeConversationError"));
+      } finally {
+        setTakingConversationId(null);
+      }
+    },
+    [user?.id, onAssignChange, t],
+  );
 
   const toggleTag = useCallback((id: string) => {
     setSelectedTagIds((prev) =>
@@ -249,6 +387,8 @@ export function ConversationList({
 
   const activeFilter = FILTER_OPTIONS.find((o) => o.value === filter);
   const activeChannel = CHANNEL_OPTIONS.find((option) => option.value === channelFilter);
+  const activeScope = SCOPE_OPTIONS.find((option) => option.value === assignmentScope);
+  const activeCampaign = campaigns.find((c) => c.id === selectedCampaignId);
 
   return (
     // w-full on mobile so the list occupies the whole viewport when it's
@@ -311,6 +451,62 @@ export function ConversationList({
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
+
+          {/* REQ-04: Mine / All / Unassigned quick filter. */}
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              className={cn(
+                "inline-flex h-7 items-center justify-center gap-1 rounded-md px-2 text-xs hover:bg-muted",
+                assignmentScope !== "all" ? "text-primary" : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {activeScope?.label ?? t("scopeAll")}
+              <ChevronDown className="h-3 w-3" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="border-border bg-popover">
+              {SCOPE_OPTIONS.map((option) => (
+                <DropdownMenuItem
+                  key={option.value}
+                  onClick={() => setAssignmentScope(option.value)}
+                  className={cn("text-sm", assignmentScope === option.value ? "text-primary" : "text-popover-foreground")}
+                >
+                  {option.label}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          {/* REQ-04: filter by the broadcast campaign a contact came from. */}
+          {campaigns.length > 0 && (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                className={cn(
+                  "inline-flex max-w-40 items-center justify-center h-7 gap-1 px-2 text-xs rounded-md hover:bg-muted",
+                  selectedCampaignId ? "text-primary" : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <span className="truncate">{activeCampaign?.name ?? t("campaignLabel")}</span>
+                <ChevronDown className="h-3 w-3 shrink-0" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="max-h-64 w-56 border-border bg-popover">
+                <DropdownMenuItem
+                  onClick={() => setSelectedCampaignId(null)}
+                  className={cn("text-sm", selectedCampaignId === null ? "text-primary" : "text-popover-foreground")}
+                >
+                  {t("campaignAll")}
+                </DropdownMenuItem>
+                {campaigns.map((campaign) => (
+                  <DropdownMenuItem
+                    key={campaign.id}
+                    onClick={() => setSelectedCampaignId(campaign.id)}
+                    className={cn("text-sm", selectedCampaignId === campaign.id ? "text-primary" : "text-popover-foreground")}
+                  >
+                    <span className="truncate">{campaign.name}</span>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
 
           {tags.length > 0 && (
             <DropdownMenu>
@@ -462,6 +658,8 @@ export function ConversationList({
                 conversation={conv}
                 isActive={conv.id === activeConversationId}
                 onSelect={handleSelect}
+                onTake={handleTakeConversation}
+                taking={takingConversationId === conv.id}
                 t={t}
               />
             ))}
@@ -476,6 +674,9 @@ interface ConversationItemProps {
   conversation: Conversation;
   isActive: boolean;
   onSelect: (conversation: Conversation) => void;
+  /** REQ-04: self-assign an unassigned chat ("Tomar conversación"). */
+  onTake: (conversationId: string) => void;
+  taking: boolean;
   t: ReturnType<typeof useTranslations>;
 }
 
@@ -483,6 +684,8 @@ function ConversationItem({
   conversation,
   isActive,
   onSelect,
+  onTake,
+  taking,
   t,
 }: ConversationItemProps) {
   const contact = conversation.contact;
@@ -492,6 +695,14 @@ function ConversationItem({
   const handleClick = useCallback(() => {
     onSelect(conversation);
   }, [onSelect, conversation]);
+
+  const handleTakeClick = useCallback(
+    (event: React.MouseEvent) => {
+      event.stopPropagation();
+      onTake(conversation.id);
+    },
+    [onTake, conversation.id],
+  );
 
   const timeAgo = conversation.last_message_at
     ? formatDistanceToNow(new Date(conversation.last_message_at), {
@@ -564,6 +775,18 @@ function ConversationItem({
             {conversation.channel_source_label ? ` · ${conversation.channel_source_label}` : ""}
           </p>
         ) : null}
+        {/* REQ-04: self-assign an unassigned chat straight from the list. */}
+        {!conversation.assigned_agent_id && (
+          <button
+            type="button"
+            onClick={handleTakeClick}
+            disabled={taking}
+            className="mt-1.5 inline-flex items-center gap-1 rounded-full border border-primary/40 bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary hover:bg-primary/15 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <UserPlus className="h-3 w-3" />
+            {t("takeConversation")}
+          </button>
+        )}
       </div>
     </button>
   );
