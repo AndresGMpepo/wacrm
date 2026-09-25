@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 
 export default function AccountSuspendedPage() {
   return (
-    <main className="flex min-h-screen items-center justify-center bg-background px-4">
+    <main className="auth-shell flex min-h-screen items-center justify-center bg-background px-4">
       <Card className="w-full max-w-md border-border bg-card text-center">
         <CardHeader className="items-center">
           <div className="mb-2 flex size-12 items-center justify-center rounded-xl bg-amber-500/10"><CirclePause className="size-6 text-amber-500" /></div>

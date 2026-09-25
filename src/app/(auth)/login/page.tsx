@@ -78,13 +78,13 @@ function LoginPageInner() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
+    <div className="auth-shell flex min-h-screen items-center justify-center bg-background px-4">
       <Card className="w-full max-w-md border-border bg-card">
         <CardHeader className="items-center text-center">
           <img
             src="/nexoomni-guino-azul.gif"
             alt="NexoOmni"
-            className="mb-2 h-16 w-16 object-contain"
+            className="mb-2 h-12 w-auto max-w-[220px] object-contain"
           />
           <CardTitle className="text-xl text-foreground">
             {inviteToken ? t('titleAccept') : t('titleWelcome')}

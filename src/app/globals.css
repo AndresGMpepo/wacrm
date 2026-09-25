@@ -149,6 +149,30 @@ html[data-mode="light"] {
   --sidebar-border: oklch(0.922 0.004 260);
 }
 
+/* Auth screens (login / signup / forgot-password / set-password /
+ * account-suspended) always render on a light, high-contrast surface —
+ * regardless of the visitor's saved or system dark-mode preference. The
+ * brand wordmark is designed for a light background, and this is the
+ * very first thing every visitor sees, so it must never inherit an
+ * illegible combination. Mirrors html[data-mode="light"] above. */
+.auth-shell {
+  --background: oklch(0.99 0.002 260);
+  --foreground: oklch(0.21 0.01 260);
+  --card: oklch(1 0 0);
+  --card-2: oklch(0.985 0.002 260);
+  --card-foreground: oklch(0.21 0.01 260);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.21 0.01 260);
+  --secondary: oklch(0.967 0.003 260);
+  --secondary-foreground: oklch(0.25 0.01 260);
+  --muted: oklch(0.967 0.003 260);
+  --muted-foreground: oklch(0.52 0.015 260);
+  --accent: oklch(0.96 0.004 260);
+  --accent-foreground: oklch(0.25 0.01 260);
+  --border: oklch(0.922 0.004 260);
+  --input: oklch(0.922 0.004 260);
+}
+
 /* ---- ACCENT: primary color ---- */
 
 :root,

@@ -1,9 +1,10 @@
 import { ImageResponse } from "next/og";
 
-// Replaces the default Next.js favicon with the brand mark — Hostinger
-// violet rounded square + white chat-square glyph — matching the
-// sidebar logo in `src/components/layout/sidebar.tsx`. Next.js renders
-// this at build time and auto-injects <link rel="icon"> into <head>.
+// Replaces the default Next.js favicon with the NexoOmni brand mark —
+// the green-ringed "eye" glyph from the wordmark logo, on white — so
+// the browser tab matches the actual product identity instead of a
+// generic purple square. Next.js renders this at build time and
+// auto-injects <link rel="icon"> into <head>.
 //
 // This route takes precedence over src/app/favicon.ico, which is the
 // Next.js default and can stay on disk harmlessly (or be removed).
@@ -22,24 +23,20 @@ export default function Icon() {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          background: "#7c3aed", // primary (Hostinger-aligned purple)
+          background: "#ffffff",
           borderRadius: 6,
         }}
       >
-        <svg
-          width="20"
-          height="20"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="#ffffff"
-          strokeWidth="2.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+        <svg width="26" height="26" viewBox="0 0 108 106" fill="none">
+          <circle cx="54" cy="53" r="43" fill="none" stroke="#16bd57" strokeWidth="12" />
+          <circle cx="54" cy="53" r="13" fill="#061b45" />
+          <circle cx="49" cy="48" r="4" fill="#fff" />
+          <path d="M21 12 Q54 -8 87 12" fill="none" stroke="#061b45" strokeWidth="8" strokeLinecap="round" />
+          <path d="M21 94 Q54 114 87 94" fill="none" stroke="#061b45" strokeWidth="8" strokeLinecap="round" />
         </svg>
       </div>
     ),
     { ...size },
   );
 }
+
