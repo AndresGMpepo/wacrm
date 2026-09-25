@@ -3,12 +3,14 @@ import { requireRole, toErrorResponse } from '@/lib/auth/account'
 
 export async function GET() {
   try {
-    const { supabase, accountId, userId } = await requireRole('agent')
-    const { data, error } = await supabase.from('call_follow_up_tasks')
+    const { supabase, accountId, userId, role } = await requireRole('agent')
+    let query = supabase.from('call_follow_up_tasks')
       .select('id, conversation_id, assigned_agent_id, due_at, status, source, created_at, conversation:conversations(contact:contacts(name, phone))')
       .eq('account_id', accountId).eq('status', 'pending')
-      .or(`assigned_agent_id.is.null,assigned_agent_id.eq.${userId}`)
-      .order('due_at').limit(50)
+    // Owners/admins/supervisors get the full account queue; plain agents
+    // only see tasks assigned to them or still unassigned (REQ-02).
+    if (role === 'agent') query = query.or(`assigned_agent_id.is.null,assigned_agent_id.eq.${userId}`)
+    const { data, error } = await query.order('due_at').limit(50)
     if (error) throw error
     const tasks = data ?? []
     const conversationIds = [...new Set(tasks.map((task) => task.conversation_id))]

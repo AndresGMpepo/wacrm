@@ -101,6 +101,12 @@ interface NavItem {
   module?: 'pipelines' | 'appointments';
 }
 
+// The agent role only gets an operational subset — everything else
+// (reports, broadcasts, automations, flows, supervision, AI agents,
+// call transcriptions, dashboard) is owner/admin/supervisor territory.
+// Keep in sync with the server-side guard in src/proxy.ts.
+const AGENT_ALLOWED_PATHS = ['/inbox', '/notifications', '/call-tasks', '/contacts', '/pipelines', '/appointments'];
+
 const navItems: NavItem[] = [
   { href: "/dashboard", labelKey: "dashboard", icon: LayoutDashboard },
   { href: "/inbox", labelKey: "inbox", icon: MessageSquare },
@@ -294,7 +300,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
         {/* Main navigation */}
         <nav className="flex-1 overflow-y-auto px-3 py-4">
           <ul className="flex flex-col gap-1">
-            {navItems.filter((item) => (!item.adminOnly || accountRole === 'owner' || accountRole === 'admin') && (!item.module || enabledModules.includes(item.module))).map((item) => {
+            {navItems.filter((item) => (!item.adminOnly || accountRole === 'owner' || accountRole === 'admin') && (!item.module || enabledModules.includes(item.module)) && (accountRole !== 'agent' || AGENT_ALLOWED_PATHS.includes(item.href))).map((item) => {
               const isActive =
                 pathname === item.href ||
                 (item.href !== "/dashboard" && pathname.startsWith(item.href));
@@ -393,7 +399,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
           <div className="my-4 border-t border-border" />
 
           <ul className="flex flex-col gap-1">
-            {bottomNavItems.map((item) => {
+            {(accountRole === 'agent' ? [] : bottomNavItems).map((item) => {
               const isActive = pathname.startsWith(item.href);
               return (
                 <li key={item.href}>

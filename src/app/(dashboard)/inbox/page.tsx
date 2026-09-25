@@ -15,6 +15,7 @@ import { MessageThread } from "@/components/inbox/message-thread";
 import { ContactSidebar } from "@/components/inbox/contact-sidebar";
 import { WifiOff } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 
 // Remembers the agent's show/hide choice for the desktop contact panel
 // across reloads and sessions (device-scoped, like the theme prefs).
@@ -74,6 +75,14 @@ function InboxPageInner() {
   const [contactPanelOpen, setContactPanelOpen] = useState(true);
   const [internalNotesOpenSignal, setInternalNotesOpenSignal] = useState(0);
   const [internalNotesConversationId, setInternalNotesConversationId] = useState<string | null>(null);
+
+  // The role-guard middleware bounces disallowed routes back here with
+  // this flag when an agent tries a URL they aren't allowed to open.
+  useEffect(() => {
+    if (searchParams.get("access_denied") !== "1") return;
+    toast.error(t("accessDeniedTitle"), { description: t("accessDeniedDescription") });
+    router.replace("/inbox");
+  }, [searchParams, router, t]);
   useEffect(() => {
     try {
       const stored = localStorage.getItem(CONTACT_PANEL_STORAGE_KEY);

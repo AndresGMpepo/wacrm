@@ -138,7 +138,9 @@
   },
   "Inbox": {
     "page": {
-      "whatsappNotConnected": "WhatsApp® no está conectado. Ve a Configuración para conectar tu cuenta."
+      "whatsappNotConnected": "WhatsApp® no está conectado. Ve a Configuración para conectar tu cuenta.",
+      "accessDeniedTitle": "Acceso denegado",
+      "accessDeniedDescription": "Tu rol no tiene permiso para ver esa sección."
     },
     "conversationList": {
       "searchPlaceholder": "Buscar conversaciones...",

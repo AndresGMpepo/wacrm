@@ -49,6 +49,23 @@ export async function proxy(request: NextRequest) {
       url.search = access.status === 'trial' && access.ends_at ? `?until=${encodeURIComponent(access.ends_at)}` : ''
       return withRefreshedCookies(NextResponse.redirect(url))
     }
+
+    // Agents only get an operational subset of the app (inbox, notifications,
+    // seguimientos, contacts, pipelines, appointments) — everything else
+    // (reports, broadcasts, automations, flows, supervision, AI agents,
+    // settings, dashboard, call transcriptions) is owner/admin territory.
+    // Keep this list in sync with AGENT_ALLOWED_PATHS in sidebar.tsx.
+    const AGENT_ALLOWED_PATHS = ['/inbox', '/notifications', '/call-tasks', '/contacts', '/pipelines', '/appointments']
+    const isAgentAllowed = AGENT_ALLOWED_PATHS.some((path) => request.nextUrl.pathname.startsWith(path))
+    if (!isAgentAllowed) {
+      const { data: profileRows } = await supabase.from('profiles').select('account_role').eq('user_id', user.id).maybeSingle()
+      if (profileRows?.account_role === 'agent') {
+        const url = request.nextUrl.clone()
+        url.pathname = '/inbox'
+        url.search = 'access_denied=1'
+        return withRefreshedCookies(NextResponse.redirect(url))
+      }
+    }
   }
 
   if (!user && request.nextUrl.pathname.startsWith('/api/whatsapp/') && !request.nextUrl.pathname.includes('/webhook')) {

@@ -19,8 +19,24 @@ function contactName(value: ContactRelation) {
  */
 export async function GET() {
   try {
-    const { supabase, accountId } = await requireRole('viewer');
+    const { supabase, accountId, userId, role } = await requireRole('viewer');
     const staleBefore = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+
+    // contact_commitments/contact_memory are per-contact, not per-conversation
+    // — a plain agent (REQ-02) only sees contacts whose conversation is
+    // assigned to them or still unassigned; owners/admins/supervisors see
+    // everything, unrestricted.
+    let allowedContactIds: Set<string> | null = null;
+    if (role === 'agent') {
+      const { data: convRows, error: convError } = await supabase
+        .from('conversations')
+        .select('contact_id')
+        .eq('account_id', accountId)
+        .or(`assigned_agent_id.is.null,assigned_agent_id.eq.${userId}`);
+      if (convError) throw convError;
+      allowedContactIds = new Set((convRows ?? []).map((row) => row.contact_id).filter(Boolean) as string[]);
+    }
+    const isAllowed = (contactId: string | null) => !allowedContactIds || (contactId ? allowedContactIds.has(contactId) : false);
 
     const [overdueResult, highRiskResult, staleResult] = await Promise.all([
       supabase
@@ -51,7 +67,9 @@ export async function GET() {
     if (staleResult.error) throw staleResult.error;
 
     return NextResponse.json({
-      overdue_commitments: (overdueResult.data ?? []).map((item) => ({
+      overdue_commitments: (overdueResult.data ?? [])
+        .filter((item) => isAllowed(item.contact_id))
+        .map((item) => ({
         id: item.id,
         contact_id: item.contact_id,
         contact_name: contactName(item.contact as ContactRelation),
@@ -59,14 +77,18 @@ export async function GET() {
         owner: item.owner,
         due_date: item.due_date,
       })),
-      high_risk_contacts: (highRiskResult.data ?? []).map((item) => ({
+      high_risk_contacts: (highRiskResult.data ?? [])
+        .filter((item) => isAllowed(item.contact_id))
+        .map((item) => ({
         contact_id: item.contact_id,
         contact_name: contactName(item.contact as ContactRelation),
         opportunity_score: item.opportunity_score,
         next_best_action: item.next_best_action,
         updated_at: item.updated_at,
       })),
-      stale_prospects: (staleResult.data ?? []).map((item) => ({
+      stale_prospects: (staleResult.data ?? [])
+        .filter((item) => isAllowed(item.contact_id))
+        .map((item) => ({
         contact_id: item.contact_id,
         contact_name: contactName(item.contact as ContactRelation),
         current_stage: item.current_stage,

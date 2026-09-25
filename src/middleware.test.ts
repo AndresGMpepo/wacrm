@@ -33,6 +33,13 @@ vi.mock("@supabase/ssr", () => ({
       },
     },
     rpc: async () => ({ data: [], error: null }),
+    from: () => ({
+      select: () => ({
+        eq: () => ({
+          maybeSingle: async () => ({ data: { account_role: "owner" }, error: null }),
+        }),
+      }),
+    }),
   }),
 }));
 

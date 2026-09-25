@@ -280,6 +280,24 @@ export function MessageThread({
     };
   }, [isMetaDirectConversation, messages, messagingWindowNow, tTimer]);
 
+  // Presence fallback (REQ-03): neither native WhatsApp Cloud API nor
+  // Zernio expose a customer online/typing webhook (platform limitation,
+  // confirmed — WhatsApp Business accounts never receive presence events
+  // for the person messaging them), so the header shows "last seen X min
+  // ago" computed from the customer's own last message instead.
+  const lastCustomerActivityLabel = useMemo(() => {
+    const lastCustomerMsg = [...messages].reverse().find((m) => m.sender_type === "customer");
+    if (!lastCustomerMsg) return null;
+    const diffMs = messagingWindowNow - new Date(lastCustomerMsg.created_at).getTime();
+    const minutes = Math.max(0, Math.floor(diffMs / 60_000));
+    if (minutes < 1) return tTimer("lastActivityJustNow");
+    if (minutes < 60) return tTimer("lastActivityMinutes", { minutes });
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return tTimer("lastActivityHours", { hours });
+    const days = Math.floor(hours / 24);
+    return tTimer("lastActivityDays", { days });
+  }, [messages, messagingWindowNow, tTimer]);
+
   // Store latest callback in a ref so fetchMessages doesn't need to
   // depend on `onMessagesLoaded` — otherwise parent re-renders cause
   // fetchMessages to change → useEffect re-fires → refetch → realtime
@@ -961,6 +979,9 @@ export function MessageThread({
             <h2 className="truncate text-sm font-semibold text-foreground">{displayName}</h2>
             {contactPhone ? (
               <p className="truncate text-xs text-muted-foreground">{contactPhone}</p>
+            ) : null}
+            {lastCustomerActivityLabel ? (
+              <p className="truncate text-[11px] text-muted-foreground/80">{lastCustomerActivityLabel}</p>
             ) : null}
             {conversation.social_comment_id ? (
               <p className="mt-0.5 truncate text-[10px] font-medium text-primary">
