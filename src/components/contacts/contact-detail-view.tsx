@@ -30,6 +30,13 @@ import {
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -94,6 +101,11 @@ export function ContactDetailView({
   // find-or-creates the conversation, so no inbound message is required.
   const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
   const [sendingTemplate, setSendingTemplate] = useState(false);
+  // '' = native (direct Meta) WhatsApp — otherwise a connected (Zernio)
+  // number's connector id. A brand-new contact has no conversation yet,
+  // so there's no channel to infer this from; the agent picks it here.
+  const [whatsappConnectors, setWhatsappConnectors] = useState<{ id: string; displayName: string }[]>([]);
+  const [selectedConnectorId, setSelectedConnectorId] = useState('');
 
   // Details tab
   const [editName, setEditName] = useState('');
@@ -220,6 +232,26 @@ export function ContactDetailView({
       setMergeTarget(null);
     }
   }, [open, contactId, fetchContact, fetchTags, fetchNotes, fetchCustomFields, fetchDeals]);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/inbox/whatsapp-status', { cache: 'no-store' });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled) {
+          setWhatsappConnectors(Array.isArray(data.zernioWhatsappConnectors) ? data.zernioWhatsappConnectors : []);
+        }
+      } catch {
+        // Non-critical — the channel selector just falls back to native-only.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
 
   async function copyPhone() {
     const phone = displayContactPhone(contact?.phone);
@@ -415,13 +447,19 @@ export function ContactDetailView({
     if (!contactId) return;
     setSendingTemplate(true);
     try {
-      const res = await fetch('/api/whatsapp/send', {
+      // A connector-owned template only ever sends via the Zernio-connected
+      // route (the native route has no Zernio branching) — cold-starts the
+      // conversation by phone since a fresh contact has no thread yet.
+      const useZernio = Boolean(template.connector_id);
+      const endpoint = useZernio ? '/api/omnichannel/zernio/send' : '/api/whatsapp/send';
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           // No conversation_id — the route find-or-creates one for this
           // contact, mirroring the inbox template-send payload otherwise.
           contact_id: contactId,
+          ...(useZernio ? { connector_id: template.connector_id } : {}),
           message_type: 'template',
           template_name: template.name,
           template_language: template.language,
@@ -524,7 +562,24 @@ export function ContactDetailView({
                   </div>
                 </div>
               </div>
-              <div className="mt-3 flex flex-wrap gap-2">
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                {whatsappConnectors.length > 0 ? (
+                  <Select value={selectedConnectorId || 'native'} onValueChange={(val) => setSelectedConnectorId(val === 'native' ? '' : (val ?? ''))}>
+                    <SelectTrigger className="h-8 w-auto min-w-[9rem] bg-muted border-border text-xs text-foreground">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="bg-popover border-border">
+                      <SelectItem value="native" className="text-popover-foreground focus:bg-muted focus:text-popover-foreground">
+                        {t('channelNative')}
+                      </SelectItem>
+                      {whatsappConnectors.map((connector) => (
+                        <SelectItem key={connector.id} value={connector.id} className="text-popover-foreground focus:bg-muted focus:text-popover-foreground">
+                          {connector.displayName}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : null}
                 <Button
                   size="sm"
                   onClick={() => setTemplatePickerOpen(true)}
@@ -874,6 +929,8 @@ export function ContactDetailView({
       open={templatePickerOpen}
       onOpenChange={setTemplatePickerOpen}
       onSelect={handleSendTemplate}
+      connectorId={selectedConnectorId || null}
+      channelType={selectedConnectorId ? 'zernio_whatsapp' : null}
     />
     <Dialog open={mergeDialogOpen} onOpenChange={(next) => { setMergeDialogOpen(next); if (!next) { setMergeQuery(''); setMergeResults([]); } }}>
       <DialogContent className="sm:max-w-md">

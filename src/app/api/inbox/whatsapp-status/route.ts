@@ -25,17 +25,22 @@ export async function GET() {
     const { accountId } = await requireRole('agent')
     const db = admin()
 
-    const [{ data: nativeConfig }, { data: zernioConnector }] = await Promise.all([
+    const [{ data: nativeConfig }, { data: zernioConnectors }] = await Promise.all([
       db.from('whatsapp_config').select('status').eq('account_id', accountId).maybeSingle(),
       // 'configured' is a genuinely-connected connector that just hasn't
       // received its first inbound message yet (only then does the
       // webhook flip it to 'active') — only 'paused'/'error' mean the
       // number isn't actually usable.
-      db.from('omnichannel_connectors').select('id').eq('account_id', accountId).eq('provider', 'zernio_whatsapp').in('status', ['configured', 'active']).limit(1).maybeSingle(),
+      db.from('omnichannel_connectors').select('id, display_name').eq('account_id', accountId).eq('provider', 'zernio_whatsapp').in('status', ['configured', 'active']).order('created_at', { ascending: true }),
     ])
 
     return NextResponse.json({
-      connected: nativeConfig?.status === 'connected' || Boolean(zernioConnector),
+      connected: nativeConfig?.status === 'connected' || Boolean(zernioConnectors?.length),
+      // Exposes just enough (id + display name) for a channel picker when
+      // a contact could be reached via more than one connected WhatsApp
+      // number — nothing else from `omnichannel_connectors` (admin-only
+      // under RLS) leaks through here.
+      zernioWhatsappConnectors: (zernioConnectors ?? []).map((c) => ({ id: c.id, displayName: c.display_name })),
     })
   } catch (error) {
     return toErrorResponse(error)

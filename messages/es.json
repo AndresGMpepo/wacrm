@@ -454,6 +454,7 @@
         "noTagsAvailable": "No hay etiquetas disponibles. Créalas en Configuración."
       },
       "sendTemplateBtn": "Enviar plantilla",
+      "channelNative": "WhatsApp directo",
       "saveChangesBtn": "Guardar Cambios",
       "saveCustomFieldsBtn": "Guardar Campos Personalizados",
       "toastPhoneRequired": "El número de teléfono es obligatorio",

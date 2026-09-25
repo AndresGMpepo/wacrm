@@ -454,6 +454,7 @@
         "noTagsAvailable": "No tags available. Create tags in Settings."
       },
       "sendTemplateBtn": "Send template",
+      "channelNative": "Direct WhatsApp",
       "saveChangesBtn": "Save Changes",
       "saveCustomFieldsBtn": "Save Custom Fields",
       "toastPhoneRequired": "Phone number is required",
