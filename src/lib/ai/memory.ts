@@ -9,7 +9,7 @@ export type MemoryExtraction = {
   opportunity_score: number | null
   interests: Array<{ text: string; confidence: number }>
   objections: Array<{ text: string; confidence: number }>
-  commitments: Array<{ description: string; owner: 'agent' | 'customer'; due_date: string | null }>
+  commitments: Array<{ description: string; owner: 'agent' | 'customer'; due_date: string | null; due_time: string | null }>
   important_facts: string[]
 }
 
@@ -39,6 +39,27 @@ function parseDueDate(value: unknown) {
   return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString().slice(0, 10)
 }
 
+/** 24h "HH:MM" only — anything else means "no specific time was stated". */
+function parseDueTime(value: unknown) {
+  if (typeof value !== 'string') return null
+  const match = value.trim().match(/^([01]\d|2[0-3]):([0-5]\d)$/)
+  return match ? `${match[1]}:${match[2]}` : null
+}
+
+/** Combines a YYYY-MM-DD date with an HH:MM time into a precise timestamp.
+ *  Returns null when either half is missing — a date-only commitment keeps
+ *  the old day-level behavior (no precise reminder). Interpreted in the
+ *  server's local time, same simplification the rest of the cron-driven
+ *  Nexo Memory code already relies on (no per-account timezone yet). */
+function combineDueAt(dueDate: string | null, dueTime: string | null) {
+  if (!dueDate || !dueTime) return null
+  const [hours, minutes] = dueTime.split(':').map(Number)
+  const combined = new Date(`${dueDate}T00:00:00`)
+  if (Number.isNaN(combined.getTime())) return null
+  combined.setHours(hours, minutes, 0, 0)
+  return combined.toISOString()
+}
+
 /** Reads the Nexo Memory fields from the same JSON the analysis worker already
  *  asked the model for — no extra AI call. */
 export function parseMemoryExtraction(value: Record<string, unknown>): MemoryExtraction {
@@ -57,9 +78,14 @@ export function parseMemoryExtraction(value: Record<string, unknown>): MemoryExt
             const description = String((entry as Record<string, unknown>).description ?? '').trim().slice(0, 300)
             if (!description) return null
             const owner = (entry as Record<string, unknown>).owner === 'customer' ? 'customer' : 'agent'
-            return { description, owner, due_date: parseDueDate((entry as Record<string, unknown>).due_date) } as const
+            return {
+              description,
+              owner,
+              due_date: parseDueDate((entry as Record<string, unknown>).due_date),
+              due_time: parseDueTime((entry as Record<string, unknown>).due_time),
+            } as const
           })
-          .filter((entry): entry is { description: string; owner: 'agent' | 'customer'; due_date: string | null } => Boolean(entry))
+          .filter((entry): entry is { description: string; owner: 'agent' | 'customer'; due_date: string | null; due_time: string | null } => Boolean(entry))
           .slice(0, 6)
       : [],
     important_facts: Array.isArray(value.important_facts)
@@ -137,13 +163,31 @@ export async function applyContactMemory(
   await upsertFacts(db, accountId, contactId, source, 'interest', memory.interests)
   await upsertFacts(db, accountId, contactId, source, 'objection', memory.objections)
 
-  for (const commitment of memory.commitments) {
-    const { data: existing } = await db.from('contact_commitments').select('id')
-      .eq('contact_id', contactId).eq('status', 'pending').ilike('description', commitment.description).maybeSingle()
-    if (existing) continue
-    await db.from('contact_commitments').insert({
-      account_id: accountId, contact_id: contactId, description: commitment.description, owner: commitment.owner,
-      due_date: commitment.due_date, source_type: source.type, source_id: source.id,
-    })
+  if (memory.commitments.length > 0) {
+    const assignedAgentId = await resolveSourceAgent(db, source)
+    for (const commitment of memory.commitments) {
+      const { data: existing } = await db.from('contact_commitments').select('id')
+        .eq('contact_id', contactId).eq('status', 'pending').ilike('description', commitment.description).maybeSingle()
+      if (existing) continue
+      await db.from('contact_commitments').insert({
+        account_id: accountId, contact_id: contactId, description: commitment.description, owner: commitment.owner,
+        due_date: commitment.due_date, due_at: combineDueAt(commitment.due_date, commitment.due_time),
+        assigned_agent_id: assignedAgentId, source_type: source.type, source_id: source.id,
+      })
+    }
   }
+}
+
+/** Who should get the "task due soon" reminder for a commitment extracted
+ *  from this source — the conversation's assigned agent, or the call's
+ *  agent (yeastar_call_transcriptions.agent_user_id, already resolved at
+ *  webhook time from the CDR's extension). Null falls back to notifying
+ *  account admins (see alertTaskDueSoon). */
+async function resolveSourceAgent(db: Db, source: MemorySource): Promise<string | null> {
+  if (source.type === 'conversation') {
+    const { data } = await db.from('conversations').select('assigned_agent_id').eq('id', source.id).maybeSingle()
+    return data?.assigned_agent_id ?? null
+  }
+  const { data } = await db.from('yeastar_call_transcriptions').select('agent_user_id').eq('id', source.id).maybeSingle()
+  return data?.agent_user_id ?? null
 }

@@ -16,6 +16,7 @@ import {
   Video,
   X,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useTelephony, type CallHistoryItem } from './telephony-provider';
@@ -28,6 +29,73 @@ function historyIcon(status: CallHistoryItem['status']) {
 
 function historyLabel(status: CallHistoryItem['status']) {
   return status === 'missed' ? 'Perdida' : status === 'incoming' ? 'Entrante' : status === 'outgoing' ? 'Saliente' : 'Llamada';
+}
+
+/** Inline "¿agendar un seguimiento?" prompt shown right after a call ends —
+ *  same task the Seguimientos page's "Nueva tarea" creates, just one tap
+ *  away from where the agent already is. */
+function PostCallFollowUp({ number, onDone }: { number: string; onDone: () => void }) {
+  const [creating, setCreating] = useState(false);
+  const [customOpen, setCustomOpen] = useState(false);
+  const [customDate, setCustomDate] = useState('');
+  const [customTime, setCustomTime] = useState('09:00');
+
+  const schedule = async (dueAt: Date, description: string) => {
+    setCreating(true);
+    try {
+      const response = await fetch('/api/contacts/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: number, description, dueAt: dueAt.toISOString() }),
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(json?.error || 'No se pudo crear la tarea.');
+      toast.success('Seguimiento agendado. Te avisaremos 10 minutos antes.');
+      onDone();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'No se pudo crear la tarea.');
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const tomorrowNineAm = () => {
+    const date = new Date();
+    date.setDate(date.getDate() + 1);
+    date.setHours(9, 0, 0, 0);
+    return date;
+  };
+
+  return (
+    <div className="mt-3 rounded-lg border border-dashed border-border p-2.5 text-xs">
+      <div className="mb-2 flex items-center justify-between">
+        <p className="font-medium text-foreground">¿Agendar seguimiento con {number}?</p>
+        <Button size="icon-sm" variant="ghost" onClick={onDone} aria-label="Cerrar"><X className="size-3.5" /></Button>
+      </div>
+      {customOpen ? (
+        <div className="space-y-2">
+          <div className="flex gap-2">
+            <Input type="date" className="h-8 text-xs" value={customDate} onChange={(event) => setCustomDate(event.target.value)} />
+            <Input type="time" className="h-8 text-xs" value={customTime} onChange={(event) => setCustomTime(event.target.value)} />
+          </div>
+          <Button
+            size="sm"
+            className="w-full"
+            disabled={creating || !customDate || !customTime}
+            onClick={() => void schedule(new Date(`${customDate}T${customTime}`), `Seguimiento de llamada con ${number}`)}
+          >
+            Agendar
+          </Button>
+        </div>
+      ) : (
+        <div className="flex flex-wrap gap-1.5">
+          <Button size="sm" variant="secondary" disabled={creating} onClick={() => void schedule(new Date(Date.now() + 60 * 60_000), `Llamar de nuevo a ${number}`)}>En 1 hora</Button>
+          <Button size="sm" variant="secondary" disabled={creating} onClick={() => void schedule(tomorrowNineAm(), `Llamar de nuevo a ${number}`)}>Mañana 9:00 am</Button>
+          <Button size="sm" variant="ghost" disabled={creating} onClick={() => setCustomOpen(true)}>Elegir fecha</Button>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function Softphone() {
@@ -97,9 +165,11 @@ export function Softphone() {
             {t.localStream || t.remoteStream ? <div className="mb-3 grid grid-cols-2 gap-2"><video ref={remoteVideo} autoPlay muted playsInline className="aspect-video w-full rounded bg-black" /><video ref={localVideo} autoPlay muted playsInline className="aspect-video w-full rounded bg-black" /></div> : null}
             {transfer ? <><Input autoFocus placeholder="Extensión destino" value={number} onChange={(event) => setNumber(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && submitTransfer()} /><div className="mt-2 flex flex-wrap gap-2"><Button onClick={submitTransfer}>{transfer === 'attended' ? 'Iniciar consulta' : 'Transferir'}</Button><Button variant="ghost" onClick={() => setTransfer(null)}>Cancelar</Button>{t.attendedTransferReady ? <><Button onClick={t.completeAttendedTransfer}>Completar transferencia</Button><Button variant="outline" onClick={t.cancelAttendedTransfer}>Volver a la llamada</Button></> : null}</div></> : <><Input placeholder="Número o extensión" value={number} onChange={(event) => setNumber(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && void t.call(number)} /><div className="mt-3 grid grid-cols-3 gap-1.5">{'123456789*0#'.split('').map((digit) => <Button key={digit} variant="secondary" onClick={() => { setNumber((value) => value + digit); t.dtmf(digit); }}>{digit}</Button>)}</div></>}
             {inCall ? <div className="mt-3 flex flex-wrap gap-2"><Button size="icon" variant="secondary" onClick={() => { t.mute(!muted); setMuted(!muted); }}>{muted ? <MicOff /> : <Mic />}</Button><Button size="sm" variant="secondary" onClick={() => setTransfer('blind')}><PhoneForwarded /> Ciega</Button><Button size="sm" variant="secondary" onClick={() => setTransfer('attended')}>Atendida</Button><Button size="icon" variant="secondary" onClick={() => void t.video()} title="Activar vídeo"><Video /></Button><Button size="icon" variant="destructive" onClick={t.hangup}><PhoneOff /></Button></div> : <div className="mt-3 grid grid-cols-2 gap-2"><Button disabled={!t.connected || !number.trim()} onClick={() => void t.call(number)}><PhoneCall />Llamar</Button><Button variant="secondary" disabled={!t.connected || !number.trim()} onClick={() => void t.call(number, true)}><Video />Video</Button></div>}
+            {!inCall && t.lastEndedCall ? <PostCallFollowUp number={t.lastEndedCall.number} onDone={t.dismissLastEndedCall} /> : null}
           </>}
         </div>
       ) : null}
     </div>
   );
 }
+

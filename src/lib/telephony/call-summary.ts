@@ -5,10 +5,10 @@ import { logAiUsage } from '@/lib/ai/usage'
 import { parseMemoryExtraction, type MemoryExtraction } from '@/lib/ai/memory'
 
 const SYSTEM_PROMPT = `Eres un asistente que analiza llamadas telefónicas de atención al cliente a partir de su transcripción. Responde únicamente JSON válido, sin markdown, con exactamente esta forma:
-{"summary":"...","key_points":["..."],"action_items":[{"description":"...","owner":"agent|customer","due_date":"YYYY-MM-DD|null"}],"sentiment":"positive|neutral|negative|mixed","sentiment_score":0,"next_best_action":"..."}
+{"summary":"...","key_points":["..."],"action_items":[{"description":"...","owner":"agent|customer","due_date":"YYYY-MM-DD|null","due_time":"HH:MM|null"}],"sentiment":"positive|neutral|negative|mixed","sentiment_score":0,"next_best_action":"..."}
 "summary": 3-6 viñetas breves en español (motivo de la llamada, puntos clave, resultado/acuerdo, próximos pasos) unidas en un solo texto.
 "key_points": hasta 6 puntos clave discutidos, cada uno una frase corta.
-"action_items": compromisos o pendientes explícitos de la llamada (quién debe hacer qué y para cuándo), vacío si no hubo ninguno.
+"action_items": compromisos o pendientes explícitos de la llamada (quién debe hacer qué y para cuándo), vacío si no hubo ninguno. "due_date" resuelve fechas relativas ("mañana", "el viernes") a una fecha absoluta usando la fecha/hora de referencia dada abajo. "due_time" solo si se mencionó una hora concreta (p.ej. "a las 3pm" -> "15:00"); si no se mencionó hora, usa null.
 "sentiment_score": 0 muy negativo, 100 muy positivo. No inventes información que no esté en la transcripción.
 Incluye también memoria del cliente (Nexo Memory) en el mismo JSON: "customer_stage":"..." (p.ej. prospecto, cotización, propuesta, cliente), "risk_level":"low|medium|high", "opportunity_score":0-100, "interests":[{"text":"...","confidence":0-1}], "objections":[{"text":"...","confidence":0-1}], "important_facts":["..."] (hechos nuevos y relevantes, no saludos ni trivialidades). Omite cualquier campo del que no tengas evidencia clara.`
 
@@ -46,10 +46,14 @@ export async function analyzeCall(db: SupabaseClient, accountId: string, transcr
   const config = await loadAiConfig(db, accountId)
   if (!config) return null
   const analysisConfig = { ...config, model: config.analysisModel ?? config.model }
+  // The model has no built-in sense of "today" — without this it cannot
+  // reliably resolve "mañana"/"el viernes" said during the call into an
+  // absolute due_date.
+  const referenceLine = `Fecha y hora de referencia (ahora mismo): ${new Date().toISOString()}.\n\n`
   const { text, usage } = await generateText({
     config: analysisConfig,
     systemPrompt: SYSTEM_PROMPT,
-    messages: [{ role: 'user', content: transcript.slice(0, 12_000) }],
+    messages: [{ role: 'user', content: referenceLine + transcript.slice(0, 12_000) }],
   })
   await logAiUsage(db, {
     accountId,

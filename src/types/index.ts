@@ -214,7 +214,9 @@ export type NotificationType =
   | 'incoming_message'
   | 'negative_sentiment'
   | 'call_follow_up'
-  | 'nexo_memory_alert';
+  | 'nexo_memory_alert'
+  /** "10 minutes before" reminder for a scheduled follow-up task (contact_commitments.due_at). */
+  | 'task_reminder';
 
 export interface Notification {
   id: string;

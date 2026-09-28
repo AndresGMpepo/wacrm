@@ -24,7 +24,10 @@ import {
   loadAccountQueues,
   routeConversationToQueue,
 } from '@/lib/ai/insights-apply'
-import { alertCommitmentOverdue, alertStaleProspect, sendDailyNexoMemoryDigest } from '@/lib/notifications/nexo-memory-alerts'
+import { alertCommitmentOverdue, alertStaleProspect, alertTaskDueSoon, sendDailyNexoMemoryDigest } from '@/lib/notifications/nexo-memory-alerts'
+
+/** How far ahead of a task's due_at the reminder notification fires. */
+const TASK_REMINDER_LEAD_MINUTES = 10
 
 export const maxDuration = 60
 
@@ -162,7 +165,7 @@ export async function POST(request: Request) {
       const qaPrompt = policy.qa_scoring_enabled
         ? ' Incluye además QA interno: "qa_score":0-100, "qa_empathy_score":0-100, "qa_objection_handling_score":0-100, "qa_script_adherence_score":0-100, "qa_summary":"...", "qa_findings":["..."]. Evalúa solo lo observable; si no hubo objeciones o guion aplicable, indícalo y usa una puntuación neutral. ' + (policy.qa_scoring_criteria ? `Criterios propios: ${policy.qa_scoring_criteria}` : '')
         : ''
-      const memoryPrompt = ' Incluye también memoria del cliente (Nexo Memory): "customer_stage":"..." (p.ej. prospecto, cotización, propuesta, cliente), "risk_level":"low|medium|high", "opportunity_score":0-100, "interests":[{"text":"...","confidence":0-1}], "objections":[{"text":"...","confidence":0-1}], "commitments":[{"description":"...","owner":"agent|customer","due_date":"YYYY-MM-DD|null"}], "important_facts":["..."] (hechos nuevos y relevantes, no saludos ni trivialidades). Omite cualquier campo del que no tengas evidencia clara en la conversación.'
+      const memoryPrompt = ' Incluye también memoria del cliente (Nexo Memory): "customer_stage":"..." (p.ej. prospecto, cotización, propuesta, cliente), "risk_level":"low|medium|high", "opportunity_score":0-100, "interests":[{"text":"...","confidence":0-1}], "objections":[{"text":"...","confidence":0-1}], "commitments":[{"description":"...","owner":"agent|customer","due_date":"YYYY-MM-DD|null","due_time":"HH:MM|null"}], "important_facts":["..."] (hechos nuevos y relevantes, no saludos ni trivialidades). Para "commitments", resuelve fechas relativas ("mañana", "el viernes") a una fecha absoluta usando como referencia de "hoy" la fecha/hora actual: ' + new Date().toISOString() + '. "due_time" solo si el cliente o agente mencionó una hora concreta (p.ej. "a las 3pm" -> "15:00"), si no la mencionó usa null — no inventes una hora. Omite cualquier campo del que no tengas evidencia clara en la conversación.'
       const analysisConfig = { ...config, model: config.analysisModel ?? config.model }
       const queues = await loadAccountQueues(db, job.account_id)
       const result = await generateText({ config: analysisConfig, messages, systemPrompt: 'Analiza la conversación. Responde únicamente JSON: {"summary":"...","sentiment":"positive|neutral|negative|mixed","sentiment_score":0,"next_best_action":"...","reasons":["..."]}. Usa español y no inventes datos.' + qaPrompt + memoryPrompt + INSIGHTS_PROMPT + departmentsPrompt(queues.map((q) => q.name)) })
@@ -238,6 +241,7 @@ export async function POST(request: Request) {
   const followUps = await processCallFollowUps(db)
   const appointmentReminders = await processAppointmentReminders(db)
   const overdueCommitments = await markOverdueCommitments(db)
+  const taskReminders = await sendTaskReminders(db)
   const staleProspects = await alertStaleProspects(db)
   await sendNexoMemoryDigests(db).catch((error) => {
     console.error('[nexo-memory] Failed to send daily digests:', error)
@@ -248,7 +252,7 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error('[appointments] Google Calendar inbound sync could not start:', error)
   }
-  return NextResponse.json({ completed, skipped, failed, media: mediaResult, follow_ups: followUps, appointment_reminders: appointmentReminders, overdue_commitments: overdueCommitments, stale_prospects: staleProspects, google_calendar: googleCalendar })
+  return NextResponse.json({ completed, skipped, failed, media: mediaResult, follow_ups: followUps, appointment_reminders: appointmentReminders, overdue_commitments: overdueCommitments, task_reminders: taskReminders, stale_prospects: staleProspects, google_calendar: googleCalendar })
 }
 
 async function processAppointmentReminders(db: ReturnType<typeof supabaseAdmin>) {
@@ -354,6 +358,41 @@ async function markOverdueCommitments(db: ReturnType<typeof supabaseAdmin>) {  c
     })
   }
   return { marked: data?.length ?? 0 }
+}
+
+/** Fires the "10 minutes before" reminder for any pending task
+ *  (contact_commitments) whose due_at is close enough — covers both
+ *  AI-extracted commitments with a specific time and manually-scheduled
+ *  follow-up tasks (from the Seguimientos page or right after a softphone
+ *  call). reminder_sent_at makes this a fire-once notification per task. */
+async function sendTaskReminders(db: ReturnType<typeof supabaseAdmin>) {
+  const windowEnd = new Date(Date.now() + TASK_REMINDER_LEAD_MINUTES * 60_000).toISOString()
+  const { data, error } = await db.from('contact_commitments')
+    .select('id, account_id, contact_id, description, due_at, assigned_agent_id')
+    .eq('status', 'pending')
+    .is('reminder_sent_at', null)
+    .not('due_at', 'is', null)
+    .lte('due_at', windowEnd)
+    .limit(50)
+  if (error) {
+    console.error('[nexo-memory] Failed to load due-soon tasks:', error)
+    return { sent: 0 }
+  }
+  let sent = 0
+  for (const task of data ?? []) {
+    // Claim it first so a slow alert send can't race the next cron tick
+    // into notifying twice.
+    const { data: claimed } = await db.from('contact_commitments')
+      .update({ reminder_sent_at: new Date().toISOString() })
+      .eq('id', task.id).is('reminder_sent_at', null)
+      .select('id').maybeSingle()
+    if (!claimed) continue
+    await alertTaskDueSoon(db, task.account_id, task.contact_id, task.description, task.due_at, task.assigned_agent_id).catch((alertError) => {
+      console.error('[nexo-memory] Failed to send task-due-soon alert:', alertError)
+    })
+    sent++
+  }
+  return { sent }
 }
 
 /** A prospect (medium/high risk, i.e. still an open relationship) whose

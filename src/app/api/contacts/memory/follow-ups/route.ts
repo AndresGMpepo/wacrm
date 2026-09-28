@@ -38,7 +38,7 @@ export async function GET() {
     }
     const isAllowed = (contactId: string | null) => !allowedContactIds || (contactId ? allowedContactIds.has(contactId) : false);
 
-    const [overdueResult, highRiskResult, staleResult] = await Promise.all([
+    const [overdueResult, highRiskResult, staleResult, upcomingResult] = await Promise.all([
       supabase
         .from('contact_commitments')
         .select('id, contact_id, description, owner, due_date, contact:contacts(name, phone)')
@@ -61,10 +61,23 @@ export async function GET() {
         .lt('updated_at', staleBefore)
         .order('updated_at', { ascending: true })
         .limit(20),
+      // Pending tasks with a schedule — both AI-extracted commitments with a
+      // date/time and manually-created follow-up tasks (Nueva tarea, or the
+      // softphone's post-call prompt) land here, soonest first.
+      supabase
+        .from('contact_commitments')
+        .select('id, contact_id, description, owner, due_date, due_at, contact:contacts(name, phone)')
+        .eq('account_id', accountId)
+        .eq('status', 'pending')
+        .not('due_date', 'is', null)
+        .order('due_date', { ascending: true })
+        .order('due_at', { ascending: true, nullsFirst: true })
+        .limit(20),
     ]);
     if (overdueResult.error) throw overdueResult.error;
     if (highRiskResult.error) throw highRiskResult.error;
     if (staleResult.error) throw staleResult.error;
+    if (upcomingResult.error) throw upcomingResult.error;
 
     return NextResponse.json({
       overdue_commitments: (overdueResult.data ?? [])
@@ -93,6 +106,17 @@ export async function GET() {
         contact_name: contactName(item.contact as ContactRelation),
         current_stage: item.current_stage,
         updated_at: item.updated_at,
+      })),
+      upcoming_tasks: (upcomingResult.data ?? [])
+        .filter((item) => isAllowed(item.contact_id))
+        .map((item) => ({
+        id: item.id,
+        contact_id: item.contact_id,
+        contact_name: contactName(item.contact as ContactRelation),
+        description: item.description,
+        owner: item.owner,
+        due_date: item.due_date,
+        due_at: item.due_at,
       })),
     });
   } catch (error) {

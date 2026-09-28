@@ -111,6 +111,7 @@ export function IncomingMessageAlert() {
         notification.type !== 'negative_sentiment' &&
         notification.type !== 'call_follow_up' &&
         notification.type !== 'nexo_memory_alert' &&
+        notification.type !== 'task_reminder' &&
         notification.type !== 'conversation_assigned' &&
         notification.type !== 'conversation_transferred'
       ) {
@@ -131,7 +132,7 @@ export function IncomingMessageAlert() {
       playAlert(notification.type);
       const notify = notification.type === 'negative_sentiment'
         ? toast.error
-        : notification.type === 'call_follow_up' || notification.type === 'nexo_memory_alert'
+        : notification.type === 'call_follow_up' || notification.type === 'nexo_memory_alert' || notification.type === 'task_reminder'
           ? toast.warning
           : notification.type === 'conversation_assigned'
             ? toast.info
@@ -145,9 +146,11 @@ export function IncomingMessageAlert() {
               label: 'Abrir chat',
               onClick: () => router.push(`/inbox?c=${notification.conversation_id}`),
             }
-          : notification.type === 'nexo_memory_alert'
-            ? { label: 'Ver reportes', onClick: () => router.push('/reports') }
-            : undefined,
+          : notification.type === 'task_reminder'
+            ? { label: 'Ver seguimientos', onClick: () => router.push('/call-tasks') }
+            : notification.type === 'nexo_memory_alert'
+              ? { label: 'Ver reportes', onClick: () => router.push('/reports') }
+              : undefined,
       });
 
       if (

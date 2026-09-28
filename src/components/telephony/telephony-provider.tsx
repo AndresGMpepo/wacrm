@@ -82,6 +82,11 @@ type State = {
   cancelAttendedTransfer: () => void;
   video: () => Promise<void>;
   dtmf: (tone: string) => void;
+  /** The number from the call that just ended (any outcome) — powers the
+   *  softphone's "¿agendar un seguimiento?" prompt right after hanging up.
+   *  Null once dismissed or once a new call starts. */
+  lastEndedCall: { number: string; endedAt: number } | null;
+  dismissLastEndedCall: () => void;
 };
 
 const TelephonyContext = createContext<State | null>(null);
@@ -156,6 +161,7 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [history, setHistory] = useState<CallHistoryItem[]>([]);
   const [attendedTransferReady, setAttendedTransferReady] = useState(false);
+  const [lastEndedCall, setLastEndedCall] = useState<{ number: string; endedAt: number } | null>(null);
 
   const phone = useRef<Phone | null>(null);
   const pbx = useRef<Pbx | null>(null);
@@ -309,6 +315,7 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
       : session?.status?.communicationType === 'outbound'
         ? 'outgoing'
         : 'incoming';
+    const wasConsultation = isSameSession(consultation.current, session);
     if (session) {
       reportLiveCall(session, 'BYE', true);
       rememberCall(session, callStatus);
@@ -328,6 +335,13 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
       notify('Llamada perdida', session?.status?.number ?? 'No se atendió la llamada entrante.');
     } else {
       setStatus('Llamada finalizada');
+    }
+    // Any real customer call (not an internal attended-transfer consult) is a
+    // natural moment to offer "schedule a follow-up" — covers both a normal
+    // hangup and a missed call the agent wants to call back later.
+    const endedNumber = session?.status?.number?.trim();
+    if (endedNumber && !wasConsultation) {
+      setLastEndedCall({ number: endedNumber, endedAt: Date.now() });
     }
     incomingSession.current = null;
     incomingAnswered.current = false;
@@ -387,6 +401,7 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
         setIncoming(session);
         setOpen(true);
         setStatus('Llamada entrante');
+        setLastEndedCall(null);
         reportLiveCall(session, 'RING', false, true);
         startRingtone();
         toast.info('Llamada entrante', { description: session.status?.number ?? 'Contesta desde el softphone.' });
@@ -523,6 +538,7 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
     call: async (number, video) => {
       setOpen(true);
       setStatus(`Llamando a ${number}…`);
+      setLastEndedCall(null);
       if (!phone.current) await connect();
       await phone.current?.call(number, { video });
     },
@@ -601,6 +617,8 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
       setRemoteStream(active.remoteStream ?? null);
     },
     dtmf: (tone) => active?.dtmf(tone),
+    lastEndedCall,
+    dismissLastEndedCall: () => setLastEndedCall(null),
   };
 
   return <TelephonyContext.Provider value={value}>{children}</TelephonyContext.Provider>;

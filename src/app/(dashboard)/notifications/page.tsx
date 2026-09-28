@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
 import type { Notification } from '@/types';
 import {
+  AlarmClock,
   Bell,
   Brain,
   CheckCheck,
@@ -31,6 +32,7 @@ const TYPE_ICON: Record<Notification['type'], typeof Bell> = {
   negative_sentiment: Siren,
   call_follow_up: PhoneCall,
   nexo_memory_alert: Brain,
+  task_reminder: AlarmClock,
 };
 
 export default function NotificationsPage() {
@@ -134,6 +136,8 @@ export default function NotificationsPage() {
       if (!n.read_at) markRead(n.id);
       if (n.conversation_id) {
         router.push(`/inbox?c=${n.conversation_id}`);
+      } else if (n.type === 'task_reminder') {
+        router.push('/call-tasks');
       } else if (n.type === 'nexo_memory_alert') {
         router.push('/reports');
       }

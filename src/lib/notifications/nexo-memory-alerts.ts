@@ -45,6 +45,40 @@ export async function alertCommitmentOverdue(db: Db, accountId: string, contactI
   })
 }
 
+/** The "10 minutes before" reminder for a scheduled task/commitment
+ *  (contact_commitments.due_at). Unlike the other Nexo Memory alerts —
+ *  account-health signals meant for owners/admins — a task reminder is
+ *  personal: it goes straight to whoever the task is assigned to (the
+ *  agent who scheduled it manually, or the conversation's/call's agent
+ *  for an AI-extracted commitment). Only falls back to admins when no
+ *  agent could be resolved. */
+export async function alertTaskDueSoon(
+  db: Db,
+  accountId: string,
+  contactId: string,
+  description: string,
+  dueAt: string,
+  assignedAgentId: string | null,
+) {
+  const { data: contact } = await db.from('contacts').select('name, phone').eq('id', contactId).maybeSingle()
+  const name = contactLabel(contact)
+  const time = new Intl.DateTimeFormat('es-MX', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(dueAt))
+  const title = 'Tarea próxima a vencer'
+  const body = `"${description}" con ${name} vence a las ${time}.`
+  if (assignedAgentId) {
+    await db.from('notifications').insert({
+      account_id: accountId,
+      user_id: assignedAgentId,
+      type: 'task_reminder' as const,
+      contact_id: contactId,
+      title,
+      body,
+    })
+    return
+  }
+  await notifyAccountAdmins(db, accountId, { contactId, title, body })
+}
+
 /** Fires when a still-active prospect (medium/high risk) hasn't had any new
  *  memory generated in 48h — re-alerts every 48h while it stays stale. */
 export async function alertStaleProspect(db: Db, accountId: string, contactId: string) {
