@@ -69,8 +69,39 @@ const SEND_BATCH_DELAY_MS = 1000;
 /** `broadcast_recipients` inserts are independent of the send rate. */
 const INSERT_BATCH_SIZE = 200;
 
+/**
+ * Self-hosted Kong/nginx in front of PostgREST rejects responses whose
+ * request line grows past its header-size limit, which a single big
+ * `.in('id', ids)` query string hits well before PostgREST's own
+ * ~1000-value cap once an audience runs into the hundreds of contacts —
+ * surfaces client-side as a generic "TypeError: Failed to fetch" with no
+ * further detail. Same fix already applied to reports
+ * (build-executive-report.ts's ID_QUERY_BATCH_SIZE) — keep every id-list
+ * query in this file batched this small regardless of tenant size.
+ */
+const ID_QUERY_BATCH_SIZE = 40;
+
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Batched `contacts` lookup by id — see `ID_QUERY_BATCH_SIZE` above. */
+async function fetchContactsByIds(
+  supabase: ReturnType<typeof createClient>,
+  ids: string[],
+): Promise<Contact[]> {
+  const contacts: Contact[] = [];
+  for (let i = 0; i < ids.length; i += ID_QUERY_BATCH_SIZE) {
+    const slice = ids.slice(i, i + ID_QUERY_BATCH_SIZE);
+    const { data, error } = await supabase
+      .from('contacts')
+      .select('*')
+      .is('deleted_at', null)
+      .in('id', slice);
+    if (error) throw new Error(`Failed to fetch contacts: ${error.message}`);
+    contacts.push(...((data ?? []) as Contact[]));
+  }
+  return contacts;
 }
 
 interface BroadcastApiResult {
@@ -205,13 +236,7 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
         const uniqueContactIds = [
           ...new Set(contactTags.map((ct) => ct.contact_id)),
         ];
-        const { data, error } = await supabase
-          .from('contacts')
-          .select('*')
-          .is('deleted_at', null)
-          .in('id', uniqueContactIds);
-        if (error) throw new Error(`Failed to fetch contacts: ${error.message}`);
-        contacts = data ?? [];
+        contacts = await fetchContactsByIds(supabase, uniqueContactIds);
       }
     } else if (audience.type === 'custom_field' && audience.customField) {
       contacts = await resolveCustomFieldAudience(supabase, audience.customField);
@@ -340,13 +365,7 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
     const contactIds = [...new Set((matches ?? []).map((m) => m.contact_id))];
     if (contactIds.length === 0) return [];
 
-    const { data, error } = await supabase
-      .from('contacts')
-      .select('*')
-      .is('deleted_at', null)
-      .in('id', contactIds);
-    if (error) throw new Error(`Failed to fetch contacts: ${error.message}`);
-    return data ?? [];
+    return fetchContactsByIds(supabase, contactIds);
   }
 
   async function createAndSendBroadcast(payload: BroadcastPayload): Promise<string> {
