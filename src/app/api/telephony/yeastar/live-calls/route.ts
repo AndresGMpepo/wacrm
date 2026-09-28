@@ -65,7 +65,7 @@ async function reconcilePbXCalls(db: ReturnType<typeof admin>, accountId: string
 
 export async function GET() {
   try {
-    const { accountId } = await requireEntitlement('yeastar_telephony', 'admin')
+    const { accountId } = await requireEntitlement('yeastar_telephony', 'supervisor')
     const db = admin()
     const [callsResult, extensionsResult, membersResult, channelsResult, monitoringResult, integrationResult] = await Promise.all([
       db.from('yeastar_live_calls').select('call_id, extension, channel_id, peer_number, direction, status, call_path, last_event_at')

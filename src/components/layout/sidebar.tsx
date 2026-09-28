@@ -26,6 +26,7 @@ import {
   Settings,
   Shield,
   ShieldAlert,
+  ShieldCheck,
   User,
   UserCog,
   Users,
@@ -65,6 +66,13 @@ const ROLE_CHIP: Record<
     // Neutral slate: the operational default.
     className:
       "border-border bg-muted text-foreground",
+  },
+  supervisor: {
+    icon: ShieldCheck,
+    labelKey: "roleSupervisor",
+    // Teal: distinct from admin's primary tint, still "elevated".
+    className:
+      "border-teal-500/40 bg-teal-500/10 text-teal-600 dark:text-teal-300",
   },
   viewer: {
     icon: User,
@@ -106,6 +114,13 @@ interface NavItem {
 // call transcriptions, dashboard) is owner/admin/supervisor territory.
 // Keep in sync with the server-side guard in src/proxy.ts.
 const AGENT_ALLOWED_PATHS = ['/inbox', '/notifications', '/call-tasks', '/contacts', '/pipelines', '/appointments'];
+
+// The supervisor role gets everything an agent does, PLUS these 4 menus
+// with full functionality (Broadcasts, Reports, Call transcriptions,
+// Supervision) — see migrations 128/129 and the requireRole('supervisor')
+// guards on their API routes. Automations/Flows/AI Agents/Settings stay
+// admin+-only.
+const SUPERVISOR_EXTRA_PATHS = ['/broadcasts', '/reports', '/call-transcriptions', '/supervision'];
 
 const navItems: NavItem[] = [
   { href: "/dashboard", labelKey: "dashboard", icon: LayoutDashboard },
@@ -300,7 +315,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
         {/* Main navigation */}
         <nav className="flex-1 overflow-y-auto px-3 py-4">
           <ul className="flex flex-col gap-1">
-            {navItems.filter((item) => (!item.adminOnly || accountRole === 'owner' || accountRole === 'admin') && (!item.module || enabledModules.includes(item.module)) && (accountRole !== 'agent' || AGENT_ALLOWED_PATHS.includes(item.href))).map((item) => {
+            {navItems.filter((item) => (!item.adminOnly || accountRole === 'owner' || accountRole === 'admin' || accountRole === 'supervisor') && (!item.module || enabledModules.includes(item.module)) && (accountRole !== 'agent' || AGENT_ALLOWED_PATHS.includes(item.href)) && (accountRole !== 'supervisor' || AGENT_ALLOWED_PATHS.includes(item.href) || SUPERVISOR_EXTRA_PATHS.includes(item.href))).map((item) => {
               const isActive =
                 pathname === item.href ||
                 (item.href !== "/dashboard" && pathname.startsWith(item.href));
@@ -399,7 +414,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
           <div className="my-4 border-t border-border" />
 
           <ul className="flex flex-col gap-1">
-            {(accountRole === 'agent' ? [] : bottomNavItems).map((item) => {
+            {((accountRole === 'agent' || accountRole === 'supervisor') ? [] : bottomNavItems).map((item) => {
               const isActive = pathname.startsWith(item.href);
               return (
                 <li key={item.href}>

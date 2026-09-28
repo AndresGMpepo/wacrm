@@ -65,7 +65,7 @@ export async function POST(request: Request) {
   let auditId: string | null = null
   let db: ReturnType<typeof admin> | null = null
   try {
-    const { accountId, userId } = await requireEntitlement('yeastar_telephony', 'admin')
+    const { accountId, userId } = await requireEntitlement('yeastar_telephony', 'supervisor')
     const body = await request.json().catch(() => null) as { callId?: unknown; extension?: unknown; mode?: unknown } | null
     const callId = typeof body?.callId === 'string' ? body.callId : ''
     const targetExtension = typeof body?.extension === 'string' ? body.extension : ''

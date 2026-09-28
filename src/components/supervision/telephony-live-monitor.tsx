@@ -99,7 +99,7 @@ export function TelephonyLiveMonitor() {
       const data = await response.json()
       if (!response.ok) throw new Error(data.error)
       const label = mode === 'barge' ? 'Solicitud de intervención enviada' : mode === 'whisper' ? 'Solicitud de susurro enviada' : 'Solicitud de escucha enviada'
-      toast.success(label, { description: 'Yeastar llamará a tu extensión como “Monitor”. Abre el softphone y contesta esa llamada.' })
+      toast.success(label, { description: 'Yeastar llamará a tu extensión como “Monitor”. Abre NexPhone y contesta esa llamada.' })
       void loadHistory(true)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'No se pudo iniciar la escucha.')
@@ -112,7 +112,7 @@ export function TelephonyLiveMonitor() {
     <div className="flex items-start justify-between gap-3">
       <div>
         <h2 className="flex items-center gap-2 text-base font-semibold"><Radio className="size-4 text-emerald-500" />Llamadas Yeastar en vivo</h2>
-        <p className="mt-1 text-sm text-muted-foreground">Actualización automática cada 5 segundos desde el PBX y los softphones NexoOmni.</p>
+        <p className="mt-1 text-sm text-muted-foreground">Actualización automática cada 5 segundos desde el PBX y los NexPhone.</p>
       </div>
       <Button size="icon" variant="ghost" title="Actualizar" disabled={loading} onClick={() => void load()}><RefreshCw className={loading ? 'size-4 animate-spin' : 'size-4'} /></Button>
     </div>

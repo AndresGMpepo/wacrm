@@ -37,6 +37,7 @@
     "unreadNotifications": "읽지 않은 알림 {count}건",
     "roleOwner": "소유자",
     "roleAdmin": "관리자",
+    "roleSupervisor": "슈퍼바이저",
     "roleAgent": "상담원",
     "roleViewer": "뷰어",
     "closeMenu": "메뉴 닫기",
@@ -1542,6 +1543,8 @@
     "roles": {
       "admin": "관리자",
       "adminHint": "멤버 관리 + 모든 기능",
+      "supervisor": "슈퍼바이저",
+      "supervisorHint": "상담원 권한 + 발송, 보고서, 통화 기록, 감독",
       "agent": "상담원",
       "agentHint": "기능 사용 가능; 설정 접근 불가",
       "viewer": "뷰어",

@@ -6,7 +6,7 @@ import { requirePlatformOperator } from '@/lib/platform/operator'
 import { checkRateLimit, RATE_LIMITS, rateLimitResponse } from '@/lib/rate-limit'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-const MEMBER_ROLES = ['admin', 'agent', 'viewer'] as const
+const MEMBER_ROLES = ['admin', 'supervisor', 'agent', 'viewer'] as const
 
 function adminClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL

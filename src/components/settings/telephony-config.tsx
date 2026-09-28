@@ -72,7 +72,7 @@ export function TelephonyConfig() {
       if (!response.ok) throw new Error(payload.error);
       setAccessId('');
       setAccessKey('');
-      toast.success('Tu extensión fue guardada. El softphone se conectará automáticamente.');
+      toast.success('Tu extensión fue guardada. NexPhone se conectará automáticamente.');
       await Promise.all([load(), telephony.refreshConfiguration()]);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'No se pudo guardar.');
@@ -107,7 +107,7 @@ export function TelephonyConfig() {
             <CardDescription>Tu cuenta tiene el plan {planName}. La telefonía Yeastar requiere el plan IA + voz Yeastar o IA + Yeastar + voz WhatsApp.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3 text-sm text-muted-foreground">
-            <p>Tu configuración, conversaciones y usuarios permanecen intactos. Para habilitar llamadas, softphone, historial y supervisión, solicita la actualización de tu plan al administrador comercial.</p>
+            <p>Tu configuración, conversaciones y usuarios permanecen intactos. Para habilitar llamadas, NexPhone, historial y supervisión, solicita la actualización de tu plan al administrador comercial.</p>
             <Button type="button" variant="outline" onClick={() => { window.location.href = 'mailto:soporte@aurionova.com?subject=Solicitud%20de%20activación%20Yeastar'; }}>Solicitar actualización</Button>
           </CardContent>
         </Card>
@@ -121,7 +121,7 @@ export function TelephonyConfig() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2"><Phone className="size-4" /> Yeastar WebRTC</CardTitle>
-          <CardDescription className="flex items-center gap-2"><span className={`size-2 rounded-full ${led}`} />{telephony.connected ? `Conectado como extensión ${extension}` : extension ? 'Tu extensión está guardada; se reconectará automáticamente.' : 'Registra tu extensión asignada para conectar el softphone.'}</CardDescription>
+          <CardDescription className="flex items-center gap-2"><span className={`size-2 rounded-full ${led}`} />{telephony.connected ? `Conectado como extensión ${extension}` : extension ? 'Tu extensión está guardada; se reconectará automáticamente.' : 'Registra tu extensión asignada para conectar NexPhone.'}</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 md:grid-cols-2">
           <div className="space-y-2">

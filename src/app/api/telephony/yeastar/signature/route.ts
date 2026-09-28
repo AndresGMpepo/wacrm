@@ -39,7 +39,7 @@ export async function POST() {
     const config = integration.data;
     const extension = userConfig.data?.extension;
     if (!config?.pbx_url || !extension || !config.yeastar_access_id || !config.yeastar_access_key) {
-      return NextResponse.json({ error: 'Configura tu extensión personal antes de conectar el softphone.' }, { status: 409 });
+      return NextResponse.json({ error: 'Configura tu extensión personal antes de conectar NexPhone.' }, { status: 409 });
     }
     const cacheKey = `${accountId}:${userId}`;
     const cached = credentialCache.get(cacheKey);

@@ -37,6 +37,7 @@
     "unreadNotifications": "{count} unread {count, plural, =1 {notification} other {notifications}}",
     "roleOwner": "Owner",
     "roleAdmin": "Admin",
+    "roleSupervisor": "Supervisor",
     "roleAgent": "Agent",
     "roleViewer": "Viewer",
     "closeMenu": "Close menu",
@@ -1542,6 +1543,8 @@
     "roles": {
       "admin": "Admin",
       "adminHint": "Manage members + everything",
+      "supervisor": "Supervisor",
+      "supervisorHint": "Agent access + broadcasts, reports, transcriptions and supervision",
       "agent": "Agent",
       "agentHint": "Use features; no settings",
       "viewer": "Viewer",

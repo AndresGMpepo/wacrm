@@ -9,7 +9,7 @@ const frequencies = new Set<ReportScheduleFrequency>(['daily', 'weekly', 'monthl
 
 export async function GET() {
   try {
-    const ctx = await requireRole('admin')
+    const ctx = await requireRole('supervisor')
     const { data, error } = await ctx.supabase.from('executive_report_schedules').select('id, account_id, name, enabled, frequency, scheduled_time, timezone, weekday, monthday, once_at, report_days, recipients, next_run_at, last_sent_at, last_error, created_at').eq('account_id', ctx.accountId).order('created_at', { ascending: false })
     if (error) throw error
     const { data: deliveries, error: deliveriesError } = await ctx.supabase.from('executive_report_deliveries').select('id, schedule_id, status, sent_at, error_message, created_at').eq('account_id', ctx.accountId).order('created_at', { ascending: false }).limit(12)
@@ -20,7 +20,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const ctx = await requireRole('admin')
+    const ctx = await requireRole('supervisor')
     const body = await request.json() as Record<string, unknown>
     const frequency = String(body.frequency ?? '') as ReportScheduleFrequency
     if (!frequencies.has(frequency)) return NextResponse.json({ error: 'Selecciona una frecuencia válida.' }, { status: 400 })

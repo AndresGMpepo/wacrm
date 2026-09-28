@@ -10,7 +10,7 @@ function admin() {
 
 export async function GET(request: Request) {
   try {
-    const { accountId } = await requireEntitlement('yeastar_telephony', 'admin')
+    const { accountId } = await requireEntitlement('yeastar_telephony', 'supervisor')
     const url = new URL(request.url)
     const limit = Math.min(100, Math.max(1, Number(url.searchParams.get('limit') ?? 50)))
     const query = url.searchParams.get('q')?.trim()

@@ -11,7 +11,7 @@ function admin() {
 
 export async function GET() {
   try {
-    const { accountId } = await requireEntitlement('yeastar_telephony', 'admin')
+    const { accountId } = await requireEntitlement('yeastar_telephony', 'supervisor')
     const db = admin()
     const { data: entries, error } = await db.from('yeastar_call_supervision_audit')
       .select('id, supervisor_user_id, supervisor_extension, target_extension, mode, outcome, error_message, created_at')

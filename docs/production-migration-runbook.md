@@ -77,7 +77,7 @@ Completa y registra estas pruebas en el entorno productivo:
 - Aislamiento de dos cuentas distintas.
 - Mensaje WhatsApp entrante y respuesta saliente.
 - Chat web Yeastar: texto, imagen, respuesta y cierre de sesión.
-- Softphone Yeastar: conexión y llamada de prueba, si el plan lo incluye.
+- Softphone Yeastar (NexPhone): conexión y llamada de prueba, si el plan lo incluye.
 - Análisis IA manual y automático, sin enviar borradores automáticamente.
 - Alertas del navegador, Uptime Kuma y monitoreo de disponibilidad.
 - Descarga de un archivo restaurado desde Storage.

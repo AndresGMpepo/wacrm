@@ -13,6 +13,7 @@
 // ============================================================
 
 import { NextResponse } from "next/server";
+import { createClient as createAdminClient } from "@supabase/supabase-js";
 
 import { getCurrentAccount, toErrorResponse } from "@/lib/auth/account";
 import { canManageMembers, isAccountRole } from "@/lib/auth/roles";
@@ -50,6 +51,24 @@ export async function GET() {
 
     const canSeeEmails = canManageMembers(ctx.role);
 
+    // Admin+ also gets each member's Yeastar extension inline (Settings →
+    // Miembros), so extensions can be assigned without a second screen.
+    // telephony_user_configs has RLS enabled with NO browser-facing policy
+    // at all (service-role only, see migration 038) — the RLS-scoped
+    // `ctx.supabase` would silently return zero rows here, so this one
+    // lookup uses the service-role client instead, gated on the already-
+    // verified admin+ check above.
+    let extensionsByUser = new Map<string, string>();
+    if (canSeeEmails) {
+      const admin = createAdminClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
+      const { data: extensionRows } = await admin
+        .from("telephony_user_configs")
+        .select("user_id, extension")
+        .eq("account_id", ctx.accountId)
+        .eq("provider", "yeastar");
+      extensionsByUser = new Map((extensionRows ?? []).map((row) => [row.user_id, row.extension]));
+    }
+
     const members: AccountMember[] = (data as ProfileRow[]).flatMap((row) => {
       // Defensive: the DB enum should never let an unknown role
       // through, but if a migration ever broadens the enum without
@@ -64,6 +83,7 @@ export async function GET() {
           role: row.account_role,
           is_active: row.is_active,
           joined_at: row.created_at,
+          telephony_extension: canSeeEmails ? (extensionsByUser.get(row.user_id) ?? null) : undefined,
         },
       ];
     });

@@ -27,7 +27,7 @@ type PlatformMember = {
   user_id: string
   full_name: string | null
   email: string | null
-  role: 'owner' | 'admin' | 'agent' | 'viewer'
+  role: 'owner' | 'admin' | 'supervisor' | 'agent' | 'viewer'
   is_active: boolean
 }
 
@@ -67,7 +67,7 @@ export default function PlatformPage() {
   const [form, setForm] = useState({ account_name: '', owner_name: '', owner_email: '', plan_code: 'ai' as PlanCode, seat_limit: '1', access_days: '0' })
   const [managingAccount, setManagingAccount] = useState<PlatformAccount | null>(null)
   const [supportAccount, setSupportAccount] = useState<PlatformAccount | null>(null)
-  const [memberForm, setMemberForm] = useState({ full_name: '', email: '', role: 'agent' as 'admin' | 'agent' | 'viewer' })
+  const [memberForm, setMemberForm] = useState({ full_name: '', email: '', role: 'agent' as 'admin' | 'supervisor' | 'agent' | 'viewer' })
   const [retentionDays, setRetentionDays] = useState('')
   const [retentionSaving, setRetentionSaving] = useState(false)
 
@@ -347,13 +347,13 @@ export default function PlatformPage() {
           <div className="divide-y rounded-lg border">
             {managingAccount.team.map((member) => <div key={member.user_id} className="flex flex-col gap-3 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
               <div className="min-w-0"><p className="font-medium">{member.full_name ?? 'Sin nombre'} <span className="text-sm font-normal text-muted-foreground">· {member.role}</span></p><p className="truncate text-sm text-muted-foreground">{member.email ?? 'sin correo'} · <span className={member.is_active ? 'text-emerald-500' : 'text-amber-500'}>{member.is_active ? 'Activo' : 'Pausado'}</span></p></div>
-              {member.role === 'owner' ? <p className="text-sm text-muted-foreground">Propietario de la cuenta</p> : <div className="flex flex-wrap gap-2"><Select value={member.role} onValueChange={(role) => updateMember(managingAccount, member, { role: role as 'admin' | 'agent' | 'viewer' })} disabled={actionId === `member:${member.user_id}`}><SelectTrigger className="w-28"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="admin">Admin</SelectItem><SelectItem value="agent">Agente</SelectItem><SelectItem value="viewer">Consulta</SelectItem></SelectContent></Select><Button type="button" size="sm" variant="outline" disabled={actionId === `member:${member.user_id}`} onClick={() => updateMember(managingAccount, member, { is_active: !member.is_active })}>{member.is_active ? <CirclePause /> : <CirclePlay />}{member.is_active ? 'Pausar' : 'Reactivar'}</Button><Button type="button" size="sm" variant="outline" disabled={actionId === `member:${member.user_id}`} onClick={() => resendMemberInvitation(managingAccount, member)}><Send />Reenviar</Button></div>}
+              {member.role === 'owner' ? <p className="text-sm text-muted-foreground">Propietario de la cuenta</p> : <div className="flex flex-wrap gap-2"><Select value={member.role} onValueChange={(role) => updateMember(managingAccount, member, { role: role as 'admin' | 'supervisor' | 'agent' | 'viewer' })} disabled={actionId === `member:${member.user_id}`}><SelectTrigger className="w-28"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="admin">Admin</SelectItem><SelectItem value="supervisor">Supervisor</SelectItem><SelectItem value="agent">Agente</SelectItem><SelectItem value="viewer">Consulta</SelectItem></SelectContent></Select><Button type="button" size="sm" variant="outline" disabled={actionId === `member:${member.user_id}`} onClick={() => updateMember(managingAccount, member, { is_active: !member.is_active })}>{member.is_active ? <CirclePause /> : <CirclePlay />}{member.is_active ? 'Pausar' : 'Reactivar'}</Button><Button type="button" size="sm" variant="outline" disabled={actionId === `member:${member.user_id}`} onClick={() => resendMemberInvitation(managingAccount, member)}><Send />Reenviar</Button></div>}
             </div>)}
           </div>
           <form onSubmit={inviteMember} className="grid gap-3 rounded-lg border p-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_160px_auto] md:items-end">
             <div className="space-y-2"><Label htmlFor="member-name">Nombre</Label><Input id="member-name" value={memberForm.full_name} onChange={(event) => setMemberForm((current) => ({ ...current, full_name: event.target.value }))} required maxLength={120} /></div>
             <div className="space-y-2"><Label htmlFor="member-email">Correo</Label><Input id="member-email" type="email" value={memberForm.email} onChange={(event) => setMemberForm((current) => ({ ...current, email: event.target.value }))} required /></div>
-            <div className="space-y-2"><Label>Rol</Label><Select value={memberForm.role} onValueChange={(role) => setMemberForm((current) => ({ ...current, role: role as 'admin' | 'agent' | 'viewer' }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="admin">Administrador</SelectItem><SelectItem value="agent">Agente</SelectItem><SelectItem value="viewer">Consulta</SelectItem></SelectContent></Select></div>
+            <div className="space-y-2"><Label>Rol</Label><Select value={memberForm.role} onValueChange={(role) => setMemberForm((current) => ({ ...current, role: role as 'admin' | 'supervisor' | 'agent' | 'viewer' }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="admin">Administrador</SelectItem><SelectItem value="supervisor">Supervisor</SelectItem><SelectItem value="agent">Agente</SelectItem><SelectItem value="viewer">Consulta</SelectItem></SelectContent></Select></div>
             <Button type="submit" disabled={actionId === `member-create:${managingAccount.id}`}>{actionId === `member-create:${managingAccount.id}` ? <LoaderCircle className="animate-spin" /> : <UserPlus />}Invitar</Button>
           </form>
           <Button type="button" variant="ghost" onClick={() => setManagingAccount(null)}>Cerrar administración de usuarios</Button>

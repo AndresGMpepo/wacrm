@@ -9,7 +9,7 @@ function admin() { return createAdminClient(process.env.NEXT_PUBLIC_SUPABASE_URL
 
 export async function GET() {
   try {
-    const { accountId } = await requireRole('admin')
+    const { accountId } = await requireRole('supervisor')
     const db = admin()
     const [profilesResult, presenceResult, conversationsResult, extensionsResult, callsResult, analysesResult] = await Promise.all([
       db.from('profiles').select('user_id, full_name, account_role').eq('account_id', accountId).order('full_name'),

@@ -98,7 +98,7 @@ function PostCallFollowUp({ number, onDone }: { number: string; onDone: () => vo
   );
 }
 
-export function Softphone() {
+export function NexPhone() {
   const t = useTelephony();
   const [number, setNumber] = useState('');
   const [transfer, setTransfer] = useState<'blind' | 'attended' | null>(null);
@@ -134,7 +134,7 @@ export function Softphone() {
         variant={t.connected ? 'default' : 'secondary'}
         size="icon"
         onClick={() => t.setOpen(!t.open)}
-        aria-label="Abrir softphone"
+        aria-label="Abrir NexPhone"
         className="relative"
       >
         <Phone className="size-4" />
@@ -152,7 +152,7 @@ export function Softphone() {
       {t.open ? (
         <div className="absolute right-0 top-12 z-50 w-80 rounded-xl border bg-card p-4 shadow-2xl">
           <div className="mb-3 flex items-center justify-between">
-            <div><b>Softphone</b><p className="text-xs text-muted-foreground">{t.status || (t.connected ? 'Conectado' : t.connecting ? 'Conectando…' : 'Desconectado')}</p></div>
+            <div><b>NexPhone</b><p className="text-xs text-muted-foreground">{t.status || (t.connected ? 'Conectado' : t.connecting ? 'Conectando…' : 'Desconectado')}</p></div>
             <div className="flex items-center gap-1"><Button size="icon" variant="ghost" title="Historial" onClick={() => setShowHistory((value) => !value)}><Clock3 /></Button><Button size="icon" variant="ghost" onClick={() => t.setOpen(false)} aria-label="Cerrar"><X /></Button></div>
           </div>
 

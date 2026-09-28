@@ -12,7 +12,7 @@ function contactOf(value: Conversation['contacts']): Contact {
 
 export async function GET() {
   try {
-    const { supabase, accountId } = await requireRole('admin')
+    const { supabase, accountId } = await requireRole('supervisor')
     const { data: analyses, error: analysesError } = await supabase
       .from('ai_conversation_analyses')
       .select('conversation_id, sentiment_score, next_best_action, updated_at')
@@ -72,7 +72,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const { supabase, accountId, userId } = await requireRole('admin')
+    const { supabase, accountId, userId } = await requireRole('supervisor')
     const body = await request.json().catch(() => null)
     const conversationId = typeof body?.conversationId === 'string' ? body.conversationId : ''
     const action = body?.action === 'claim' || body?.action === 'resolve' ? body.action : null

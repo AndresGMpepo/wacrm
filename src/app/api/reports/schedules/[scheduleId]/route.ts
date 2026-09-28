@@ -10,7 +10,7 @@ type ScheduleContext = { params: Promise<{ scheduleId: string }> }
 
 export async function PATCH(request: Request, context: ScheduleContext) {
   try {
-    const ctx = await requireRole('admin')
+    const ctx = await requireRole('supervisor')
     const { scheduleId } = await context.params
     const body = await request.json() as { enabled?: boolean }
     if (typeof body.enabled !== 'boolean') return NextResponse.json({ error: 'Actualización no válida.' }, { status: 400 })
@@ -33,7 +33,7 @@ export async function PATCH(request: Request, context: ScheduleContext) {
 // worker when email configuration is incomplete.
 export async function POST(request: Request, context: ScheduleContext) {
   try {
-    const ctx = await requireRole('admin')
+    const ctx = await requireRole('supervisor')
     const limit = checkRateLimit(`reports:schedule-send-now:${ctx.userId}`, RATE_LIMITS.adminAction)
     if (!limit.success) return rateLimitResponse(limit)
 
@@ -70,7 +70,7 @@ export async function POST(request: Request, context: ScheduleContext) {
 
 export async function DELETE(_request: Request, context: ScheduleContext) {
   try {
-    const ctx = await requireRole('admin')
+    const ctx = await requireRole('supervisor')
     const { scheduleId } = await context.params
     const { error } = await ctx.supabase.from('executive_report_schedules').delete().eq('id', scheduleId).eq('account_id', ctx.accountId)
     if (error) throw error

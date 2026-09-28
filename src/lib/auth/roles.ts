@@ -15,12 +15,13 @@
 // changes a one-file diff.
 // ============================================================
 
-export type AccountRole = "owner" | "admin" | "agent" | "viewer";
+export type AccountRole = "owner" | "admin" | "supervisor" | "agent" | "viewer";
 
 /** Ordered list of every valid role, lowest privilege first. */
 export const ACCOUNT_ROLES: readonly AccountRole[] = [
   "viewer",
   "agent",
+  "supervisor",
   "admin",
   "owner",
 ] as const;
@@ -32,8 +33,10 @@ export const ACCOUNT_ROLES: readonly AccountRole[] = [
 export function roleRank(role: AccountRole): number {
   switch (role) {
     case "owner":
-      return 4;
+      return 5;
     case "admin":
+      return 4;
+    case "supervisor":
       return 3;
     case "agent":
       return 2;

@@ -544,7 +544,7 @@ export function ContactDetailView({
                             <Copy className="size-3" />
                           )}
                         </button>
-                        <button onClick={() => void telephony.call(contactPhone)} disabled={!telephony.connected} className="flex items-center gap-1 text-primary transition-colors hover:text-primary/80 disabled:opacity-50" title="Llamar por softphone"><PhoneCall className="size-3" /> Llamar</button>
+                        <button onClick={() => void telephony.call(contactPhone)} disabled={!telephony.connected} className="flex items-center gap-1 text-primary transition-colors hover:text-primary/80 disabled:opacity-50" title="Llamar por NexPhone"><PhoneCall className="size-3" /> Llamar</button>
                       </>
                     ) : null}
                     {contact.email && (
@@ -560,6 +560,11 @@ export function ContactDetailView({
                       </span>
                     )}
                   </div>
+                  {contact.alternate_phones && contact.alternate_phones.length > 0 ? (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Otro número: {contact.alternate_phones.map((phone) => displayContactPhone(phone)).join(', ')}
+                    </p>
+                  ) : null}
                 </div>
               </div>
               <div className="mt-3 flex flex-wrap items-center gap-2">

@@ -140,12 +140,12 @@ function isSameSession(first: Session | null | undefined, second: Session | null
 async function parseJsonResponse(response: Response): Promise<{ data: unknown; error?: string }> {
   const contentType = response.headers.get('content-type') ?? '';
   if (!contentType.includes('application/json')) {
-    return { data: null, error: 'Tu sesión expiró. Recarga la página para reconectar el softphone.' };
+    return { data: null, error: 'Tu sesión expiró. Recarga la página para reconectar NexPhone.' };
   }
   try {
     return { data: await response.json() };
   } catch {
-    return { data: null, error: 'Respuesta inválida del servidor. Recarga la página para reconectar el softphone.' };
+    return { data: null, error: 'Respuesta inválida del servidor. Recarga la página para reconectar NexPhone.' };
   }
 }
 
@@ -239,7 +239,7 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
     if (!callId) {
       if (diagnostic && liveReportingError.current !== 'missing-call-id') {
         liveReportingError.current = 'missing-call-id';
-        toast.error('No se pudo sincronizar la supervisión', { description: 'Yeastar no entregó el identificador de esta llamada al softphone.' });
+        toast.error('No se pudo sincronizar la supervisión', { description: 'Yeastar no entregó el identificador de esta llamada a NexPhone.' });
       }
       return;
     }
@@ -364,9 +364,9 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
       const { data, error: parseError } = await parseJsonResponse(response);
       if (parseError) throw new Error(parseError);
       const credentials = data as { extension?: string; secret?: string; pbxUrl?: string; error?: string };
-      if (!response.ok) throw new Error(credentials.error ?? 'No se pudo conectar el softphone.');
+      if (!response.ok) throw new Error(credentials.error ?? 'No se pudo conectar NexPhone.');
       if (!credentials.extension || !credentials.secret || !credentials.pbxUrl) {
-        throw new Error('Configuración de softphone incompleta.');
+        throw new Error('Configuración de NexPhone incompleta.');
       }
 
       destroy.current?.();
@@ -404,7 +404,7 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
         setLastEndedCall(null);
         reportLiveCall(session, 'RING', false, true);
         startRingtone();
-        toast.info('Llamada entrante', { description: session.status?.number ?? 'Contesta desde el softphone.' });
+        toast.info('Llamada entrante', { description: session.status?.number ?? 'Contesta desde NexPhone.' });
         notify('Llamada entrante', session.status?.number ?? 'Contesta desde NexoOmni.');
         // A missed call never reaches startSession. Listen directly to the
         // incoming session so it is recorded even when Yeastar removes it
@@ -463,7 +463,7 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
       const { data, error: parseError } = await parseJsonResponse(response);
       if (parseError) throw new Error(parseError);
       const config = data as { config?: { extension?: string }; error?: string };
-      if (!response.ok) throw new Error(config.error ?? 'No se pudo cargar la configuración del softphone.');
+      if (!response.ok) throw new Error(config.error ?? 'No se pudo cargar la configuración de NexPhone.');
       const ready = Boolean(config.config?.extension);
       setConfigured(ready);
       if (ready) await connect();

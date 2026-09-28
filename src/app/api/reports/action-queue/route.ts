@@ -29,7 +29,7 @@ function nestedContact(value: unknown): ContactRelation {
  */
 export async function GET() {
   try {
-    const { supabase, accountId } = await requireRole('admin')
+    const { supabase, accountId } = await requireRole('supervisor')
     const staleBefore = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
 
     const [analysesResult, followUpsResult, dealsResult, overdueCommitmentsResult, highRiskResult] = await Promise.all([

@@ -296,8 +296,8 @@ export function ContactSidebar({ contact, conversationId, internalNotesOpenSigna
                   type="button"
                   onClick={() => void telephony.call(contactPhone)}
                   disabled={!telephony.connected}
-                  title="Llamar por softphone"
-                  aria-label="Llamar por softphone"
+                  title="Llamar por NexPhone"
+                  aria-label="Llamar por NexPhone"
                   className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary transition-colors hover:bg-primary/20 disabled:opacity-50"
                 >
                   <PhoneCall className="h-4 w-4" />

@@ -84,11 +84,12 @@ interface Member {
   role: AccountRole;
   is_active: boolean;
   joined_at: string;
+  telephony_extension?: string | null;
 }
 
 interface Invitation {
   id: string;
-  role: 'admin' | 'agent' | 'viewer';
+  role: 'admin' | 'supervisor' | 'agent' | 'viewer';
   label: string | null;
   created_at: string;
   expires_at: string;
@@ -97,6 +98,7 @@ interface Invitation {
 // These roles are translated via `useTranslations("Settings.roles")` where they are used.
 const EDITABLE_ROLES: { value: AccountRole }[] = [
   { value: 'admin' },
+  { value: 'supervisor' },
   { value: 'agent' },
   { value: 'viewer' },
 ];
@@ -135,6 +137,9 @@ export function MembersTab() {
   // lets the roster explain that access is provisioned by the platform.
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [loading, setLoading] = useState(true);
+  // Gates the inline "Extensión" field per row — only accounts on a plan
+  // that includes telephony can assign NexPhone extensions here.
+  const [telephonyEnabled, setTelephonyEnabled] = useState(false);
 
   const [removingMember, setRemovingMember] = useState<Member | null>(null);
   const [editingMember, setEditingMember] = useState<Member | null>(null);
@@ -146,7 +151,10 @@ export function MembersTab() {
 
   const loadEverything = useCallback(async () => {
     try {
-      const mres = await fetch('/api/account/members', { cache: 'no-store' });
+      const [mres, entitlementsRes] = await Promise.all([
+        fetch('/api/account/members', { cache: 'no-store' }),
+        fetch('/api/account/entitlements', { cache: 'no-store' }),
+      ]);
 
       if (!mres.ok) {
         const payload = await mres.json().catch(() => ({}));
@@ -156,6 +164,10 @@ export function MembersTab() {
       const mdata = (await mres.json()) as { members: Member[] };
       setMembers(mdata.members);
 
+      if (entitlementsRes.ok) {
+        const entitlementsData = await entitlementsRes.json();
+        setTelephonyEnabled(Boolean(entitlementsData.entitlements?.features?.yeastar_telephony));
+      }
     } catch (err) {
       console.error('[MembersTab] load error:', err);
       toast.error('Could not reach the server');
@@ -213,6 +225,33 @@ export function MembersTab() {
       toast.error('Could not reach the server');
     } finally {
       setPendingMemberAction(null);
+    }
+  }
+
+  /** Admin sets a teammate's NexPhone extension directly — reuses the
+   *  account's already-saved PBX URL/Access ID/Access Key, only the
+   *  extension number itself is entered here. */
+  async function handleExtensionSave(member: Member, value: string) {
+    const extension = value.trim();
+    if (!extension || extension === (member.telephony_extension ?? '')) return;
+    try {
+      const response = await fetch(`/api/account/members/${member.user_id}/telephony-extension`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ extension }),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        toast.error(payload.error || 'No se pudo guardar la extensión.');
+        return;
+      }
+      setMembers((prev) =>
+        prev.map((m) => (m.user_id === member.user_id ? { ...m, telephony_extension: extension } : m)),
+      );
+      toast.success(`Extensión guardada para ${member.full_name || 'el miembro'}.`);
+    } catch (err) {
+      console.error('[MembersTab] extension save error:', err);
+      toast.error('No se pudo conectar con el servidor.');
     }
   }
 
@@ -410,6 +449,19 @@ export function MembersTab() {
                       inline. Items align to the start on mobile so the
                       role dropdown lines up under the avatar. */}
                   <div className="flex items-center gap-2 sm:gap-3">
+                    {/* Admin sets the teammate's NexPhone extension inline
+                        — the account's PBX URL/Access ID/Access Key were
+                        already saved once in Settings → Telefonía, so
+                        only the extension number is needed per member. */}
+                    {canManageMembers && telephonyEnabled && !isOwnerRow ? (
+                      <Input
+                        defaultValue={member.telephony_extension ?? ''}
+                        onBlur={(e) => void handleExtensionSave(member, e.target.value)}
+                        placeholder="Ext."
+                        title="Extensión NexPhone"
+                        className="w-20 bg-muted border-border text-foreground"
+                      />
+                    ) : null}
                     {/* Role display / editor. Inline Select is admin+
                         only AND not allowed on the owner row (owner
                         changes go through transfer, which lands later). */}

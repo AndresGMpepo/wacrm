@@ -327,7 +327,18 @@ export function ConversationList({
       });
     }
 
-    return result;
+    // The initial fetch above orders by last_message_at, but realtime
+    // patches (handleMessageEvent/handleConversationEvent in the parent)
+    // only update that field in place — without re-sorting here, a chat
+    // that just got a new reply would stay wherever it happened to be in
+    // the list instead of jumping to the top like every other messaging
+    // app. Re-sorting on every recompute keeps this correct for every
+    // role/scope, since they all render through this same list.
+    return [...result].sort((a, b) => {
+      const aTime = a.last_message_at ? new Date(a.last_message_at).getTime() : 0;
+      const bTime = b.last_message_at ? new Date(b.last_message_at).getTime() : 0;
+      return bTime - aTime;
+    });
   }, [conversations, filter, channelFilter, search, selectedTagIds, selectedCompany, assignmentScope, user?.id, selectedCampaignId, campaignContactIds]);
 
   // REQ-04: self-assign an unassigned chat ("Tomar conversación"). Any

@@ -127,7 +127,7 @@ function compactReportForModel(report: ExecutiveReport) {
 
 export async function GET(request: Request) {
   try {
-    const { accountId } = await requireRole('admin')
+    const { accountId } = await requireRole('supervisor')
     const url = new URL(request.url)
     const from = url.searchParams.get('from') ?? ''
     const to = url.searchParams.get('to') ?? ''
@@ -150,7 +150,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const { supabase, accountId, userId } = await requireRole('admin')
+    const { supabase, accountId, userId } = await requireRole('supervisor')
     const limit = checkRateLimit(`ai-report:${accountId}`, RATE_LIMITS.aiReportAccount)
     if (!limit.success) return rateLimitResponse(limit)
 

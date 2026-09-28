@@ -31,7 +31,7 @@ function csvCell(value: string | null): string {
  */
 export async function GET(request: Request) {
   try {
-    const { supabase, accountId } = await requireRole('admin')
+    const { supabase, accountId } = await requireRole('supervisor')
     const url = new URL(request.url)
 
     const days = Math.min(MAX_DAYS, Math.max(1, Number(url.searchParams.get('days')) || 7))
