@@ -45,7 +45,8 @@ data or send messages, add `"NEXOOMNI_ENABLE_WRITES": "true"` (and
 ## What it exposes
 
 - **Reads (always on):** `whoami`, contacts (list/get), conversations
-  (list/get), messages (list), broadcast status, team members.
+  (list/get), messages (list), broadcast status, team members, contact
+  Nexo Memory (summary/risk/facts/tasks).
 - **Writes (opt-in):** send a message, create/update a contact, assign
   a conversation, add an internal note.
 - **Broadcasts (opt-in):** launch a template broadcast — requires an

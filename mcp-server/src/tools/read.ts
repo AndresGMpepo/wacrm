@@ -136,4 +136,18 @@ export function registerReadTools(server: McpServer, client: NexoOmniClient): vo
     },
     handle(async () => jsonResult(await client.listTeamMembers())),
   );
+
+  server.registerTool(
+    'get_contact_memory',
+    {
+      title: 'Get contact memory',
+      description:
+        'Read a contact\'s Nexo Memory: the AI-derived summary, sales stage, sentiment, risk level, opportunity score, and next best action, plus its dated timeline events, active facts (interests/objections/attributes), and commitments/tasks (pending and past). Use this to answer "what do we know about this customer?" without opening the dashboard.',
+      inputSchema: {
+        id: z.string().describe('Contact id.'),
+      },
+      annotations: { ...READ_ONLY, title: 'Get contact memory' },
+    },
+    handle(async ({ id }) => jsonResult(await client.getContactMemory(id))),
+  );
 }

@@ -38,10 +38,10 @@ desarrollador para uso interno del equipo, no para clientes finales.
 3. Agrega el servidor ya compilado a la configuración de tu asistente
    de IA.
 4. Por defecto el modo es de solo lectura — el asistente puede
-   consultar (incluidos contactos, conversaciones, mensajes y el
-   equipo) pero no puede enviar mensajes, asignar conversaciones,
-   dejar notas ni modificar datos, a menos que lo actives
-   explícitamente.
+   consultar (incluidos contactos, conversaciones, mensajes, el
+   equipo y la memoria/Nexo Memory de un contacto) pero no puede
+   enviar mensajes, asignar conversaciones, dejar notas ni modificar
+   datos, a menos que lo actives explícitamente.
 
 ## Preguntas frecuentes
 

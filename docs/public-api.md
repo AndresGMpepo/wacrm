@@ -50,6 +50,7 @@ it. Grant the minimum.
 | `conversations:read` | List and read conversations              |
 | `conversations:assign` | Assign or unassign a conversation to an active team member |
 | `conversation-notes:write` | Create a private team note on a conversation |
+| `contact-memory:read` | Read a contact's Nexo Memory (summary, risk, facts, tasks) |
 | `broadcasts:send`    | Launch broadcast campaigns               |
 | `webhooks:manage`    | Register and manage outbound webhooks    |
 
@@ -200,6 +201,35 @@ Read or update one contact. Scopes: `contacts:read` / `contacts:write`.
 `PATCH` updates only the fields you send (`name`, `email`, `company`);
 pass `tags` (an array of tag names) to replace the contact's tags. A
 contact in another account returns `404`.
+
+### `GET /api/v1/contacts/{id}/memory`
+
+Reads a contact's Nexo Memory: the consolidated summary/stage/
+sentiment/risk/opportunity analysis, its dated timeline events, active
+facts (interests/objections/attributes), and commitments/tasks
+(pending and past). Scope: `contact-memory:read`. This is read-only —
+the memory itself is only ever written by NexoOmni's own AI analysis
+worker or a dashboard admin, never through the public API.
+
+```json
+{
+  "data": {
+    "memory": {
+      "current_summary": "Interested in the annual plan, waiting on a quote.",
+      "current_stage": "negotiation",
+      "sentiment": "positive",
+      "sentiment_score": 78,
+      "risk_level": "low",
+      "opportunity_score": 82,
+      "next_best_action": "Send the annual-plan quote before Friday.",
+      "updated_at": "…"
+    },
+    "events": [{ "id": "…", "event_type": "fact", "summary": "…", "importance": "normal", "confidence": 0.8, "event_date": "…" }],
+    "facts": [{ "id": "…", "category": "interest", "fact": "…", "confidence": 0.75, "status": "active" }],
+    "commitments": [{ "id": "…", "description": "…", "owner": "agent", "due_date": "…", "due_at": null, "status": "pending", "created_at": "…" }]
+  }
+}
+```
 
 ### `GET /api/v1/conversations`
 

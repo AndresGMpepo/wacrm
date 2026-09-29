@@ -81,6 +81,7 @@ when their guard is set.
 | `list_messages`      | read      | `messages:read`      | List a conversation's messages                  |
 | `get_broadcast`      | read      | `broadcasts:send`    | Poll a broadcast's delivery status              |
 | `list_team_members`  | read      | `conversations:assign` | List active members who can receive an assignment |
+| `get_contact_memory` | read      | `contact-memory:read` | Read a contact's Nexo Memory (summary, risk, facts, tasks) |
 | `send_message`       | write     | `messages:send`      | Send a WhatsApp message (text/template/media)   |
 | `create_contact`     | write     | `contacts:write`     | Create (find-or-create) a contact               |
 | `update_contact`     | write     | `contacts:write`     | Update a contact / replace its tags             |

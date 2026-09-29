@@ -145,6 +145,10 @@ export class NexoOmniClient {
     return this.request('PATCH', `/contacts/${encodeURIComponent(id)}`, { body });
   }
 
+  getContactMemory(id: string): Promise<{ data: unknown }> {
+    return this.request('GET', `/contacts/${encodeURIComponent(id)}/memory`);
+  }
+
   // --- Conversations ------------------------------------------------
 
   listConversations(query: {
