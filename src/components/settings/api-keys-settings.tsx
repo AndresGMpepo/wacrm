@@ -43,6 +43,7 @@ import {
 import { useTranslations } from 'next-intl';
 import { SettingsPanelHead } from './settings-panel-head';
 import { N8nIntegrationSettings } from './n8n-integration-settings';
+import { McpConnectionSettings } from './mcp-connection-settings';
 
 interface ApiKey {
   id: string;
@@ -278,6 +279,15 @@ export function ApiKeysSettings() {
           setCreatePreset({
             name: 'n8n producción',
             scopes: ['contacts:read', 'contacts:write', 'messages:send', 'messages:read', 'conversations:read', 'conversations:assign', 'conversation-notes:write'],
+          });
+          setCreateOpen(true);
+        }}
+      />
+      <McpConnectionSettings
+        onCreateApiKey={() => {
+          setCreatePreset({
+            name: 'Asistente IA (MCP)',
+            scopes: ['contacts:read', 'contact-memory:read', 'conversations:read', 'messages:read'],
           });
           setCreateOpen(true);
         }}

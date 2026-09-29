@@ -1744,6 +1744,17 @@
       "done": "완료",
       "networkError": "서버에 연결할 수 없습니다"
     },
+    "mcp": {
+      "title": "MCP 서버",
+      "description": "AI 어시스턴트(Claude, Cursor, ChatGPT 등)를 설치 없이 HTTPS로 CRM에 직접 연결하세요. 어시스턴트는 API 키의 권한 범위가 허용하는 작업만 수행할 수 있습니다.",
+      "endpointLabel": "서버 URL",
+      "copyUrlSuccess": "URL이 복사되었습니다",
+      "configLabel": "예시 설정",
+      "copyConfigSuccess": "설정이 복사되었습니다",
+      "copyFailed": "복사 실패 — 직접 선택해 복사하세요",
+      "createKeyButton": "MCP용 API 키 생성",
+      "note": "항상 읽기 전용 키로 시작하세요. 어시스턴트는 그 키의 권한 범위를 벗어난 작업을 절대 할 수 없습니다."
+    },
     "deals": {
       "title": "딜 & 통화",
       "description": "새 딜과 파이프라인, 대시보드 합계에 사용되는 통화입니다.",

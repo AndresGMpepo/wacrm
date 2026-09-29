@@ -1744,6 +1744,17 @@
       "done": "Done",
       "networkError": "Could not reach the server"
     },
+    "mcp": {
+      "title": "MCP server",
+      "description": "Connect an AI assistant (Claude, Cursor, ChatGPT, etc.) directly to your CRM over HTTPS — nothing to install. The assistant can only do what the API key's scopes allow.",
+      "endpointLabel": "Server URL",
+      "copyUrlSuccess": "URL copied",
+      "configLabel": "Example configuration",
+      "copyConfigSuccess": "Configuration copied",
+      "copyFailed": "Copy failed — select and copy manually",
+      "createKeyButton": "Create an API key for MCP",
+      "note": "Always start with a read-only key. The assistant can never do more than that key's scopes allow."
+    },
     "deals": {
       "title": "Deals & currency",
       "description": "The currency used for new deals and for pipeline and dashboard totals.",

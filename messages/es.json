@@ -1732,6 +1732,17 @@
       "done": "Hecho",
       "networkError": "No se pudo conectar con el servidor"
     },
+    "mcp": {
+      "title": "Servidor MCP",
+      "description": "Conecta un asistente de IA (Claude, Cursor, ChatGPT, etc.) directamente a tu CRM por HTTPS, sin instalar nada. El asistente solo puede hacer lo que permitan los permisos (scopes) de la clave de API que le des.",
+      "endpointLabel": "URL del servidor",
+      "copyUrlSuccess": "URL copiada",
+      "configLabel": "Configuración de ejemplo",
+      "copyConfigSuccess": "Configuración copiada",
+      "copyFailed": "Fallo al copiar — selecciona y copia manualmente",
+      "createKeyButton": "Crear clave de API para MCP",
+      "note": "Empieza siempre con una clave de solo lectura. El asistente nunca podrá hacer más de lo que permitan los permisos de esa clave."
+    },
     "deals": {
       "title": "Tratos y moneda",
       "description": "La moneda utilizada para nuevos tratos y para los totales del pipeline y el panel de control.",
