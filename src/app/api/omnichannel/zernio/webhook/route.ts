@@ -530,6 +530,10 @@ export async function POST(request: Request) {
         reply_to_message_id: replyToInternalId,
         status: 'delivered',
         created_at: now,
+        // Which of the contact's numbers actually sent this — only
+        // meaningful on WhatsApp, where the participant id IS the phone
+        // (see contactPhone above). Migration 131.
+        sender_phone: channel === 'whatsapp' ? (contactPhone || null) : null,
       })
       if (messageError && !isUniqueViolation(messageError)) throw messageError
 

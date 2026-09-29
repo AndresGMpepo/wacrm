@@ -293,6 +293,12 @@ export interface Message {
   media_analysis_status?: 'queued' | 'processing' | 'completed' | 'skipped' | 'failed';
   media_transcript?: string;
   media_description?: string;
+  /** Raw originating phone for an inbound customer WhatsApp/Zernio message
+   *  (migration 131) — null for outbound and for channels with no phone
+   *  concept (Facebook/Instagram/chat web). Only meaningful to show when
+   *  the contact has more than one number on file (see
+   *  `contacts.alternate_phones`, migration 127). */
+  sender_phone?: string | null;
 }
 
 export type ReactionActor = 'customer' | 'agent';

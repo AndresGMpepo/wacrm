@@ -37,6 +37,12 @@ docs/manuals/
   supervision-y-reportes/
     supervision-en-vivo.md
     reportes-ejecutivos.md
+    transcripcion-de-llamadas.md
+  automatizaciones-y-flujos/
+    automatizaciones.md
+    flujos.md
+  notificaciones/
+    notificaciones.md
   changelog/
     2026-09.md               ← un archivo por mes, mejoras + bugs resueltos
 ```
@@ -44,6 +50,48 @@ docs/manuals/
 Cada carpeta = una sección del menú del sitio de documentación. El
 nombre de archivo (sin `.md`) se vuelve la URL (`/manuales/inbox/
 plantillas-y-botones`).
+
+## Catálogo — qué existe en NexoOmni y qué manual lo cubre
+
+Esta tabla es la fuente de verdad de "todo lo que hay que documentar".
+Actualízala cada vez que se agregue una funcionalidad nueva o se
+escriba un manual pendiente — la regla en [AGENTS.md](../../AGENTS.md)
+("todo feature nuevo lleva su manual") depende de que esta lista esté
+al día.
+
+| Funcionalidad | Manual | Estado |
+|---|---|---|
+| Conectar WhatsApp (nativo o guiado) | [primeros-pasos/conexion-whatsapp.md](./primeros-pasos/conexion-whatsapp.md) | ✅ |
+| Conectar Facebook / Instagram | [primeros-pasos/conexion-facebook-instagram.md](./primeros-pasos/conexion-facebook-instagram.md) | ✅ |
+| Miembros del equipo y roles (owner/admin/supervisor/agent/viewer) | [primeros-pasos/invitar-miembros.md](./primeros-pasos/invitar-miembros.md) | ✅ |
+| Bandeja de entrada compartida (WhatsApp/FB/IG/Chat web) | [inbox/bandeja-compartida.md](./inbox/bandeja-compartida.md) | ✅ |
+| Plantillas de mensaje y botones | [inbox/plantillas-y-botones.md](./inbox/plantillas-y-botones.md) | ✅ |
+| Notas internas del equipo (por conversación) | [inbox/bandeja-compartida.md](./inbox/bandeja-compartida.md) | ⏳ fusionar con un manual propio |
+| Reacciones y respuestas citadas | — | ⏳ pendiente |
+| Fusionar contactos duplicados (incl. multi-número) | [contactos/fusionar-contactos.md](./contactos/fusionar-contactos.md) | ✅ |
+| Etiquetas y campos personalizados | [contactos/etiquetas-y-campos.md](./contactos/etiquetas-y-campos.md) | ✅ |
+| Importar contactos por CSV | — | ⏳ pendiente |
+| Crear una difusión | [difusiones/crear-una-difusion.md](./difusiones/crear-una-difusion.md) | ✅ |
+| Audiencias y exclusiones | [difusiones/audiencias-y-exclusiones.md](./difusiones/audiencias-y-exclusiones.md) | ✅ |
+| Pipeline de ventas (tratos) | [pipelines-y-citas/pipeline-de-ventas.md](./pipelines-y-citas/pipeline-de-ventas.md) | ✅ |
+| Agenda de citas + especialistas + Google Calendar | [pipelines-y-citas/agenda-de-citas.md](./pipelines-y-citas/agenda-de-citas.md) | ✅ |
+| Tareas y recordatorios (10 min antes) | [nexo-memory/tareas-y-recordatorios.md](./nexo-memory/tareas-y-recordatorios.md) | ✅ |
+| Seguimientos Nexo (cola unificada de pendientes) | [nexo-memory/seguimientos-nexo.md](./nexo-memory/seguimientos-nexo.md) | ✅ |
+| Nexo Memory (resumen, riesgo, oportunidad, hechos) | — | ⏳ pendiente (falta un manual dedicado a leer/interpretar el panel) |
+| NexPhone (softphone) | [telefonia/nexphone-softphone.md](./telefonia/nexphone-softphone.md) | ✅ |
+| Extensiones de NexPhone por agente | [telefonia/extensiones-por-agente.md](./telefonia/extensiones-por-agente.md) | ✅ |
+| Supervisión en vivo (agentes, llamadas, intervenciones) | [supervision-y-reportes/supervision-en-vivo.md](./supervision-y-reportes/supervision-en-vivo.md) | ✅ |
+| Reportes ejecutivos + reportes programados | [supervision-y-reportes/reportes-ejecutivos.md](./supervision-y-reportes/reportes-ejecutivos.md) | ✅ |
+| Transcripción y análisis de llamadas | [supervision-y-reportes/transcripcion-de-llamadas.md](./supervision-y-reportes/transcripcion-de-llamadas.md) | ✅ |
+| Automatizaciones (palabra clave → acción) | [automatizaciones-y-flujos/automatizaciones.md](./automatizaciones-y-flujos/automatizaciones.md) | ✅ |
+| Flujos (editor visual multi-paso) | [automatizaciones-y-flujos/flujos.md](./automatizaciones-y-flujos/flujos.md) | ✅ |
+| Notificaciones | [notificaciones/notificaciones.md](./notificaciones/notificaciones.md) | ✅ |
+| Agentes IA (config de respuesta automática + base de conocimiento) | — | ⏳ pendiente |
+| Chat web (Yeastar Live Chat) — instalación del widget | — | ⏳ pendiente |
+| Claves de API + Webhooks salientes (integraciones propias) | — | ⏳ pendiente |
+| Servidor MCP (conectar NexoOmni a un agente de IA externo) | [../mcp.md](../mcp.md) (técnico) | ⏳ falta versión para cliente final |
+| API pública v1 | [../public-api.md](../public-api.md) (técnico) | ⏳ falta versión para cliente final |
+| Panel de plataforma (solo operador NexoOmni, no clientes) | — | Fuera de alcance de este catálogo — es interno |
 
 ## Front matter obligatorio
 

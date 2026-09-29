@@ -638,6 +638,9 @@ async function processMessage(
     // the column; null for every other content_type so existing inserts
     // behave identically.
     interactive_reply_id: interactiveReplyId,
+    // Which of the contact's numbers actually sent this — matters once a
+    // contact has more than one active WhatsApp number (migration 131).
+    sender_phone: senderPhone,
   })
 
   if (msgError) {

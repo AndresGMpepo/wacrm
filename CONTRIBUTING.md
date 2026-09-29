@@ -29,6 +29,18 @@ npm run dev
 Full setup (Supabase migrations, WhatsApp Business API, deploy) lives in
 [`docs/`](./docs/README.md).
 
+## Development rules — for humans and AI assistants alike
+
+Every change in this fork (whether written by a person or by an AI
+coding assistant) follows [docs/development-practices.md](./docs/development-practices.md).
+It is not optional reading — it's the same rule set [AGENTS.md](./AGENTS.md)
+loads automatically for AI agents, kept in one place so both follow the
+same standard. In short: roles are ranked not string-compared, schema
+changes are numbered migrations, `npx tsc --noEmit` + `npm run lint`
+must be clean before a task is done, and every new user-facing feature
+ships with an entry under [`docs/manuals/`](./docs/manuals/README.md).
+A pull request that skips these isn't reviewed until it's fixed.
+
 ## Keeping your fork up to date
 
 Pull in upstream bug fixes and security patches periodically:

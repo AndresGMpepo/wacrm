@@ -23,14 +23,23 @@ export interface ExistingContact {
   id: string;
   phone: string;
   name?: string | null;
+  /** Secondary numbers kept from a merged-away duplicate (migration 127)
+   *  OR a contact that genuinely has more than one active number (e.g. a
+   *  business line and a personal line) — see `addAlternatePhone`. */
+  alternate_phones?: string[] | null;
   [key: string]: unknown;
 }
 
 /**
- * Find an existing contact in `accountId` whose phone matches `phone`,
- * or null. Pre-filters in SQL by the last-8-digit suffix (so we don't
- * pull every contact), then applies the strict `phonesMatch` in JS on
- * the small candidate set — the exact approach the webhook has used.
+ * Find an existing contact in `accountId` whose phone OR any of its
+ * `alternate_phones` matches `phone`, or null. Pre-filters in SQL by the
+ * last-8-digit suffix on the primary phone (so we don't pull every
+ * contact), then applies the strict `phonesMatch` in JS on the small
+ * candidate set — the exact approach the webhook has used. A contact
+ * that genuinely owns more than one active number (a business line and
+ * a personal line, not just an old merged one) is looked up the same
+ * way: whichever number messages in, this still resolves to the one
+ * contact instead of spawning a duplicate.
  */
 export async function findExistingContact(
   db: SupabaseClient,
@@ -42,16 +51,33 @@ export async function findExistingContact(
 
   const suffix = normalized.length >= 8 ? normalized.slice(-8) : normalized;
 
-  const { data, error } = await db
-    .from("contacts")
-    .select("*")
-    .eq("account_id", accountId)
-    .like("phone", `%${suffix}`);
+  const [byPhone, byAlternate] = await Promise.all([
+    db
+      .from("contacts")
+      .select("*")
+      .eq("account_id", accountId)
+      .like("phone", `%${suffix}`),
+    // Contacts with any alternate number never number more than a
+    // handful per account (only merges/manual additions create them),
+    // so fetching all of them and matching in JS is cheap and avoids
+    // needing a per-array-element SQL suffix match PostgREST can't
+    // express directly.
+    db
+      .from("contacts")
+      .select("*")
+      .eq("account_id", accountId)
+      .not("alternate_phones", "eq", "{}"),
+  ]);
 
-  if (error || !data) return null;
+  if (byPhone.error && byAlternate.error) return null;
+
+  const byPrimary = (byPhone.data as ExistingContact[] | null)?.find((c) => phonesMatch(c.phone, phone));
+  if (byPrimary) return byPrimary;
 
   return (
-    (data as ExistingContact[]).find((c) => phonesMatch(c.phone, phone)) ?? null
+    (byAlternate.data as ExistingContact[] | null)?.find((c) =>
+      (c.alternate_phones ?? []).some((alt) => phonesMatch(alt, phone)),
+    ) ?? null
   );
 }
 

@@ -1212,6 +1212,7 @@ export function MessageThread({
                           currentUserId={user?.id}
                           onToggleReaction={handlePillToggle}
                           channelType={conversation.channel_type}
+                          showSenderPhone={Boolean(conversation.contact?.alternate_phones?.length)}
                         />
                       </MessageActions>
                     );

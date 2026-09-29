@@ -37,6 +37,10 @@ interface MessageBubbleProps {
   onToggleReaction?: (emoji: string) => void;
   /** Conversation's channel_type — drives the Zernio media proxy below. */
   channelType?: string | null;
+  /** True when the contact has more than one number on file
+   *  (`contacts.alternate_phones`, migration 127) — only then is it
+   *  useful to show which specific number sent an inbound message. */
+  showSenderPhone?: boolean;
 }
 
 /**
@@ -394,6 +398,7 @@ export function MessageBubble({
   currentUserId,
   onToggleReaction,
   channelType,
+  showSenderPhone,
 }: MessageBubbleProps) {
   const t = useTranslations("Inbox.bubble");
 
@@ -425,6 +430,11 @@ export function MessageBubble({
           />
         )}
         <MessageContent message={message} t={t} channelType={channelType} isAgent={isAgent} />
+        {showSenderPhone && !isAgent && message.sender_phone ? (
+          <p className="mt-1 text-[10px] italic text-muted-foreground">
+            Vía {message.sender_phone}
+          </p>
+        ) : null}
         <div
           className={cn(
             "mt-1 flex items-center gap-1",
