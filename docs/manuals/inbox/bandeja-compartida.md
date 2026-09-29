@@ -46,4 +46,6 @@ cada mensaje muestra debajo "Vía [número]" para que sepas cuál usó.
 ## Ver también
 
 - [Plantillas y botones](./plantillas-y-botones.md)
+- [Notas internas del equipo](./notas-internas.md)
+- [Reacciones y respuestas citadas](./reacciones-y-respuestas.md)
 - [Fusionar contactos duplicados](../contactos/fusionar-contactos.md)
