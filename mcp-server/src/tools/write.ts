@@ -1,5 +1,5 @@
 // ============================================================
-// Write tools — registered only when WACRM_ENABLE_WRITES is set.
+// Write tools — registered only when NEXOOMNI_ENABLE_WRITES is set.
 //
 // These change data or send a WhatsApp message. They are gated so a
 // read-only deployment never exposes them to the model at all. (The
@@ -9,7 +9,7 @@
 
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { WacrmClient } from '../client.js';
+import type { NexoOmniClient } from '../client.js';
 import { handle, jsonResult } from './shared.js';
 
 const templateSchema = z
@@ -23,7 +23,7 @@ const templateSchema = z
   })
   .describe('Template payload — required when type is "template".');
 
-export function registerWriteTools(server: McpServer, client: WacrmClient): void {
+export function registerWriteTools(server: McpServer, client: NexoOmniClient): void {
   server.registerTool(
     'send_message',
     {
@@ -91,5 +91,40 @@ export function registerWriteTools(server: McpServer, client: WacrmClient): void
       annotations: { title: 'Update contact', readOnlyHint: false, openWorldHint: true },
     },
     handle(async ({ id, ...body }) => jsonResult(await client.updateContact(id, body))),
+  );
+
+  server.registerTool(
+    'assign_conversation',
+    {
+      title: 'Assign conversation',
+      description:
+        'Assign a conversation to an active team member, or remove its assignment. Never sends a customer message and never changes the conversation status. Call list_team_members first to resolve a name to a user_id.',
+      inputSchema: {
+        id: z.string().describe('Conversation id.'),
+        assigned_agent_id: z
+          .string()
+          .nullable()
+          .describe('Team member user_id from list_team_members, or null to unassign.'),
+      },
+      annotations: { title: 'Assign conversation', readOnlyHint: false, openWorldHint: true },
+    },
+    handle(async ({ id, assigned_agent_id }) =>
+      jsonResult(await client.assignConversation(id, assigned_agent_id)),
+    ),
+  );
+
+  server.registerTool(
+    'add_conversation_note',
+    {
+      title: 'Add internal note',
+      description:
+        'Add a private team note to a conversation. Never delivered to the customer through WhatsApp, Meta, Yeastar, or web chat — visible only inside the NexoOmni inbox.',
+      inputSchema: {
+        id: z.string().describe('Conversation id.'),
+        body: z.string().min(1).describe('Note text.'),
+      },
+      annotations: { title: 'Add internal note', readOnlyHint: false, openWorldHint: true },
+    },
+    handle(async ({ id, body }) => jsonResult(await client.addConversationNote(id, body))),
   );
 }

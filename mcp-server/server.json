@@ -1,9 +1,9 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.ArnasDon/wacrm-mcp",
-  "description": "Drive a self-hosted wacrm WhatsApp CRM from Claude, Cursor and other MCP clients.",
+  "name": "io.github.your-org/nexoomni-mcp",
+  "description": "Drive a NexoOmni WhatsApp CRM from Claude, Cursor and other MCP clients. Internal use only — not published to the public MCP registry.",
   "repository": {
-    "url": "https://github.com/ArnasDon/wacrm",
+    "url": "https://github.com/your-org/your-repo",
     "source": "github",
     "subfolder": "mcp-server"
   },
@@ -11,36 +11,36 @@
   "packages": [
     {
       "registryType": "npm",
-      "identifier": "wacrm-mcp",
+      "identifier": "nexoomni-mcp",
       "version": "0.1.1",
       "transport": {
         "type": "stdio"
       },
       "environmentVariables": [
         {
-          "name": "WACRM_BASE_URL",
-          "description": "Base URL of your wacrm instance, e.g. https://crm.example.com",
+          "name": "NEXOOMNI_BASE_URL",
+          "description": "Base URL of your NexoOmni instance, e.g. https://crm.example.com",
           "isRequired": true,
           "isSecret": false,
           "format": "string"
         },
         {
-          "name": "WACRM_API_KEY",
-          "description": "wacrm API key (Settings → API keys). Its scopes decide what is allowed.",
+          "name": "NEXOOMNI_API_KEY",
+          "description": "NexoOmni API key (Settings → API keys). Its scopes decide what is allowed.",
           "isRequired": true,
           "isSecret": true,
           "format": "string"
         },
         {
-          "name": "WACRM_ENABLE_WRITES",
-          "description": "Set to true to expose contact create/update and message sending. Read-only when unset.",
+          "name": "NEXOOMNI_ENABLE_WRITES",
+          "description": "Set to true to expose contact create/update, message sending, conversation assignment, and internal notes. Read-only when unset.",
           "isRequired": false,
           "isSecret": false,
           "format": "string"
         },
         {
-          "name": "WACRM_ENABLE_BROADCASTS",
-          "description": "Set to true to expose the mass-broadcast tool. Requires WACRM_ENABLE_WRITES.",
+          "name": "NEXOOMNI_ENABLE_BROADCASTS",
+          "description": "Set to true to expose the mass-broadcast tool. Requires NEXOOMNI_ENABLE_WRITES.",
           "isRequired": false,
           "isSecret": false,
           "format": "string"
@@ -49,3 +49,4 @@
     }
   ]
 }
+

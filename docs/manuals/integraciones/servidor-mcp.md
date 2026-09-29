@@ -32,12 +32,16 @@ desarrollador para uso interno del equipo, no para clientes finales.
 1. Crea una clave de API en **Configuración → API** — dale solo los
    permisos de lectura si tu asistente solo va a consultar, no a
    modificar datos.
-2. Agrega el servidor a la configuración de tu asistente de IA
-   (ver la guía técnica completa en [docs/mcp.md](../../mcp.md) para
-   el paso a paso exacto por cliente).
-3. Por defecto el modo es de solo lectura — el asistente puede
-   consultar pero no puede enviar mensajes ni modificar datos, a menos
-   que lo actives explícitamente.
+2. El servidor se compila y ejecuta localmente (no se instala desde un
+   registro público) — pide a tu equipo técnico que lo prepare siguiendo
+   la guía completa en [docs/mcp.md](../../mcp.md).
+3. Agrega el servidor ya compilado a la configuración de tu asistente
+   de IA.
+4. Por defecto el modo es de solo lectura — el asistente puede
+   consultar (incluidos contactos, conversaciones, mensajes y el
+   equipo) pero no puede enviar mensajes, asignar conversaciones,
+   dejar notas ni modificar datos, a menos que lo actives
+   explícitamente.
 
 ## Preguntas frecuentes
 

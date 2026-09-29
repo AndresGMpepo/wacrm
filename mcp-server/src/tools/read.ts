@@ -9,18 +9,18 @@
 
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { WacrmClient } from '../client.js';
+import type { NexoOmniClient } from '../client.js';
 import { handle, jsonResult } from './shared.js';
 
 const READ_ONLY = { readOnlyHint: true, openWorldHint: true } as const;
 
-export function registerReadTools(server: McpServer, client: WacrmClient): void {
+export function registerReadTools(server: McpServer, client: NexoOmniClient): void {
   server.registerTool(
     'whoami',
     {
       title: 'Who am I',
       description:
-        'Verify the API key and show which wacrm account it is bound to and what scopes it carries. Call this first to discover what actions are possible.',
+        'Verify the API key and show which NexoOmni account it is bound to and what scopes it carries. Call this first to discover what actions are possible.',
       inputSchema: {},
       annotations: { ...READ_ONLY, title: 'Who am I' },
     },
@@ -123,5 +123,17 @@ export function registerReadTools(server: McpServer, client: WacrmClient): void 
       annotations: { ...READ_ONLY, title: 'Get broadcast status' },
     },
     handle(async ({ id }) => jsonResult(await client.getBroadcast(id))),
+  );
+
+  server.registerTool(
+    'list_team_members',
+    {
+      title: 'List team members',
+      description:
+        'List active team members who can receive a conversation assignment (user_id, full_name, role only — no email or login data). Call this before assign_conversation to resolve a name to a user_id.',
+      inputSchema: {},
+      annotations: { ...READ_ONLY, title: 'List team members' },
+    },
+    handle(async () => jsonResult(await client.listTeamMembers())),
   );
 }
