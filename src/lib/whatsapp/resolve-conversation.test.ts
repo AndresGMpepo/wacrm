@@ -65,6 +65,9 @@ function makeDb(script: Script): SupabaseClient {
       likeCalls++;
       return Promise.resolve({ data, error: null });
     },
+    // findExistingContact's parallel alternate-phones lookup — none of
+    // these scripts exercise it, so it always resolves empty.
+    not: () => Promise.resolve({ data: [], error: null }),
     maybeSingle: () => {
       if (table === 'whatsapp_config')
         return Promise.resolve({ data: script.config ?? null, error: null });

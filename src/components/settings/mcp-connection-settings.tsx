@@ -8,7 +8,7 @@
 // like any other integration on this page.
 // ============================================================
 
-import { useEffect, useState } from 'react';
+import { useSyncExternalStore } from 'react';
 import { Bot, Copy } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslations } from 'next-intl';
@@ -18,13 +18,22 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
+// SSR renders '' (no window); the client re-reads the real origin on
+// hydration — the same warning-free pattern as useIsClient in
+// themed-toaster.tsx, avoids a setState-in-effect for a value that
+// never changes during the component's lifetime.
+const noopSubscribe = () => () => {};
+function useOrigin(): string {
+  return useSyncExternalStore(
+    noopSubscribe,
+    () => window.location.origin,
+    () => ''
+  );
+}
+
 export function McpConnectionSettings({ onCreateApiKey }: { onCreateApiKey: () => void }) {
   const t = useTranslations('Settings.mcp');
-  const [origin, setOrigin] = useState('');
-
-  useEffect(() => {
-    setOrigin(window.location.origin);
-  }, []);
+  const origin = useOrigin();
 
   const endpointUrl = `${origin}/api/mcp`;
   const configSnippet = JSON.stringify(

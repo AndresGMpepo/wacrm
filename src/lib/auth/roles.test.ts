@@ -22,10 +22,11 @@ describe("roleRank", () => {
 
   it("matches the SQL helper's numeric mapping", () => {
     // Keep these in lockstep with `is_account_member`'s CASE expression
-    // in supabase/migrations/017_account_sharing.sql — any change here
-    // means the SQL helper needs the same change.
-    expect(roleRank("owner")).toBe(4);
-    expect(roleRank("admin")).toBe(3);
+    // in supabase/migrations/129_supervisor_permissions.sql — any change
+    // here means the SQL helper needs the same change.
+    expect(roleRank("owner")).toBe(5);
+    expect(roleRank("admin")).toBe(4);
+    expect(roleRank("supervisor")).toBe(3);
     expect(roleRank("agent")).toBe(2);
     expect(roleRank("viewer")).toBe(1);
   });
@@ -63,6 +64,15 @@ describe("hasMinRole", () => {
     ["viewer", "admin", false],
     ["viewer", "agent", false],
     ["viewer", "viewer", true],
+    ["supervisor", "owner", false],
+    ["supervisor", "admin", false],
+    ["supervisor", "supervisor", true],
+    ["supervisor", "agent", true],
+    ["supervisor", "viewer", true],
+    ["admin", "supervisor", true],
+    ["owner", "supervisor", true],
+    ["agent", "supervisor", false],
+    ["viewer", "supervisor", false],
   ])("%s vs min %s → %s", (role, min, expected) => {
     expect(hasMinRole(role, min)).toBe(expected);
   });
@@ -89,6 +99,7 @@ describe("capability predicates", () => {
   it("canManageMembers: admin+ only", () => {
     expect(canManageMembers("owner")).toBe(true);
     expect(canManageMembers("admin")).toBe(true);
+    expect(canManageMembers("supervisor")).toBe(false);
     expect(canManageMembers("agent")).toBe(false);
     expect(canManageMembers("viewer")).toBe(false);
   });
@@ -96,6 +107,7 @@ describe("capability predicates", () => {
   it("canEditSettings: admin+ only", () => {
     expect(canEditSettings("owner")).toBe(true);
     expect(canEditSettings("admin")).toBe(true);
+    expect(canEditSettings("supervisor")).toBe(false);
     expect(canEditSettings("agent")).toBe(false);
     expect(canEditSettings("viewer")).toBe(false);
   });
@@ -103,6 +115,7 @@ describe("capability predicates", () => {
   it("canSendMessages: agent+ only", () => {
     expect(canSendMessages("owner")).toBe(true);
     expect(canSendMessages("admin")).toBe(true);
+    expect(canSendMessages("supervisor")).toBe(true);
     expect(canSendMessages("agent")).toBe(true);
     expect(canSendMessages("viewer")).toBe(false);
   });
@@ -110,6 +123,7 @@ describe("capability predicates", () => {
   it("canViewOnly: viewer only", () => {
     expect(canViewOnly("owner")).toBe(false);
     expect(canViewOnly("admin")).toBe(false);
+    expect(canViewOnly("supervisor")).toBe(false);
     expect(canViewOnly("agent")).toBe(false);
     expect(canViewOnly("viewer")).toBe(true);
   });

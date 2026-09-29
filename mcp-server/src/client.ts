@@ -149,6 +149,25 @@ export class NexoOmniClient {
     return this.request('GET', `/contacts/${encodeURIComponent(id)}/memory`);
   }
 
+  createTask(contactId: string, body: unknown): Promise<{ data: unknown }> {
+    return this.request('POST', `/contacts/${encodeURIComponent(contactId)}/tasks`, { body });
+  }
+
+  updateTask(contactId: string, taskId: string, body: unknown): Promise<{ data: unknown }> {
+    return this.request(
+      'PATCH',
+      `/contacts/${encodeURIComponent(contactId)}/tasks/${encodeURIComponent(taskId)}`,
+      { body },
+    );
+  }
+
+  deleteTask(contactId: string, taskId: string): Promise<{ data: unknown }> {
+    return this.request(
+      'DELETE',
+      `/contacts/${encodeURIComponent(contactId)}/tasks/${encodeURIComponent(taskId)}`,
+    );
+  }
+
   // --- Conversations ------------------------------------------------
 
   listConversations(query: {
@@ -187,6 +206,59 @@ export class NexoOmniClient {
 
   listTeamMembers(): Promise<{ data: unknown }> {
     return this.request('GET', '/team-members');
+  }
+
+  // --- Pipelines & deals ----------------------------------------------
+
+  listPipelines(): Promise<{ data: unknown }> {
+    return this.request('GET', '/pipelines');
+  }
+
+  listDeals(query: {
+    limit?: number;
+    cursor?: string;
+    pipeline_id?: string;
+    stage_id?: string;
+    contact_id?: string;
+    status?: string;
+  }): Promise<Paginated<unknown>> {
+    return this.list('/deals', query);
+  }
+
+  getDeal(id: string): Promise<{ data: unknown }> {
+    return this.request('GET', `/deals/${encodeURIComponent(id)}`);
+  }
+
+  createDeal(body: unknown): Promise<{ data: unknown }> {
+    return this.request('POST', '/deals', { body });
+  }
+
+  updateDeal(id: string, body: unknown): Promise<{ data: unknown }> {
+    return this.request('PATCH', `/deals/${encodeURIComponent(id)}`, { body });
+  }
+
+  // --- Appointments ----------------------------------------------------
+
+  listAppointments(query: {
+    from?: string;
+    to?: string;
+    status?: string;
+    contact_id?: string;
+    specialist_id?: string;
+  }): Promise<{ data: unknown }> {
+    return this.request('GET', '/appointments', { query });
+  }
+
+  getAppointment(id: string): Promise<{ data: unknown }> {
+    return this.request('GET', `/appointments/${encodeURIComponent(id)}`);
+  }
+
+  createAppointment(body: unknown): Promise<{ data: unknown }> {
+    return this.request('POST', '/appointments', { body });
+  }
+
+  updateAppointment(id: string, body: unknown): Promise<{ data: unknown }> {
+    return this.request('PATCH', `/appointments/${encodeURIComponent(id)}`, { body });
   }
 
   // --- Broadcasts ---------------------------------------------------

@@ -82,11 +82,23 @@ when their guard is set.
 | `get_broadcast`      | read      | `broadcasts:send`    | Poll a broadcast's delivery status              |
 | `list_team_members`  | read      | `conversations:assign` | List active members who can receive an assignment |
 | `get_contact_memory` | read      | `contact-memory:read` | Read a contact's Nexo Memory (summary, risk, facts, tasks) |
+| `list_pipelines`     | read      | `deals:read`          | List pipelines with their ordered stages |
+| `list_deals`         | read      | `deals:read`          | List deals, filter by pipeline/stage/contact/status |
+| `get_deal`           | read      | `deals:read`          | Read one deal |
+| `list_appointments`  | read      | `appointments:read`   | List appointments in a date window |
+| `get_appointment`    | read      | `appointments:read`   | Read one appointment |
 | `send_message`       | write     | `messages:send`      | Send a WhatsApp message (text/template/media)   |
 | `create_contact`     | write     | `contacts:write`     | Create (find-or-create) a contact               |
 | `update_contact`     | write     | `contacts:write`     | Update a contact / replace its tags             |
 | `assign_conversation` | write    | `conversations:assign` | Assign or unassign a conversation |
 | `add_conversation_note` | write  | `conversation-notes:write` | Add a private team note (never sent to the customer) |
+| `create_task`        | write     | `contact-memory:write` | Schedule a follow-up task for a contact |
+| `update_task`        | write     | `contact-memory:write` | Update a task's status, description, or due date |
+| `delete_task`        | write     | `contact-memory:write` | Permanently delete a task |
+| `create_deal`        | write     | `deals:write`         | Create a deal in a pipeline |
+| `update_deal`        | write     | `deals:write`         | Move a deal's stage, or update its value/status/notes |
+| `create_appointment` | write     | `appointments:write`  | Schedule an appointment (checks for conflicts) |
+| `update_appointment` | write     | `appointments:write`  | Reschedule, change status, or update an appointment |
 | `send_broadcast`     | broadcast | `broadcasts:send`    | Launch a template broadcast (requires `confirm`)|
 
 ## Safety model

@@ -138,6 +138,81 @@ export function registerReadTools(server: McpServer, client: NexoOmniClient): vo
   );
 
   server.registerTool(
+    'list_pipelines',
+    {
+      title: 'List pipelines',
+      description:
+        'List every sales pipeline in the account with its ordered stages (id, name, color). Call this first to resolve a pipeline/stage name to the ids create_deal and update_deal need.',
+      inputSchema: {},
+      annotations: { ...READ_ONLY, title: 'List pipelines' },
+    },
+    handle(async () => jsonResult(await client.listPipelines())),
+  );
+
+  server.registerTool(
+    'list_deals',
+    {
+      title: 'List deals',
+      description:
+        'List deals (sales opportunities), newest first. Optionally filter by pipeline_id, stage_id, contact_id, or status (open/won/lost). Paginated.',
+      inputSchema: {
+        pipeline_id: z.string().optional(),
+        stage_id: z.string().optional(),
+        contact_id: z.string().optional().describe('Only deals for this contact.'),
+        status: z.enum(['open', 'won', 'lost']).optional(),
+        limit: z.number().int().min(1).max(100).optional().describe('Page size, 1–100 (default 50).'),
+        cursor: z.string().optional().describe('Opaque pagination cursor.'),
+      },
+      annotations: { ...READ_ONLY, title: 'List deals' },
+    },
+    handle(async (args) => jsonResult(await client.listDeals(args))),
+  );
+
+  server.registerTool(
+    'get_deal',
+    {
+      title: 'Get deal',
+      description: 'Read a single deal (sales opportunity) by id, including its contact and stage.',
+      inputSchema: {
+        id: z.string().describe('Deal id.'),
+      },
+      annotations: { ...READ_ONLY, title: 'Get deal' },
+    },
+    handle(async ({ id }) => jsonResult(await client.getDeal(id))),
+  );
+
+  server.registerTool(
+    'list_appointments',
+    {
+      title: 'List appointments',
+      description:
+        'List appointments in a date window (default: 7 days ago to 30 days ahead), newest first by start time. Optionally filter by status, contact_id, or specialist_id.',
+      inputSchema: {
+        from: z.string().optional().describe('ISO 8601 date-time. Defaults to 7 days ago.'),
+        to: z.string().optional().describe('ISO 8601 date-time. Defaults to 30 days ahead.'),
+        status: z.enum(['scheduled', 'confirmed', 'completed', 'cancelled', 'no_show']).optional(),
+        contact_id: z.string().optional(),
+        specialist_id: z.string().optional(),
+      },
+      annotations: { ...READ_ONLY, title: 'List appointments' },
+    },
+    handle(async (args) => jsonResult(await client.listAppointments(args))),
+  );
+
+  server.registerTool(
+    'get_appointment',
+    {
+      title: 'Get appointment',
+      description: 'Read a single appointment by id, including its contact.',
+      inputSchema: {
+        id: z.string().describe('Appointment id.'),
+      },
+      annotations: { ...READ_ONLY, title: 'Get appointment' },
+    },
+    handle(async ({ id }) => jsonResult(await client.getAppointment(id))),
+  );
+
+  server.registerTool(
     'get_contact_memory',
     {
       title: 'Get contact memory',

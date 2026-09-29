@@ -102,9 +102,11 @@ accordingly if several people share one compiled copy.
 
 - **Reads (always on):** `whoami`, contacts (list/get), conversations
   (list/get), messages (list), broadcast status, team members, contact
-  Nexo Memory (summary/risk/facts/tasks).
+  Nexo Memory (summary/risk/facts/tasks), pipelines and deals
+  (list/get), appointments (list/get).
 - **Writes (opt-in):** send a message, create/update a contact, assign
-  a conversation, add an internal note.
+  a conversation, add an internal note, create/update/delete a
+  follow-up task, create/update a deal, create/update an appointment.
 - **Broadcasts (opt-in):** launch a template broadcast — requires an
   explicit `confirm` and is marked destructive.
 

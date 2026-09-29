@@ -23,6 +23,11 @@ import { GET as getConversationGET } from '@/app/api/v1/conversations/[id]/route
 import { GET as listMessagesGET } from '@/app/api/v1/conversations/[id]/messages/route';
 import { GET as getBroadcastGET } from '@/app/api/v1/broadcasts/[id]/route';
 import { GET as listTeamMembersGET } from '@/app/api/v1/team-members/route';
+import { GET as listPipelinesGET } from '@/app/api/v1/pipelines/route';
+import { GET as listDealsGET } from '@/app/api/v1/deals/route';
+import { GET as getDealGET } from '@/app/api/v1/deals/[id]/route';
+import { GET as listAppointmentsGET } from '@/app/api/v1/appointments/route';
+import { GET as getAppointmentGET } from '@/app/api/v1/appointments/[id]/route';
 
 const READ_ONLY = { readOnlyHint: true, openWorldHint: true } as const;
 
@@ -193,6 +198,119 @@ export function registerReadTools(server: McpServer, authHeader: string, scopes:
         annotations: { ...READ_ONLY, title: 'List team members' },
       },
       handle(async () => jsonResult((await callRoute(listTeamMembersGET, '/team-members', authHeader)).data)),
+    );
+  }
+
+  if (hasScope(scopes, 'deals:read')) {
+    server.registerTool(
+      'list_pipelines',
+      {
+        title: 'List pipelines',
+        description:
+          'List every sales pipeline in the account with its ordered stages (id, name, color). Call this first to resolve a pipeline/stage name to the ids create_deal and update_deal need.',
+        inputSchema: {},
+        annotations: { ...READ_ONLY, title: 'List pipelines' },
+      },
+      handle(async () => jsonResult((await callRoute(listPipelinesGET, '/pipelines', authHeader)).data)),
+    );
+
+    server.registerTool(
+      'list_deals',
+      {
+        title: 'List deals',
+        description:
+          'List deals (sales opportunities), newest first. Optionally filter by pipeline_id, stage_id, contact_id, or status (open/won/lost). Paginated.',
+        inputSchema: {
+          pipeline_id: z.string().optional(),
+          stage_id: z.string().optional(),
+          contact_id: z.string().optional().describe('Only deals for this contact.'),
+          status: z.enum(['open', 'won', 'lost']).optional(),
+          limit: z.number().int().min(1).max(100).optional().describe('Page size, 1–100 (default 50).'),
+          cursor: z.string().optional().describe('Opaque pagination cursor.'),
+        },
+        annotations: { ...READ_ONLY, title: 'List deals' },
+      },
+      handle(
+        async (args: {
+          pipeline_id?: string;
+          stage_id?: string;
+          contact_id?: string;
+          status?: string;
+          limit?: number;
+          cursor?: string;
+        }) =>
+          jsonResult(
+            await callRoute(listDealsGET, '/deals', authHeader, {
+              query: {
+                pipeline_id: args.pipeline_id,
+                stage_id: args.stage_id,
+                contact_id: args.contact_id,
+                status: args.status,
+                limit: args.limit,
+                cursor: args.cursor,
+              },
+            }),
+          ),
+      ),
+    );
+
+    server.registerTool(
+      'get_deal',
+      {
+        title: 'Get deal',
+        description: 'Read a single deal (sales opportunity) by id, including its contact and stage.',
+        inputSchema: { id: z.string().describe('Deal id.') },
+        annotations: { ...READ_ONLY, title: 'Get deal' },
+      },
+      handle(async ({ id }: { id: string }) =>
+        jsonResult((await callRoute(getDealGET, `/deals/${id}`, authHeader, { params: { id } })).data),
+      ),
+    );
+  }
+
+  if (hasScope(scopes, 'appointments:read')) {
+    server.registerTool(
+      'list_appointments',
+      {
+        title: 'List appointments',
+        description:
+          'List appointments in a date window (default: 7 days ago to 30 days ahead), newest first by start time. Optionally filter by status, contact_id, or specialist_id.',
+        inputSchema: {
+          from: z.string().optional().describe('ISO 8601 date-time. Defaults to 7 days ago.'),
+          to: z.string().optional().describe('ISO 8601 date-time. Defaults to 30 days ahead.'),
+          status: z.enum(['scheduled', 'confirmed', 'completed', 'cancelled', 'no_show']).optional(),
+          contact_id: z.string().optional(),
+          specialist_id: z.string().optional(),
+        },
+        annotations: { ...READ_ONLY, title: 'List appointments' },
+      },
+      handle(
+        async (args: { from?: string; to?: string; status?: string; contact_id?: string; specialist_id?: string }) =>
+          jsonResult(
+            await callRoute(listAppointmentsGET, '/appointments', authHeader, {
+              query: {
+                from: args.from,
+                to: args.to,
+                status: args.status,
+                contact_id: args.contact_id,
+                specialist_id: args.specialist_id,
+              },
+            }),
+          ),
+      ),
+    );
+
+    server.registerTool(
+      'get_appointment',
+      {
+        title: 'Get appointment',
+        description: 'Read a single appointment by id, including its contact.',
+        inputSchema: { id: z.string().describe('Appointment id.') },
+        annotations: { ...READ_ONLY, title: 'Get appointment' },
+      },
+      handle(async ({ id }: { id: string }) =>
+        jsonResult((await callRoute(getAppointmentGET, `/appointments/${id}`, authHeader, { params: { id } })).data),
+      ),
     );
   }
 }

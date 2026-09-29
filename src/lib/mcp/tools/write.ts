@@ -14,6 +14,12 @@ import { POST as createContactPOST } from '@/app/api/v1/contacts/route';
 import { PATCH as updateContactPATCH } from '@/app/api/v1/contacts/[id]/route';
 import { PATCH as assignConversationPATCH } from '@/app/api/v1/conversations/[id]/assignment/route';
 import { POST as addConversationNotePOST } from '@/app/api/v1/conversations/[id]/internal-notes/route';
+import { POST as createTaskPOST } from '@/app/api/v1/contacts/[id]/tasks/route';
+import { PATCH as updateTaskPATCH, DELETE as deleteTaskDELETE } from '@/app/api/v1/contacts/[id]/tasks/[taskId]/route';
+import { POST as createDealPOST } from '@/app/api/v1/deals/route';
+import { PATCH as updateDealPATCH } from '@/app/api/v1/deals/[id]/route';
+import { POST as createAppointmentPOST } from '@/app/api/v1/appointments/route';
+import { PATCH as updateAppointmentPATCH } from '@/app/api/v1/appointments/[id]/route';
 
 const templateSchema = z
   .object({
@@ -89,6 +95,186 @@ export function registerWriteTools(server: McpServer, authHeader: string, scopes
       },
       handle(async ({ id, ...body }: { id: string } & Record<string, unknown>) =>
         jsonResult((await callRoute(updateContactPATCH, `/contacts/${id}`, authHeader, { method: 'PATCH', body, params: { id } })).data),
+      ),
+    );
+  }
+
+  if (hasScope(scopes, 'contact-memory:write')) {
+    server.registerTool(
+      'create_task',
+      {
+        title: 'Create follow-up task',
+        description:
+          'Schedule a follow-up task for a contact (e.g. "call back tomorrow at 3pm"). Triggers the existing "10 minutes before" reminder to the assigned agent. Requires an existing contact id — use create_contact first if you only have a phone number.',
+        inputSchema: {
+          id: z.string().describe('Contact id.'),
+          description: z.string().min(1).max(300).describe('What the task is about.'),
+          due_at: z.string().describe('When the task is due, ISO 8601 date-time, e.g. 2026-10-01T15:00:00-06:00.'),
+          owner: z.enum(['agent', 'customer']).optional().describe('Who owns the follow-up. Defaults to "agent".'),
+        },
+        annotations: { title: 'Create follow-up task', readOnlyHint: false, openWorldHint: true },
+      },
+      handle(async ({ id, ...body }: { id: string } & Record<string, unknown>) =>
+        jsonResult((await callRoute(createTaskPOST, `/contacts/${id}/tasks`, authHeader, { body, params: { id } })).data),
+      ),
+    );
+
+    server.registerTool(
+      'update_task',
+      {
+        title: 'Update follow-up task',
+        description:
+          'Update a follow-up task: change its status (pending/done/overdue/cancelled), description, or due date/time. Only the fields you pass are changed. Changing due_at re-arms the "10 minutes before" reminder for the new time.',
+        inputSchema: {
+          id: z.string().describe('Contact id.'),
+          task_id: z.string().describe('Task id.'),
+          status: z.enum(['pending', 'done', 'overdue', 'cancelled']).optional(),
+          description: z.string().min(1).max(300).optional(),
+          due_at: z.string().optional().describe('ISO 8601 date-time.'),
+        },
+        annotations: { title: 'Update follow-up task', readOnlyHint: false, openWorldHint: true },
+      },
+      handle(async ({ id, task_id, ...body }: { id: string; task_id: string } & Record<string, unknown>) =>
+        jsonResult(
+          (
+            await callRoute(updateTaskPATCH, `/contacts/${id}/tasks/${task_id}`, authHeader, {
+              method: 'PATCH',
+              body,
+              params: { id, taskId: task_id },
+            })
+          ).data,
+        ),
+      ),
+    );
+
+    server.registerTool(
+      'delete_task',
+      {
+        title: 'Delete follow-up task',
+        description: 'Permanently delete a follow-up task. Prefer update_task with status "cancelled" or "done" unless the task was created by mistake.',
+        inputSchema: {
+          id: z.string().describe('Contact id.'),
+          task_id: z.string().describe('Task id.'),
+        },
+        annotations: { title: 'Delete follow-up task', readOnlyHint: false, destructiveHint: true, openWorldHint: true },
+      },
+      handle(async ({ id, task_id }: { id: string; task_id: string }) =>
+        jsonResult(
+          (
+            await callRoute(deleteTaskDELETE, `/contacts/${id}/tasks/${task_id}`, authHeader, {
+              method: 'DELETE',
+              params: { id, taskId: task_id },
+            })
+          ).data,
+        ),
+      ),
+    );
+  }
+
+  if (hasScope(scopes, 'deals:write')) {
+    server.registerTool(
+      'create_deal',
+      {
+        title: 'Create deal',
+        description:
+          'Create a deal (sales opportunity) in a pipeline. Call list_pipelines first to get valid pipeline_id/stage_id values. contact_id is optional but recommended.',
+        inputSchema: {
+          title: z.string().min(1).describe('Deal title, e.g. "Acme Inc — annual plan".'),
+          pipeline_id: z.string().describe('Pipeline id from list_pipelines.'),
+          stage_id: z.string().describe('Stage id from list_pipelines (must belong to pipeline_id).'),
+          contact_id: z.string().optional().describe('Contact this deal belongs to.'),
+          value: z.number().optional().describe('Deal value. Defaults to 0.'),
+          currency: z.string().optional().describe('ISO currency code, e.g. "USD". Defaults to the account default.'),
+          notes: z.string().optional(),
+          expected_close_date: z.string().optional().describe('Date string, e.g. "2026-12-01".'),
+        },
+        annotations: { title: 'Create deal', readOnlyHint: false, openWorldHint: true },
+      },
+      handle(async (body: Record<string, unknown>) =>
+        jsonResult((await callRoute(createDealPOST, '/deals', authHeader, { body })).data),
+      ),
+    );
+
+    server.registerTool(
+      'update_deal',
+      {
+        title: 'Update deal',
+        description:
+          'Update a deal: move it to a different stage (must belong to the same pipeline), change its value/currency/status/notes/contact, or set the expected close date. Only the fields you pass are changed.',
+        inputSchema: {
+          id: z.string().describe('Deal id.'),
+          title: z.string().min(1).optional(),
+          stage_id: z.string().optional().describe('Moves the deal to this stage (same pipeline only).'),
+          status: z.enum(['open', 'won', 'lost']).optional(),
+          value: z.number().optional(),
+          currency: z.string().optional(),
+          contact_id: z.string().nullable().optional(),
+          notes: z.string().nullable().optional(),
+          expected_close_date: z.string().nullable().optional(),
+        },
+        annotations: { title: 'Update deal', readOnlyHint: false, openWorldHint: true },
+      },
+      handle(async ({ id, ...body }: { id: string } & Record<string, unknown>) =>
+        jsonResult(
+          (await callRoute(updateDealPATCH, `/deals/${id}`, authHeader, { method: 'PATCH', body, params: { id } })).data,
+        ),
+      ),
+    );
+  }
+
+  if (hasScope(scopes, 'appointments:write')) {
+    server.registerTool(
+      'create_appointment',
+      {
+        title: 'Create appointment',
+        description:
+          'Schedule an appointment. Checks for scheduling conflicts (same specialist or same agent) and rejects the request if the slot is already booked. Syncs to Google Calendar automatically if configured.',
+        inputSchema: {
+          title: z.string().min(1).max(160).describe('Appointment title, e.g. "Consulta — Jane Doe".'),
+          starts_at: z.string().describe('ISO 8601 date-time.'),
+          ends_at: z.string().describe('ISO 8601 date-time, must be after starts_at.'),
+          timezone: z.string().optional().describe('IANA timezone, e.g. "America/Mexico_City". Defaults to UTC.'),
+          contact_id: z.string().optional(),
+          assigned_agent_id: z.string().optional().describe('Active team member user_id. Defaults to the account owner.'),
+          specialist_id: z.string().optional(),
+          notes: z.string().optional(),
+        },
+        annotations: { title: 'Create appointment', readOnlyHint: false, openWorldHint: true },
+      },
+      handle(async (body: Record<string, unknown>) =>
+        jsonResult((await callRoute(createAppointmentPOST, '/appointments', authHeader, { body })).data),
+      ),
+    );
+
+    server.registerTool(
+      'update_appointment',
+      {
+        title: 'Update appointment',
+        description:
+          'Update an appointment: change its status (scheduled/confirmed/completed/cancelled/no_show), reschedule (re-checks for conflicts), or update its contact/agent/specialist/notes. Only the fields you pass are changed.',
+        inputSchema: {
+          id: z.string().describe('Appointment id.'),
+          title: z.string().min(1).max(160).optional(),
+          starts_at: z.string().optional().describe('ISO 8601 date-time.'),
+          ends_at: z.string().optional().describe('ISO 8601 date-time.'),
+          status: z.enum(['scheduled', 'confirmed', 'completed', 'cancelled', 'no_show']).optional(),
+          contact_id: z.string().nullable().optional(),
+          assigned_agent_id: z.string().optional(),
+          specialist_id: z.string().nullable().optional(),
+          notes: z.string().optional(),
+        },
+        annotations: { title: 'Update appointment', readOnlyHint: false, openWorldHint: true },
+      },
+      handle(async ({ id, ...body }: { id: string } & Record<string, unknown>) =>
+        jsonResult(
+          (
+            await callRoute(updateAppointmentPATCH, `/appointments/${id}`, authHeader, {
+              method: 'PATCH',
+              body,
+              params: { id },
+            })
+          ).data,
+        ),
       ),
     );
   }

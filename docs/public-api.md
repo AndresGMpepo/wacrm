@@ -51,6 +51,11 @@ it. Grant the minimum.
 | `conversations:assign` | Assign or unassign a conversation to an active team member |
 | `conversation-notes:write` | Create a private team note on a conversation |
 | `contact-memory:read` | Read a contact's Nexo Memory (summary, risk, facts, tasks) |
+| `contact-memory:write` | Create, update, or delete a contact's follow-up tasks |
+| `deals:read`         | List and read pipelines and deals        |
+| `deals:write`        | Create and update deals (including moving stage or status) |
+| `appointments:read`  | List and read appointments               |
+| `appointments:write` | Create and update appointments            |
 | `broadcasts:send`    | Launch broadcast campaigns               |
 | `webhooks:manage`    | Register and manage outbound webhooks    |
 
@@ -231,11 +236,109 @@ worker or a dashboard admin, never through the public API.
 }
 ```
 
+### `POST /api/v1/contacts/{id}/tasks`
+
+Schedule a follow-up task for a contact. Scope: `contact-memory:write`.
+`description` (1–300 chars) and `due_at` (ISO 8601 date-time) are
+required; `owner` is `agent` (default) or `customer`. Triggers the same
+"10 minutes before" reminder the dashboard's own task scheduler uses.
+
+```json
+{ "description": "Send the annual-plan quote", "due_at": "2026-10-01T15:00:00-06:00" }
+```
+
+### `PATCH` / `DELETE /api/v1/contacts/{id}/tasks/{taskId}`
+
+Update or delete a follow-up task. Scope: `contact-memory:write`.
+`PATCH` updates only the fields you send (`status`, `description`,
+`due_at`); changing `due_at` re-arms the reminder for the new time. A
+task in another account (or contact) returns `404`.
+
+### `GET /api/v1/pipelines`
+
+List every pipeline in the account with its ordered stages. Scope:
+`deals:read`. Not paginated — pipelines and stages are small enough
+per account to return in one call.
+
+```json
+{
+  "data": [
+    {
+      "id": "…", "name": "Pipeline comercial", "created_at": "…",
+      "stages": [{ "id": "…", "name": "Nuevo", "color": "#3b82f6", "position": 0 }]
+    }
+  ]
+}
+```
+
+### `GET /api/v1/deals`
+
+List deals (sales opportunities), newest first. Scope: `deals:read`.
+Paginated. Optional filters: `?pipeline_id=`, `?stage_id=`,
+`?contact_id=`, `?status=` (`open` / `won` / `lost`). Each deal embeds
+its contact and stage.
+
+### `POST /api/v1/deals`
+
+Create a deal. Scope: `deals:write`. `title`, `pipeline_id`, and
+`stage_id` are required (`stage_id` must belong to `pipeline_id`);
+`contact_id`, `value`, `currency`, `notes`, and `expected_close_date`
+are optional.
+
+```json
+{ "title": "Acme Inc — annual plan", "pipeline_id": "…", "stage_id": "…", "contact_id": "…", "value": 1200 }
+```
+
+### `GET` / `PATCH /api/v1/deals/{id}`
+
+Read or update one deal. Scopes: `deals:read` / `deals:write`.
+`PATCH` updates only the fields you send — moving `stage_id` (e.g.
+across the pipeline board) is just another field update, validated to
+belong to the deal's own pipeline. A deal in another account returns
+`404`.
+
+### `GET /api/v1/appointments`
+
+List appointments in a date window, ordered by start time. Scope:
+`appointments:read`. Optional filters: `?from=`/`?to=` (ISO, default
+7 days ago .. 30 days ahead), `?status=` (`scheduled` / `confirmed` /
+`completed` / `cancelled` / `no_show`), `?contact_id=`,
+`?specialist_id=`. Each appointment embeds its contact.
+
+### `POST /api/v1/appointments`
+
+Schedule an appointment. Scope: `appointments:write`. `title`,
+`starts_at`, and `ends_at` (ISO 8601) are required; `contact_id`,
+`assigned_agent_id` (defaults to the account owner),
+`specialist_id`, `timezone`, and `notes` are optional. Rejects the
+request with `409` if the slot conflicts with an existing booking for
+the same specialist (or the same agent, when no specialist is set) —
+the identical conflict check the dashboard's own booking flow uses.
+Syncs to Google Calendar automatically when the account has a
+connection configured.
+
+```json
+{ "title": "Consulta — Jane Doe", "starts_at": "2026-10-01T15:00:00-06:00", "ends_at": "2026-10-01T15:30:00-06:00", "contact_id": "…" }
+```
+
+### `GET` / `PATCH /api/v1/appointments/{id}`
+
+Read or update one appointment. Scopes: `appointments:read` /
+`appointments:write`. `PATCH` updates only the fields you send;
+changing `starts_at`/`ends_at` re-runs the same conflict check as
+creation (never against the appointment's own current booking).
+Setting `status` to `completed`, `no_show`, or `cancelled` records the
+matching Nexo Memory event on the contact (and, for `no_show` /
+`cancelled`, a follow-up task) — the same behavior the dashboard
+triggers. An appointment in another account returns `404`.
+
 ### `GET /api/v1/conversations`
 
 List conversations, newest first. Scope: `conversations:read`.
 Paginated. Optional filters: `?status=` (`open` / `pending` / `closed`)
 and `?contact_id=`. Each conversation embeds its contact + tags.
+
+
 
 ### `GET /api/v1/conversations/{id}`
 

@@ -22,6 +22,11 @@ export const API_SCOPES = [
   'conversations:assign',
   'conversation-notes:write',
   'contact-memory:read',
+  'contact-memory:write',
+  'deals:read',
+  'deals:write',
+  'appointments:read',
+  'appointments:write',
   'broadcasts:send',
   'webhooks:manage',
 ] as const;
@@ -38,6 +43,11 @@ export const SCOPE_DESCRIPTIONS: Record<ApiScope, string> = {
   'conversations:assign': 'Assign or unassign a conversation to a team member',
   'conversation-notes:write': 'Create private notes for the team on a conversation',
   'contact-memory:read': 'Read a contact’s Nexo Memory (summary, risk, facts, tasks)',
+  'contact-memory:write': 'Create, update, or delete a contact’s follow-up tasks',
+  'deals:read': 'List and read pipelines and deals',
+  'deals:write': 'Create and update deals (including moving stage or status)',
+  'appointments:read': 'List and read appointments',
+  'appointments:write': 'Create and update appointments',
   'broadcasts:send': 'Launch broadcast campaigns',
   'webhooks:manage': 'Register and manage outbound event webhooks',
 };

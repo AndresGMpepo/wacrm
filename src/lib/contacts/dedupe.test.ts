@@ -67,13 +67,16 @@ describe("dedupeByPhone", () => {
 });
 
 describe("findExistingContact", () => {
-  // Minimal SupabaseClient stub: resolves the .from().select().eq().like()
-  // chain to a fixed candidate set.
+  // Minimal SupabaseClient stub covering both parallel queries
+  // findExistingContact fires: primary-phone (.../like()) and
+  // alternate-phones (.../not()). None of these tests exercise the
+  // alternate-phones path, so it always resolves empty.
   function stubDb(rows: Array<{ id: string; phone: string }>): SupabaseClient {
     const builder = {
       select: () => builder,
       eq: () => builder,
       like: () => Promise.resolve({ data: rows, error: null }),
+      not: () => Promise.resolve({ data: [], error: null }),
     };
     return { from: () => builder } as unknown as SupabaseClient;
   }
