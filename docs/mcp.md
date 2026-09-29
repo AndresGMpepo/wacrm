@@ -110,6 +110,22 @@ accordingly if several people share one compiled copy.
 - **Broadcasts (opt-in):** launch a template broadcast — requires an
   explicit `confirm` and is marked destructive.
 
+## Manual testing (curl / Postman / PowerShell)
+
+Real MCP clients (Claude Desktop, Cursor, etc.) already send the right
+headers. If you're testing Option A by hand, every `POST` to
+`/api/mcp` must include:
+
+```
+Content-Type: application/json
+Accept: application/json, text/event-stream
+Authorization: Bearer nexoomni_live_xxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+Missing `Accept` (or missing either of its two values) gets a `406`
+before the request ever reaches NexoOmni's own code — that's the MCP
+SDK's transport enforcing the spec, not an auth or account issue.
+
 ## Safety
 
 Because sending WhatsApp messages is a real side effect, both options
