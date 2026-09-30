@@ -18,6 +18,8 @@ cosas como:
 > "Muéstrame los últimos 5 mensajes con el +52 55 1234 5678."
 > "¿Qué sabemos de este cliente? Revisa Nexo Memory."
 > "Agenda una tarea para llamar a Juan Pérez mañana a las 3pm."
+> "¿Qué notas internas dejó el equipo en esta conversación?"
+> "¿Qué horarios libres tiene la Dra. López esta semana?"
 
 Es una capa fina sobre la misma [API pública](./api-publica.md) — todo
 queda igual de protegido y con los mismos permisos que le diste a tu

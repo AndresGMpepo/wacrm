@@ -202,6 +202,13 @@ export class NexoOmniClient {
     });
   }
 
+  listConversationNotes(
+    id: string,
+    query: { limit?: number; cursor?: string },
+  ): Promise<Paginated<unknown>> {
+    return this.list(`/conversations/${encodeURIComponent(id)}/internal-notes`, query);
+  }
+
   // --- Team members --------------------------------------------------
 
   listTeamMembers(): Promise<{ data: unknown }> {
@@ -259,6 +266,16 @@ export class NexoOmniClient {
 
   updateAppointment(id: string, body: unknown): Promise<{ data: unknown }> {
     return this.request('PATCH', `/appointments/${encodeURIComponent(id)}`, { body });
+  }
+
+  getAvailability(query: {
+    specialist_id?: string;
+    agent_id?: string;
+    from?: string;
+    to?: string;
+    duration?: number;
+  }): Promise<{ data: unknown }> {
+    return this.request('GET', '/appointments/availability', { query });
   }
 
   // --- Broadcasts ---------------------------------------------------

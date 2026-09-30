@@ -28,6 +28,8 @@ import { GET as listDealsGET } from '@/app/api/v1/deals/route';
 import { GET as getDealGET } from '@/app/api/v1/deals/[id]/route';
 import { GET as listAppointmentsGET } from '@/app/api/v1/appointments/route';
 import { GET as getAppointmentGET } from '@/app/api/v1/appointments/[id]/route';
+import { GET as getAvailabilityGET } from '@/app/api/v1/appointments/availability/route';
+import { GET as listConversationNotesGET } from '@/app/api/v1/conversations/[id]/internal-notes/route';
 
 const READ_ONLY = { readOnlyHint: true, openWorldHint: true } as const;
 
@@ -141,6 +143,31 @@ export function registerReadTools(server: McpServer, authHeader: string, scopes:
       handle(async ({ id }: { id: string }) =>
         jsonResult(
           (await callRoute(getConversationGET, `/conversations/${id}`, authHeader, { params: { id } })).data,
+        ),
+      ),
+    );
+  }
+
+  if (hasScope(scopes, 'conversation-notes:read')) {
+    server.registerTool(
+      'list_conversation_notes',
+      {
+        title: 'List internal notes',
+        description:
+          'List the private team notes on a conversation, newest first — things the team wrote for each other, never sent to the customer. Paginated.',
+        inputSchema: {
+          conversation_id: z.string().describe('Conversation id.'),
+          limit: z.number().int().min(1).max(100).optional().describe('Page size, 1–100 (default 50).'),
+          cursor: z.string().optional().describe('Opaque pagination cursor.'),
+        },
+        annotations: { ...READ_ONLY, title: 'List internal notes' },
+      },
+      handle(async ({ conversation_id, limit, cursor }: { conversation_id: string; limit?: number; cursor?: string }) =>
+        jsonResult(
+          await callRoute(listConversationNotesGET, `/conversations/${conversation_id}/internal-notes`, authHeader, {
+            params: { id: conversation_id },
+            query: { limit, cursor },
+          }),
         ),
       ),
     );
@@ -310,6 +337,37 @@ export function registerReadTools(server: McpServer, authHeader: string, scopes:
       },
       handle(async ({ id }: { id: string }) =>
         jsonResult((await callRoute(getAppointmentGET, `/appointments/${id}`, authHeader, { params: { id } })).data),
+      ),
+    );
+
+    server.registerTool(
+      'get_availability',
+      {
+        title: 'Get available time slots',
+        description:
+          'Find free time slots for a specialist or an agent, honoring their working hours, holidays, buffer time, existing bookings, and Google Calendar busy time. Call this before create_appointment to offer the customer real options instead of guessing.',
+        inputSchema: {
+          specialist_id: z.string().optional().describe('Specialist to check. Omit if checking an agent instead.'),
+          agent_id: z.string().optional().describe('Agent user_id to check. Omit if checking a specialist instead.'),
+          from: z.string().optional().describe('ISO 8601 date-time. Defaults to now.'),
+          to: z.string().optional().describe('ISO 8601 date-time. Defaults to 7 days from "from". Max 60-day range.'),
+          duration: z.number().int().min(5).max(480).optional().describe('Slot length in minutes. Defaults to 30.'),
+        },
+        annotations: { ...READ_ONLY, title: 'Get available time slots' },
+      },
+      handle(
+        async (args: { specialist_id?: string; agent_id?: string; from?: string; to?: string; duration?: number }) =>
+          jsonResult(
+            await callRoute(getAvailabilityGET, '/appointments/availability', authHeader, {
+              query: {
+                specialist_id: args.specialist_id,
+                agent_id: args.agent_id,
+                from: args.from,
+                to: args.to,
+                duration: args.duration,
+              },
+            }),
+          ),
       ),
     );
   }

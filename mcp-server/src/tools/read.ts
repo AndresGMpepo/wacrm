@@ -94,6 +94,24 @@ export function registerReadTools(server: McpServer, client: NexoOmniClient): vo
   );
 
   server.registerTool(
+    'list_conversation_notes',
+    {
+      title: 'List internal notes',
+      description:
+        'List the private team notes on a conversation, newest first — things the team wrote for each other, never sent to the customer. Paginated.',
+      inputSchema: {
+        conversation_id: z.string().describe('Conversation id.'),
+        limit: z.number().int().min(1).max(100).optional().describe('Page size, 1–100 (default 50).'),
+        cursor: z.string().optional().describe('Opaque pagination cursor.'),
+      },
+      annotations: { ...READ_ONLY, title: 'List internal notes' },
+    },
+    handle(async ({ conversation_id, limit, cursor }) =>
+      jsonResult(await client.listConversationNotes(conversation_id, { limit, cursor })),
+    ),
+  );
+
+  server.registerTool(
     'list_messages',
     {
       title: 'List messages',
@@ -210,6 +228,24 @@ export function registerReadTools(server: McpServer, client: NexoOmniClient): vo
       annotations: { ...READ_ONLY, title: 'Get appointment' },
     },
     handle(async ({ id }) => jsonResult(await client.getAppointment(id))),
+  );
+
+  server.registerTool(
+    'get_availability',
+    {
+      title: 'Get available time slots',
+      description:
+        'Find free time slots for a specialist or an agent, honoring their working hours, holidays, buffer time, existing bookings, and Google Calendar busy time. Call this before create_appointment to offer the customer real options instead of guessing.',
+      inputSchema: {
+        specialist_id: z.string().optional().describe('Specialist to check. Omit if checking an agent instead.'),
+        agent_id: z.string().optional().describe('Agent user_id to check. Omit if checking a specialist instead.'),
+        from: z.string().optional().describe('ISO 8601 date-time. Defaults to now.'),
+        to: z.string().optional().describe('ISO 8601 date-time. Defaults to 7 days from "from". Max 60-day range.'),
+        duration: z.number().int().min(5).max(480).optional().describe('Slot length in minutes. Defaults to 30.'),
+      },
+      annotations: { ...READ_ONLY, title: 'Get available time slots' },
+    },
+    handle(async (args) => jsonResult(await client.getAvailability(args))),
   );
 
   server.registerTool(

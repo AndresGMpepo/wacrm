@@ -49,6 +49,7 @@ it. Grant the minimum.
 | `contacts:write`     | Create and update contacts               |
 | `conversations:read` | List and read conversations              |
 | `conversations:assign` | Assign or unassign a conversation to an active team member |
+| `conversation-notes:read` | Read private team notes on a conversation |
 | `conversation-notes:write` | Create a private team note on a conversation |
 | `contact-memory:read` | Read a contact's Nexo Memory (summary, risk, facts, tasks) |
 | `contact-memory:write` | Create, update, or delete a contact's follow-up tasks |
@@ -332,6 +333,25 @@ matching Nexo Memory event on the contact (and, for `no_show` /
 `cancelled`, a follow-up task) — the same behavior the dashboard
 triggers. An appointment in another account returns `404`.
 
+### `GET /api/v1/appointments/availability`
+
+Find free time slots for a specialist or an agent. Scope:
+`appointments:read`. Honors working hours, holidays, buffer time,
+existing bookings, and Google Calendar busy time — the identical logic
+the dashboard's own booking picker uses. Query: `specialist_id` OR
+`agent_id`, `from`/`to` (ISO, default now .. 7 days ahead, max 60-day
+range), `duration` (minutes, default 30).
+
+```json
+{
+  "data": {
+    "slots": [{ "start": "2026-10-01T15:00:00.000Z", "end": "2026-10-01T15:30:00.000Z" }],
+    "duration_minutes": 30,
+    "has_schedule": true
+  }
+}
+```
+
 ### `GET /api/v1/conversations`
 
 List conversations, newest first. Scope: `conversations:read`.
@@ -363,11 +383,12 @@ the conversation status. Send `null` to remove the current assignment.
 { "assigned_agent_id": "<team-member-user-id>" }
 ```
 
-### `POST /api/v1/conversations/{id}/internal-notes`
+### `GET` / `POST /api/v1/conversations/{id}/internal-notes`
 
-Creates a private note for the NexoOmni team. Scope:
-`conversation-notes:write`. This note is never delivered through WhatsApp,
-Yeastar, Meta, or web chat.
+Lists or creates private notes for the NexoOmni team on a
+conversation. Scopes: `conversation-notes:read` / `conversation-notes:write`.
+Notes are never delivered through WhatsApp, Yeastar, Meta, or web
+chat. `GET` is keyset-paginated, newest first.
 
 ```json
 { "body": "n8n: create a follow-up task before Friday." }

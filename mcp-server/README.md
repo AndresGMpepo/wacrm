@@ -78,6 +78,7 @@ when their guard is set.
 | `get_contact`        | read      | `contacts:read`      | Read one contact                                |
 | `list_conversations` | read      | `conversations:read` | List conversations, filter by status/contact    |
 | `get_conversation`   | read      | `conversations:read` | Read one conversation                           |
+| `list_conversation_notes` | read | `conversation-notes:read` | List private team notes on a conversation |
 | `list_messages`      | read      | `messages:read`      | List a conversation's messages                  |
 | `get_broadcast`      | read      | `broadcasts:send`    | Poll a broadcast's delivery status              |
 | `list_team_members`  | read      | `conversations:assign` | List active members who can receive an assignment |
@@ -87,6 +88,7 @@ when their guard is set.
 | `get_deal`           | read      | `deals:read`          | Read one deal |
 | `list_appointments`  | read      | `appointments:read`   | List appointments in a date window |
 | `get_appointment`    | read      | `appointments:read`   | Read one appointment |
+| `get_availability`   | read      | `appointments:read`   | Find free time slots for a specialist or agent |
 | `send_message`       | write     | `messages:send`      | Send a WhatsApp message (text/template/media)   |
 | `create_contact`     | write     | `contacts:write`     | Create (find-or-create) a contact               |
 | `update_contact`     | write     | `contacts:write`     | Update a contact / replace its tags             |
