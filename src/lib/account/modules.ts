@@ -1,7 +1,7 @@
 import { ForbiddenError, requireRole, type AccountContext } from '@/lib/auth/account'
 import type { AccountRole } from '@/lib/auth/roles'
 
-export const ACCOUNT_MODULES = ['pipelines', 'appointments'] as const
+export const ACCOUNT_MODULES = ['pipelines', 'appointments', 'agendapro'] as const
 export type AccountModule = (typeof ACCOUNT_MODULES)[number]
 
 export async function requireAccountModule(module: AccountModule, minRole: AccountRole = 'viewer'): Promise<AccountContext> {
