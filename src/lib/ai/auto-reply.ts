@@ -4,6 +4,7 @@ import { buildConversationContext } from './context'
 import { retrieveKnowledge } from './knowledge'
 import { generateReply } from './generate'
 import { buildSystemPrompt } from './defaults'
+import { resolvePromptVariables, substitutePromptVariables } from './prompt-variables'
 import { buildHandoffSummary } from './handoff'
 import { logAiUsage } from './usage'
 import { latestUserMessage } from './query'
@@ -195,8 +196,9 @@ export async function dispatchInboundToAiReply(
     const routableQueues =
       config.handoffTarget === 'ai_queue' ? await loadQueues(db, accountId) : []
 
+    const promptVariables = await resolvePromptVariables(db, accountId, config.timezone)
     const systemPrompt = buildSystemPrompt({
-      userPrompt: config.systemPrompt,
+      userPrompt: config.systemPrompt ? substitutePromptVariables(config.systemPrompt, promptVariables) : config.systemPrompt,
       mode: 'auto_reply',
       knowledge,
       handoffQueues: routableQueues.map((q) => q.name),

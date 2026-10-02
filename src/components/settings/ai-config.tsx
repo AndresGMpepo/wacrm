@@ -78,6 +78,7 @@ export function AiConfig() {
   const [embeddingsKeyEdited, setEmbeddingsKeyEdited] = useState(false);
   const [hasStoredEmbeddingsKey, setHasStoredEmbeddingsKey] = useState(false);
   const [systemPrompt, setSystemPrompt] = useState('');
+  const [timezone, setTimezone] = useState('America/Mexico_City');
   const [isActive, setIsActive] = useState(false);
   const [autoReplyEnabled, setAutoReplyEnabled] = useState(false);
   const [conversationAnalysisEnabled, setConversationAnalysisEnabled] = useState(false);
@@ -125,6 +126,7 @@ export function AiConfig() {
         setImageAnalysisModel(data.image_analysis_model ?? 'gpt-4.1-mini');
         setVoiceTranscriptionModel(data.voice_transcription_model ?? 'gpt-4o-mini-transcribe');
         setSystemPrompt(data.system_prompt ?? '');
+        setTimezone(data.timezone || 'America/Mexico_City');
         setIsActive(data.is_active);
         setAutoReplyEnabled(data.auto_reply_enabled);
         setConversationAnalysisEnabled(Boolean(data.conversation_analysis_enabled));
@@ -189,6 +191,7 @@ export function AiConfig() {
     api_key: keyPayload(),
     embeddings_api_key: embeddingsKeyPayload(),
     system_prompt: systemPrompt.trim() || null,
+    timezone: timezone.trim() || 'America/Mexico_City',
     is_active: isActive,
     auto_reply_enabled: autoReplyEnabled,
     auto_reply_max_per_conversation: maxPerConversation,
@@ -276,6 +279,7 @@ export function AiConfig() {
         setIsActive(false);
         setAutoReplyEnabled(false);
         setSystemPrompt('');
+        setTimezone('America/Mexico_City');
         setHandoffAgentId('');
       } else {
         const data = await res.json();
@@ -444,6 +448,19 @@ export function AiConfig() {
                 rows={5}
                 disabled={disabled}
               />
+              <p className="text-xs text-muted-foreground">{t('promptVariablesHint')}</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="ai-timezone">{t('timezoneLabel')}</Label>
+              <Input
+                id="ai-timezone"
+                value={timezone}
+                onChange={(e) => setTimezone(e.target.value)}
+                placeholder="America/Mexico_City"
+                disabled={disabled}
+              />
+              <p className="text-xs text-muted-foreground">{t('timezoneHint')}</p>
             </div>
 
             <div className="flex items-center justify-between gap-4 rounded-md border border-border p-3">

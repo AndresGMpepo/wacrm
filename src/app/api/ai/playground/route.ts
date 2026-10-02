@@ -5,6 +5,7 @@ import { loadAiConfig } from '@/lib/ai/config'
 import { retrieveKnowledge } from '@/lib/ai/knowledge'
 import { generateReply } from '@/lib/ai/generate'
 import { buildSystemPrompt } from '@/lib/ai/defaults'
+import { resolvePromptVariables, substitutePromptVariables } from '@/lib/ai/prompt-variables'
 import { latestUserMessage } from '@/lib/ai/query'
 import { AiError, type ChatMessage } from '@/lib/ai/types'
 
@@ -79,7 +80,7 @@ export async function POST(request: Request) {
       latestUserMessage(messages),
     )
     const systemPrompt = buildSystemPrompt({
-      userPrompt: config.systemPrompt,
+      userPrompt: config.systemPrompt ? substitutePromptVariables(config.systemPrompt, await resolvePromptVariables(supabase, accountId, config.timezone)) : config.systemPrompt,
       mode: 'auto_reply',
       knowledge,
     })

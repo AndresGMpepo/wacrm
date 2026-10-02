@@ -87,6 +87,7 @@ function aiConfig(overrides: Partial<AiConfig> = {}): AiConfig {
     autoReplyMaxPerConversation: 3,
     handoffAgentId: null,
     embeddingsApiKey: null,
+    timezone: 'America/Mexico_City',
     ...overrides,
   }
 }

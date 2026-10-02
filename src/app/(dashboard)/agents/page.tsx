@@ -7,6 +7,7 @@ import { AiPlayground } from '@/components/agents/ai-playground';
 import { AiUsageCard } from '@/components/agents/ai-usage';
 import { AiAnalysisJobsCard } from '@/components/agents/ai-analysis-jobs';
 import { AiConfig } from '@/components/settings/ai-config';
+import { AiPromotions } from '@/components/settings/ai-promotions';
 import { useAuth } from '@/hooks/use-auth';
 import { canEditSettings } from '@/lib/auth/roles';
 import { useTranslations } from 'next-intl';
@@ -76,7 +77,10 @@ export default function AgentsPage() {
           </TabsContent>
 
           <TabsContent value="setup" className="mt-4">
-            <AiConfig />
+            <div className="space-y-6">
+              <AiConfig />
+              <AiPromotions />
+            </div>
           </TabsContent>
 
           {canViewUsage && (

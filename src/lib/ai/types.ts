@@ -45,6 +45,9 @@ export interface AiConfig {
    *  knowledge base is embedded and semantic retrieval turns on; when
    *  null, retrieval falls back to lexical full-text search. */
   embeddingsApiKey: string | null
+  /** IANA timezone used to resolve {{current_datetime}} and the
+   *  active-promotions date filter (see src/lib/ai/prompt-variables.ts). */
+  timezone: string
 }
 
 /** A single conversation turn in the shape both providers accept. */
