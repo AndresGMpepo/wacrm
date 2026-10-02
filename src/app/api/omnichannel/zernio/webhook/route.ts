@@ -324,7 +324,7 @@ export async function POST(request: Request) {
         await handleOutboundStatusEvent(db, eventType, record(event.message), record(event.error))
         continue
       }
-      if (eventType !== 'message.received' && eventType !== 'comment.received' && eventType !== 'reaction.received') continue
+      if (eventType !== 'message.received' && eventType !== 'comment.received' && eventType !== 'reaction.received' && eventType !== 'message.sent') continue
 
       const message = record(event.message)
       const comment = record(event.comment)
@@ -413,6 +413,108 @@ export async function POST(request: Request) {
         }
         await db.from('zernio_webhook_receipts').update({ outcome: 'processed', detail: 'Reacción del canal conectado procesada.', processed_at: new Date().toISOString() })
           .eq('connector_id', typed.id).eq('external_message_id', externalEventId)
+        continue
+      }
+
+      // `message.sent` — "An outgoing message was sent from the inbox,
+      // through the API or the dashboard" (docs.zernio.com/webhooks/inbox).
+      // Fires for EVERY outgoing message Zernio observes, including ones
+      // sent natively on the platform (a human answering straight from the
+      // Facebook/Instagram Page inbox, or — on WhatsApp — the Business app
+      // itself or Meta Business Agent), not only sends made through
+      // Zernio's own API/dashboard. Our own sends (src/app/api/omnichannel/
+      // zernio/send/route.ts) already insert the message synchronously
+      // when we call Zernio's send API, keyed on the same `platform_message_id`
+      // this event reports — so the first step is always "is this already
+      // ours?" before inserting anything, to avoid a duplicate bubble.
+      //
+      // Capturing these is what keeps NexoOmni's copy of the conversation
+      // complete when someone replies outside NexoOmni (e.g. straight from
+      // Meta's own inbox) — otherwise Nexo Memory, QA scoring and the AI's
+      // own "a human already replied" gate (src/lib/ai/auto-reply.ts) all
+      // work off an incomplete thread.
+      if (eventType === 'message.sent') {
+        try {
+          const zernioMessageId = text(incoming.id, incoming._id, event.messageId, event.id) || externalMessageId
+          const { data: existingOutbound, error: existingOutboundError } = await db
+            .from('messages')
+            .select('id')
+            .eq('platform_message_id', zernioMessageId)
+            .limit(1)
+            .maybeSingle()
+          if (existingOutboundError) throw existingOutboundError
+          if (existingOutbound) {
+            await db.from('zernio_webhook_receipts').update({ outcome: 'ignored', detail: 'Ya registrado — enviado desde NexoOmni.', processed_at: new Date().toISOString() })
+              .eq('connector_id', typed.id).eq('external_message_id', externalEventId)
+            continue
+          }
+
+          // `message.sender` on this event IS the business account, not the
+          // customer — reading it to name/update the contact would relabel
+          // the customer's record with the business's own name (explicitly
+          // called out in Zernio's docs). The customer is always
+          // `conversation.participant*`, populated in both directions.
+          const auditUserId = await resolveAuditUserId(db, typed.account_id)
+          const participantName = text(conversation.participantName, participant.name)
+          const outgoingContactName = participantName || safeZernioContactName(channel, externalUserId)
+          const outgoingContactPhone = channel === 'whatsapp' ? externalUserId : ''
+          const { contactId: outgoingContactId } = await resolveContact(
+            db, typed, externalUserId, auditUserId, outgoingContactName, undefined, outgoingContactPhone || undefined, undefined,
+          )
+
+          const { data: outRows, error: outFindError } = await db
+            .from('conversations')
+            .select('id')
+            .eq('account_id', typed.account_id)
+            .eq('connector_id', typed.id)
+            .eq('external_session_id', externalConversationId)
+            .limit(1)
+          if (outFindError) throw outFindError
+          let outConversationId = outRows?.[0]?.id as string | undefined
+          if (!outConversationId) {
+            const { data: createdConv, error: createConvError } = await db
+              .from('conversations')
+              .insert({ account_id: typed.account_id, user_id: auditUserId, contact_id: outgoingContactId, channel_type: typed.provider, connector_id: typed.id, external_session_id: externalConversationId, channel_source_label: typed.display_name, queue_id: typed.queue_id })
+              .select('id')
+              .single()
+            if (createConvError || !createdConv) throw createConvError ?? new Error('No se pudo crear la conversación saliente.')
+            outConversationId = createdConv.id
+          }
+
+          const outAttachment = extractZernioMedia(incoming)
+          const outContent = normalizeMetaText(text(incoming.text), outAttachment?.caption || outAttachment?.fileName)
+          const outContentType = outAttachment && outAttachment.kind !== 'text' ? outAttachment.kind : 'text'
+          const sentAt = text(incoming.sentAt) || new Date().toISOString()
+
+          // sender_id is set (to the account's audit user, not literally
+          // whoever clicked send in Meta/Zernio — we have no NexoOmni
+          // identity for them) so this message satisfies the same
+          // "a human already replied" signal the AI's own eligibility gate
+          // checks (sender_type='agent' AND sender_id IS NOT NULL) — a
+          // reply sent outside NexoOmni must stop our own bot from also
+          // answering, exactly like one sent through NexoOmni would.
+          const { error: outInsertError } = await db.from('messages').insert({
+            conversation_id: outConversationId,
+            sender_type: 'agent',
+            sender_id: auditUserId,
+            content_type: outContentType,
+            content_text: outContent,
+            media_url: outAttachment?.url ?? null,
+            message_id: `zernio:out:${typed.id}:${zernioMessageId}`,
+            platform_message_id: zernioMessageId,
+            status: 'sent',
+            created_at: sentAt,
+          })
+          if (outInsertError && !isUniqueViolation(outInsertError)) throw outInsertError
+
+          await db.from('conversations').update({ last_message_text: outContent || `[${outContentType}]`, last_message_at: sentAt, updated_at: new Date().toISOString() }).eq('id', outConversationId)
+          await db.from('zernio_webhook_receipts').update({ outcome: 'processed', detail: 'Mensaje saliente externo (fuera de NexoOmni) registrado.', processed_at: new Date().toISOString() })
+            .eq('connector_id', typed.id).eq('external_message_id', externalEventId)
+        } catch (eventError) {
+          console.error('[zernio] message.sent handling failed, skipping:', eventError)
+          await db.from('zernio_webhook_receipts').update({ outcome: 'failed', detail: eventError instanceof Error ? eventError.message.slice(0, 500) : 'Error desconocido', processed_at: new Date().toISOString() })
+            .eq('connector_id', typed.id).eq('external_message_id', externalEventId)
+        }
         continue
       }
 
