@@ -13,13 +13,15 @@ type ConfigResponse = {
   connected: boolean;
   status?: 'configured' | 'active' | 'error';
   last_error?: string | null;
-  has_webhook_secret?: boolean;
   webhook_url?: string;
 };
 
 /**
- * AgendaPro (developers.agendapro.com) connection — one API key per tenant,
- * independent from the internal Appointments module. Plain Spanish,
+ * AgendaPro ("Agendapro Public V1" — agendapro.com/api/public/v1) connection.
+ * Authenticates with the USER + PASSWORD pair shown once in AgendaPro's own
+ * "Configuraciones → API Pública" panel (HTTP Basic Auth), NOT an API key —
+ * this account's plan does not use the newer Bearer-key "Connect v3" API.
+ * Independent from the internal Appointments module. Plain Spanish,
  * self-contained fetches (same convention as Nexo Memory/Appointments),
  * not next-intl.
  */
@@ -27,8 +29,8 @@ export function AgendaProConfig() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [config, setConfig] = useState<ConfigResponse | null>(null);
-  const [apiKey, setApiKey] = useState('');
-  const [webhookSecret, setWebhookSecret] = useState('');
+  const [apiUser, setApiUser] = useState('');
+  const [apiPassword, setApiPassword] = useState('');
 
   const load = useCallback(async () => {
     try {
@@ -48,8 +50,8 @@ export function AgendaProConfig() {
   }, [load]);
 
   async function connect() {
-    if (!apiKey.trim()) {
-      toast.error('Ingresa tu API key de AgendaPro.');
+    if (!apiUser.trim() || !apiPassword.trim()) {
+      toast.error('Ingresa el usuario y la contraseña de la API de AgendaPro.');
       return;
     }
     setSaving(true);
@@ -57,39 +59,16 @@ export function AgendaProConfig() {
       const response = await fetch('/api/agendapro/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ api_key: apiKey }),
+        body: JSON.stringify({ api_user: apiUser, api_password: apiPassword }),
       });
       const payload = (await response.json()) as { error?: string };
       if (!response.ok) throw new Error(payload.error || 'No se pudo conectar AgendaPro.');
-      setApiKey('');
+      setApiUser('');
+      setApiPassword('');
       toast.success('AgendaPro conectado correctamente.');
       await load();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'No se pudo conectar AgendaPro.');
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function saveWebhookSecret() {
-    if (!webhookSecret.trim()) {
-      toast.error('Pega el secreto del webhook que te mostró AgendaPro.');
-      return;
-    }
-    setSaving(true);
-    try {
-      const response = await fetch('/api/agendapro/config', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ webhook_secret: webhookSecret }),
-      });
-      const payload = (await response.json()) as { error?: string };
-      if (!response.ok) throw new Error(payload.error || 'No se pudo guardar el secreto.');
-      setWebhookSecret('');
-      toast.success('Secreto del webhook guardado.');
-      await load();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'No se pudo guardar el secreto.');
     } finally {
       setSaving(false);
     }
@@ -134,8 +113,9 @@ export function AgendaProConfig() {
           AgendaPro
         </CardTitle>
         <CardDescription>
-          Conecta tu cuenta de AgendaPro (reservas, clientes y pagos) con una API key propia de tu empresa.
-          Este módulo es independiente del módulo de Citas interno.
+          Conecta tu cuenta de AgendaPro (reservas, clientes y pagos) con el usuario y contraseña de
+          &quot;Configuraciones → API Pública&quot; dentro de tu panel de AgendaPro. Este módulo es independiente
+          del módulo de Citas interno.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -145,15 +125,26 @@ export function AgendaProConfig() {
             <span>Conectado{config.last_error ? ` — último error: ${config.last_error}` : '.'}</span>
           </div>
         ) : (
-          <div className="space-y-2">
-            <Label htmlFor="agendapro-api-key">API key de AgendaPro</Label>
-            <Input
-              id="agendapro-api-key"
-              type="password"
-              placeholder="Pega aquí tu API key"
-              value={apiKey}
-              onChange={(event) => setApiKey(event.target.value)}
-            />
+          <div className="space-y-3">
+            <div className="space-y-2">
+              <Label htmlFor="agendapro-api-user">Usuario (API Pública)</Label>
+              <Input
+                id="agendapro-api-user"
+                placeholder="Ej. arqrcq16"
+                value={apiUser}
+                onChange={(event) => setApiUser(event.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="agendapro-api-password">Contraseña</Label>
+              <Input
+                id="agendapro-api-password"
+                type="password"
+                placeholder="Pega aquí la contraseña"
+                value={apiPassword}
+                onChange={(event) => setApiPassword(event.target.value)}
+              />
+            </div>
             <Button onClick={() => void connect()} disabled={saving}>
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
               Conectar
@@ -166,31 +157,14 @@ export function AgendaProConfig() {
             <div className="space-y-2">
               <Label>URL del webhook</Label>
               <p className="text-xs text-muted-foreground">
-                Pega esta URL en AgendaPro → Configuraciones → Integraciones, suscríbete a los eventos de reservas,
-                clientes y pagos, y copia el secreto que te entregan en el campo de abajo.
+                Pega esta URL en AgendaPro → Configuraciones → API Pública → Webhooks (botón &quot;Crear Webhook&quot;).
+                AgendaPro no firma estas notificaciones, así que mantén esta URL en secreto — es lo único que
+                protege este canal.
               </p>
               <div className="flex gap-2">
                 <Input readOnly value={config.webhook_url ?? ''} className="font-mono text-xs" />
                 <Button variant="outline" size="icon" onClick={copyWebhookUrl} aria-label="Copiar URL del webhook">
                   <Copy className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="agendapro-webhook-secret">
-                Secreto del webhook {config.has_webhook_secret ? '(ya configurado — pega uno nuevo para reemplazarlo)' : ''}
-              </Label>
-              <div className="flex gap-2">
-                <Input
-                  id="agendapro-webhook-secret"
-                  type="password"
-                  placeholder="whsec_..."
-                  value={webhookSecret}
-                  onChange={(event) => setWebhookSecret(event.target.value)}
-                />
-                <Button variant="outline" onClick={() => void saveWebhookSecret()} disabled={saving}>
-                  Guardar
                 </Button>
               </div>
             </div>
@@ -205,3 +179,4 @@ export function AgendaProConfig() {
     </Card>
   );
 }
+

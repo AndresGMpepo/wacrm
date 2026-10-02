@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 
 import { requireAccountModule } from '@/lib/account/modules'
 import { toErrorResponse } from '@/lib/auth/account'
-import { disconnectAgendaPro, getAgendaProConfig, saveAgendaProConfig, saveAgendaProWebhookSecret } from '@/lib/agendapro/server'
+import { disconnectAgendaPro, getAgendaProConfig, saveAgendaProConfig } from '@/lib/agendapro/server'
 
 function publicOrigin(request: Request) {
   const configured = process.env.NEXT_PUBLIC_SITE_URL?.trim() || process.env.APP_URL?.trim()
@@ -21,7 +21,6 @@ export async function GET(request: Request) {
       connected: true,
       status: config.status,
       last_error: config.lastError,
-      has_webhook_secret: config.hasWebhookSecret,
       webhook_url: `${publicOrigin(request)}/api/omnichannel/agendapro/webhook/${config.webhookToken}`,
       connected_at: config.connectedAt,
     })
@@ -31,20 +30,11 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const { userId, accountId } = await requireAccountModule('agendapro', 'admin')
-    const body = await request.json().catch(() => null) as { api_key?: unknown } | null
-    const apiKey = typeof body?.api_key === 'string' ? body.api_key : ''
-    const webhookToken = await saveAgendaProConfig(accountId, apiKey, userId)
+    const body = await request.json().catch(() => null) as { api_user?: unknown; api_password?: unknown } | null
+    const apiUser = typeof body?.api_user === 'string' ? body.api_user : ''
+    const apiPassword = typeof body?.api_password === 'string' ? body.api_password : ''
+    const webhookToken = await saveAgendaProConfig(accountId, apiUser, apiPassword, userId)
     return NextResponse.json({ connected: true, webhook_url: `${publicOrigin(request)}/api/omnichannel/agendapro/webhook/${webhookToken}` })
-  } catch (error) { return toErrorResponse(error) }
-}
-
-export async function PATCH(request: Request) {
-  try {
-    const { accountId } = await requireAccountModule('agendapro', 'admin')
-    const body = await request.json().catch(() => null) as { webhook_secret?: unknown } | null
-    const secret = typeof body?.webhook_secret === 'string' ? body.webhook_secret : ''
-    await saveAgendaProWebhookSecret(accountId, secret)
-    return NextResponse.json({ ok: true })
   } catch (error) { return toErrorResponse(error) }
 }
 
@@ -55,3 +45,4 @@ export async function DELETE() {
     return NextResponse.json({ ok: true })
   } catch (error) { return toErrorResponse(error) }
 }
+

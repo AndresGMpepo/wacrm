@@ -1,8 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
+import crypto from 'node:crypto'
 
-import { decrypt } from '@/lib/whatsapp/encryption'
-import { verifyAgendaProSignature } from '@/lib/agendapro/server'
 import { recordAgendaProMemoryEvent } from '@/lib/agendapro/memory'
 import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe'
 import { resolveAuditUserId } from '@/lib/api/v1/contacts'
@@ -69,14 +68,15 @@ async function resolveContactForClient(db: ReturnType<typeof admin>, accountId: 
   return data.id as string
 }
 
-async function upsertAgendaProClient(db: ReturnType<typeof admin>, accountId: string, data: Json) {
-  const clientId = id(data.id)
+async function upsertAgendaProClient(db: ReturnType<typeof admin>, accountId: string, client: Json) {
+  const clientId = id(client.id)
   if (!clientId) return
-  const contactId = await resolveContactForClient(db, accountId, data)
+  const contactId = await resolveContactForClient(db, accountId, client)
   const { error } = await db.from('agendapro_clients').upsert({
     account_id: accountId, contact_id: contactId, agendapro_client_id: clientId, synced_at: new Date().toISOString(),
   }, { onConflict: 'account_id,agendapro_client_id' })
   if (error) console.error('[agendapro] could not upsert agendapro_clients:', error.message)
+  return contactId
 }
 
 async function linkedContactId(db: ReturnType<typeof admin>, accountId: string, agendaproClientId: string | null) {
@@ -86,34 +86,41 @@ async function linkedContactId(db: ReturnType<typeof admin>, accountId: string, 
   return data?.contact_id ?? null
 }
 
-/** Booking webhook payloads only carry a subset of the Booking resource
- *  (id/start_time/end_time/service_id/client_id/location_id, per AgendaPro's
- *  own docs example) — richer fields (names, status, price) are left null
- *  here and only ever populated by a direct `GET /v3/bookings` call (used by
- *  the dashboard read routes), not guessed from the webhook alone. */
-async function upsertAgendaProBooking(db: ReturnType<typeof admin>, accountId: string, data: Json) {
-  const bookingId = id(data.id)
+/** `resource` on a booking.* event is the FULL Booking shape (confirmed from
+ *  the webhook doc's own examples: id/service_provider_id/service_id/
+ *  location_id/price/status_id/service/service_provider/location/status/
+ *  start/end/notes/company_comment/payed_state/client{...}) — richer than
+ *  Connect v3's partial payload, so no separate enrichment call is needed. */
+async function upsertAgendaProBooking(db: ReturnType<typeof admin>, accountId: string, booking: Json) {
+  const bookingId = id(booking.id)
   if (!bookingId) return
-  const agendaproClientId = id(data.client_id)
+  const client = record(booking.client)
+  // The webhook's embedded client object omits `id` in the documented
+  // examples — fall back to linking by whatever agendapro_clients mapping
+  // already exists for this booking's own client sub-object if it ever
+  // does carry one, else leave unlinked (best-effort cache, not guaranteed).
+  const agendaproClientId = id(client.id)
   const contactId = await linkedContactId(db, accountId, agendaproClientId)
   const { error } = await db.from('agendapro_bookings').upsert({
     account_id: accountId,
     contact_id: contactId,
     agendapro_booking_id: bookingId,
     agendapro_client_id: agendaproClientId,
-    location_id: id(data.location_id),
-    start_time: text(data.start_time),
-    end_time: text(data.end_time),
-    status_id: typeof data.status_id === 'number' ? data.status_id : null,
-    price: text(data.price),
-    agendapro_created_at: text(data.created_at),
-    agendapro_updated_at: text(data.updated_at),
+    service_name: text(booking.service),
+    provider_name: text(booking.service_provider),
+    location_id: id(booking.location_id),
+    location_name: text(booking.location),
+    start_time: text(booking.start),
+    end_time: text(booking.end),
+    status_id: typeof booking.status_id === 'number' ? booking.status_id : null,
+    status_name: text(booking.status),
+    price: booking.price != null ? String(booking.price) : null,
     synced_at: new Date().toISOString(),
   }, { onConflict: 'account_id,agendapro_booking_id' })
   if (error) { console.error('[agendapro] could not upsert agendapro_bookings:', error.message); return }
 
   if (contactId) {
-    const when = text(data.start_time)
+    const when = text(booking.start)
     await recordAgendaProMemoryEvent({
       accountId, contactId, sourceId: bookingId,
       summary: when ? `Reserva en AgendaPro para el ${when}.` : 'Reserva creada/actualizada en AgendaPro.',
@@ -121,44 +128,22 @@ async function upsertAgendaProBooking(db: ReturnType<typeof admin>, accountId: s
   }
 }
 
-async function upsertAgendaProPaymentRequest(db: ReturnType<typeof admin>, accountId: string, data: Json, eventType: string) {
-  const paymentRequestId = id(data.id)
-  if (!paymentRequestId) return
-  const status = eventType === 'payment_request.paid' ? 'paid' : 'expired'
-  const amount = text(data.amount)
-  const params = record(data.params)
-  const { error } = await db.from('agendapro_payment_requests').upsert({
-    account_id: accountId,
-    agendapro_payment_request_id: paymentRequestId,
-    status,
-    amount,
-    payment_url: text(params.checkout_url),
-    expires_at: text(params.expires_at),
-    agendapro_created_at: text(data.created_at),
-    synced_at: new Date().toISOString(),
-  }, { onConflict: 'account_id,agendapro_payment_request_id' })
-  if (error) console.error('[agendapro] could not upsert agendapro_payment_requests:', error.message)
-}
-
-async function processAgendaProEvent(db: ReturnType<typeof admin>, accountId: string, eventType: string, data: Json) {
-  switch (eventType) {
-    case 'booking.created':
-    case 'booking.updated':
-      await upsertAgendaProBooking(db, accountId, data)
-      return
-    case 'client.created':
-    case 'client.updated':
-      await upsertAgendaProClient(db, accountId, data)
-      return
-    case 'payment_request.paid':
-    case 'payment_request.expired':
-      await upsertAgendaProPaymentRequest(db, accountId, data, eventType)
-      return
-    default:
-      // service.updated and anything else: catalog data is fetch-through
-      // by design (no local cache), nothing to persist.
-      return
+/** `resource_type` values for client/payment events are inferred from the
+ *  webhook guide's prose ("reservas, clientes, pagos y fichas") — only
+ *  `Booking`'s shape is actually confirmed with a documented payload
+ *  example. Matched case-insensitively/defensively; an unrecognized
+ *  resource_type is a no-op, not a guessed write. */
+async function processAgendaProEvent(db: ReturnType<typeof admin>, accountId: string, resourceType: string, resource: Json) {
+  const normalized = resourceType.toLowerCase()
+  if (normalized === 'booking') {
+    await upsertAgendaProBooking(db, accountId, resource)
+    return
   }
+  if (normalized === 'client') {
+    await upsertAgendaProClient(db, accountId, resource)
+  }
+  // Payment/ficha events: not wired up — their resource_type string and
+  // exact field shape were never confirmed from AgendaPro's own docs.
 }
 
 export async function POST(request: Request, { params }: { params: Promise<{ webhookToken: string }> }) {
@@ -167,27 +152,17 @@ export async function POST(request: Request, { params }: { params: Promise<{ web
   const db = admin()
 
   const { data: config, error: configError } = await db.from('agendapro_configs')
-    .select('account_id, encrypted_webhook_secret')
+    .select('account_id')
     .eq('webhook_token', webhookToken)
     .maybeSingle()
   if (configError) {
     console.error('[agendapro] could not look up webhook config:', configError.message)
     return NextResponse.json({ error: 'Error interno.' }, { status: 500 })
   }
+  // AgendaPro V1 has no documented webhook signature scheme — the random
+  // `webhookToken` in the URL path IS the entire trust boundary here
+  // (unlike Zernio/Connect v3, which sign every request with a secret).
   if (!config) return NextResponse.json({ error: 'Webhook no encontrado.' }, { status: 404 })
-  if (!config.encrypted_webhook_secret) {
-    return NextResponse.json({ error: 'El webhook de AgendaPro aún no tiene un secreto configurado en NexoOmni.' }, { status: 401 })
-  }
-
-  const secret = decrypt(config.encrypted_webhook_secret)
-  const verified = verifyAgendaProSignature(
-    request.headers.get('webhook-id'),
-    request.headers.get('webhook-timestamp'),
-    raw,
-    request.headers.get('webhook-signature'),
-    secret,
-  )
-  if (!verified) return NextResponse.json({ error: 'Firma de webhook inválida.' }, { status: 401 })
 
   let payload: Json
   try {
@@ -197,12 +172,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ web
   }
 
   const accountId = config.account_id as string
-  const eventType = text(payload.type)
-  const webhookId = request.headers.get('webhook-id')!
-  if (!eventType) return NextResponse.json({ ok: true })
+  const resourceType = text(payload.resource_type)
+  const requestUuid = text(payload.request_uuid) ?? crypto.randomUUID()
+  if (!resourceType) return NextResponse.json({ ok: true })
 
   const { data: receipt, error: receiptError } = await db.from('agendapro_webhook_receipts')
-    .insert({ account_id: accountId, webhook_id: webhookId, event_type: eventType })
+    .insert({ account_id: accountId, request_uuid: requestUuid, event_type: `${resourceType}.${text(payload.trigger) ?? 'unknown'}` })
     .select('id')
     .maybeSingle()
   if (receiptError) {
@@ -211,7 +186,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ web
   }
 
   try {
-    await processAgendaProEvent(db, accountId, eventType, record(payload.data))
+    await processAgendaProEvent(db, accountId, resourceType, record(payload.resource))
     if (receipt) await db.from('agendapro_webhook_receipts').update({ outcome: 'processed', processed_at: new Date().toISOString() }).eq('id', receipt.id)
   } catch (error) {
     console.error('[agendapro] webhook processing failed:', error)
@@ -220,8 +195,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ web
         .update({ outcome: 'failed', detail: error instanceof Error ? error.message.slice(0, 500) : 'Error desconocido', processed_at: new Date().toISOString() })
         .eq('id', receipt.id)
     }
-    // Still 200 — a transient DB hiccup shouldn't burn through AgendaPro's
-    // limited retry budget (it auto-disables the webhook after repeated failures).
+    // Still 200 — AgendaPro's own retry/disable policy for this legacy
+    // webhook isn't documented, but failing loudly here would only risk
+    // losing future deliveries for a transient DB hiccup.
   }
   return NextResponse.json({ ok: true })
 }
+

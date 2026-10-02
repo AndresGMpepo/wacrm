@@ -4,7 +4,13 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 
 import { encrypt, decrypt } from '@/lib/whatsapp/encryption'
 
-const DEFAULT_API_URL = 'https://connect.agendapro.com/v3'
+// "Agendapro Public V1" (developers.agendapro.com/v1) — HTTP Basic Auth
+// (a USER + PASSWORD pair issued per company from their "API Pública"
+// settings panel), NOT the Bearer-key "Connect v3" product documented at
+// the root of developers.agendapro.com, which is a different API this
+// integration does NOT target (confirmed against a real tenant's own
+// panel, not guessed).
+const DEFAULT_API_URL = 'https://agendapro.com/api/public/v1'
 
 function apiUrl() {
   return (process.env.AGENDAPRO_API_BASE_URL?.trim() || DEFAULT_API_URL).replace(/\/$/, '')
@@ -19,26 +25,30 @@ function admin() {
 
 /** Carries the parsed error body so callers can inspect status-specific fields. */
 export class AgendaProApiError extends Error {
-  constructor(message: string, readonly status: number, readonly body: Record<string, unknown> | null) {
+  constructor(message: string, readonly status: number, readonly body: unknown) {
     super(message)
     this.name = 'AgendaProApiError'
   }
 }
 
-async function getApiKey(accountId: string): Promise<string> {
+async function getCredentials(accountId: string): Promise<{ user: string; password: string }> {
   const { data, error } = await admin()
     .from('agendapro_configs')
-    .select('encrypted_api_key')
+    .select('encrypted_api_user, encrypted_api_password')
     .eq('account_id', accountId)
     .maybeSingle()
   if (error) throw error
-  if (!data?.encrypted_api_key) throw new Error('AgendaPro no está conectado para esta cuenta.')
-  return decrypt(data.encrypted_api_key)
+  if (!data?.encrypted_api_user || !data?.encrypted_api_password) throw new Error('AgendaPro no está conectado para esta cuenta.')
+  return { user: decrypt(data.encrypted_api_user), password: decrypt(data.encrypted_api_password) }
 }
 
-/** One API key per NexoOmni tenant (unlike Zernio's single shared env-var key) — looked up and decrypted per call. */
+function basicAuthHeader(user: string, password: string) {
+  return `Basic ${Buffer.from(`${user}:${password}`).toString('base64')}`
+}
+
+/** One USER+PASSWORD pair per NexoOmni tenant — looked up and decrypted per call. */
 export async function agendaProFetch(accountId: string, path: string, init?: RequestInit) {
-  const apiKey = await getApiKey(accountId)
+  const { user, password } = await getCredentials(accountId)
   let response: Response
   try {
     response = await fetch(`${apiUrl()}${path}`, {
@@ -46,7 +56,7 @@ export async function agendaProFetch(accountId: string, path: string, init?: Req
       cache: 'no-store',
       signal: init?.signal ?? AbortSignal.timeout(20_000),
       headers: {
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: basicAuthHeader(user, password),
         Accept: 'application/json',
         ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
         ...init?.headers,
@@ -58,20 +68,25 @@ export async function agendaProFetch(accountId: string, path: string, init?: Req
     }
     throw new Error(`No se pudo contactar a AgendaPro: ${error instanceof Error ? error.message : 'error de red'}`)
   }
-  const body = await response.json().catch(() => null) as Record<string, unknown> | null
+  const body = await response.json().catch(() => null) as unknown
   if (!response.ok) {
-    const detail = typeof body?.detail === 'string' ? body.detail
-      : typeof body?.error === 'string' ? body.error
-        : `HTTP ${response.status}`
-    throw new AgendaProApiError(`No se pudo completar la solicitud a AgendaPro: ${detail}`, response.status, body)
+    // V1 returns `{}` on 400 with no structured error field — nothing more
+    // specific to surface than the HTTP status itself (confirmed from the
+    // documented OpenAPI examples, not guessed further).
+    throw new AgendaProApiError(`No se pudo completar la solicitud a AgendaPro (HTTP ${response.status}).`, response.status, body)
   }
   return body ?? {}
 }
 
-function query(params: Record<string, string | number | boolean | undefined>) {
+function query(params: Record<string, string | number | boolean | string[] | number[] | undefined>) {
   const search = new URLSearchParams()
   for (const [key, value] of Object.entries(params)) {
-    if (value !== undefined && value !== '') search.set(key, String(value))
+    if (value === undefined || value === '') continue
+    if (Array.isArray(value)) {
+      for (const item of value) search.append(`${key}[]`, String(item))
+    } else {
+      search.set(key, String(value))
+    }
   }
   const qs = search.toString()
   return qs ? `?${qs}` : ''
@@ -85,14 +100,13 @@ export type AgendaProConfig = {
   status: 'configured' | 'active' | 'error'
   lastError: string | null
   webhookToken: string
-  hasWebhookSecret: boolean
   connectedAt: string
 }
 
 export async function getAgendaProConfig(db: SupabaseClient, accountId: string): Promise<AgendaProConfig | null> {
   const { data, error } = await db
     .from('agendapro_configs')
-    .select('status, last_error, webhook_token, encrypted_webhook_secret, created_at')
+    .select('status, last_error, webhook_token, created_at')
     .eq('account_id', accountId)
     .maybeSingle()
   if (error) throw error
@@ -101,23 +115,23 @@ export async function getAgendaProConfig(db: SupabaseClient, accountId: string):
     status: data.status,
     lastError: data.last_error,
     webhookToken: data.webhook_token,
-    hasWebhookSecret: Boolean(data.encrypted_webhook_secret),
     connectedAt: data.created_at,
   }
 }
 
-/** Validates the key against AgendaPro (a cheap `listLocations` call) before persisting it — same "test before save" pattern as the WhatsApp config route. */
-export async function saveAgendaProConfig(accountId: string, apiKey: string, userId: string) {
+/** Validates the credentials against AgendaPro (a cheap `GET /locations` call) before persisting them. */
+export async function saveAgendaProConfig(accountId: string, apiUser: string, apiPassword: string, userId: string) {
   const db = admin()
-  const trimmedKey = apiKey.trim()
-  if (!trimmedKey) throw new Error('Ingresa una API key de AgendaPro.')
+  const trimmedUser = apiUser.trim()
+  const trimmedPassword = apiPassword.trim()
+  if (!trimmedUser || !trimmedPassword) throw new Error('Ingresa el usuario y la contraseña de la API de AgendaPro.')
 
-  const probe = await fetch(`${apiUrl()}/locations?per_page=1`, {
-    headers: { Authorization: `Bearer ${trimmedKey}`, Accept: 'application/json' },
+  const probe = await fetch(`${apiUrl()}/locations`, {
+    headers: { Authorization: basicAuthHeader(trimmedUser, trimmedPassword), Accept: 'application/json' },
     signal: AbortSignal.timeout(10_000),
   }).catch(() => null)
   if (!probe || !probe.ok) {
-    throw new Error('No se pudo validar la API key de AgendaPro. Verifica que sea correcta y que el acceso a la API esté activo para la empresa.')
+    throw new Error('No se pudo validar el usuario y la contraseña de AgendaPro. Verifica las credenciales de "Configuraciones → API Pública" y que el plan las tenga habilitadas.')
   }
 
   const { data: existing } = await db.from('agendapro_configs').select('webhook_token').eq('account_id', accountId).maybeSingle()
@@ -125,7 +139,8 @@ export async function saveAgendaProConfig(accountId: string, apiKey: string, use
 
   const { error } = await db.from('agendapro_configs').upsert({
     account_id: accountId,
-    encrypted_api_key: encrypt(trimmedKey),
+    encrypted_api_user: encrypt(trimmedUser),
+    encrypted_api_password: encrypt(trimmedPassword),
     webhook_token: webhookToken,
     status: 'active',
     last_error: null,
@@ -136,164 +151,86 @@ export async function saveAgendaProConfig(accountId: string, apiKey: string, use
   return webhookToken
 }
 
-export async function saveAgendaProWebhookSecret(accountId: string, secret: string) {
-  const trimmed = secret.trim()
-  if (!trimmed) throw new Error('Ingresa el secreto del webhook.')
-  const { error } = await admin().from('agendapro_configs')
-    .update({ encrypted_webhook_secret: encrypt(trimmed), updated_at: new Date().toISOString() })
-    .eq('account_id', accountId)
-  if (error) throw error
-}
-
 export async function disconnectAgendaPro(accountId: string) {
   const { error } = await admin().from('agendapro_configs').delete().eq('account_id', accountId)
   if (error) throw error
 }
 
 // ------------------------------------------------------------
-// Bookings
+// Bookings ("Reservas")
 // ------------------------------------------------------------
 
 export async function listAgendaProBookings(accountId: string, params: {
-  client_id?: number; location_id?: number; service_id?: number; service_provider_id?: number
-  scheduled?: boolean; status_id?: number; start_date?: string; end_date?: string; page?: number; per_page?: number
+  range_from?: string; range_to?: string; created_from?: string; created_to?: string
+  updated_from?: string; updated_to?: string
+  statuses?: number[]; services?: number[]; providers?: number[]; locations?: number[]; clients?: number[]
+  page?: number
 }) {
   return agendaProFetch(accountId, `/bookings${query(params)}`)
 }
 
 export async function createAgendaProBooking(accountId: string, body: {
-  start_time: string; end_time?: string; service_id: number; provider_id: number; client_id: number
-  location_id: number; status_id: number; price?: string; notes?: string; time_resource_id?: number
+  start: string; end: string; service_id: number; provider_id: number; price?: number
+  first_name: string; last_name?: string; email?: string; phone?: string; identification_number?: string
 }) {
   return agendaProFetch(accountId, '/bookings', { method: 'POST', body: JSON.stringify(body) })
 }
 
-/** Caches a full Booking resource (richer than the webhook's partial payload —
- *  see the webhook route's own upsert) right after we create it ourselves,
- *  so it shows up immediately without waiting for the booking.created webhook. */
-export async function cacheAgendaProBooking(db: SupabaseClient, accountId: string, contactId: string | null, booking: Record<string, unknown>) {
-  const status = booking.status as Record<string, unknown> | undefined
-  const service = booking.service as Record<string, unknown> | undefined
-  const provider = booking.service_provider as Record<string, unknown> | undefined
-  const location = booking.location as Record<string, unknown> | undefined
-  const sale = booking.sale as Record<string, unknown> | undefined
-  const { error } = await db.from('agendapro_bookings').upsert({
-    account_id: accountId,
-    contact_id: contactId,
-    agendapro_booking_id: String(booking.id),
-    agendapro_client_id: booking.client_id != null ? String(booking.client_id) : null,
-    service_name: typeof service?.name === 'string' ? service.name : null,
-    provider_name: typeof provider?.public_name === 'string' ? provider.public_name : null,
-    location_id: booking.location_id != null ? String(booking.location_id) : null,
-    location_name: typeof location?.name === 'string' ? location.name : null,
-    start_time: typeof booking.start_time === 'string' ? booking.start_time : null,
-    end_time: typeof booking.end_time === 'string' ? booking.end_time : null,
-    status_id: typeof booking.status_id === 'number' ? booking.status_id : null,
-    status_name: typeof status?.name === 'string' ? status.name : null,
-    price: typeof booking.price === 'string' ? booking.price : null,
-    sale_id: sale?.id != null ? String(sale.id) : null,
-    agendapro_created_at: typeof booking.created_at === 'string' ? booking.created_at : null,
-    agendapro_updated_at: typeof booking.updated_at === 'string' ? booking.updated_at : null,
-    synced_at: new Date().toISOString(),
-  }, { onConflict: 'account_id,agendapro_booking_id' })
-  if (error) throw error
+export async function getAgendaProBooking(accountId: string, bookingId: number) {
+  return agendaProFetch(accountId, `/bookings/${bookingId}`)
 }
 
-export async function listAvailableSlots(accountId: string, params: {
-  location_id: number; start_date: string; service_id?: number; provider_id?: number
+export async function listAvailableHours(accountId: string, serviceId: number, params: {
+  date: string; provider_id?: number; location_id?: number
 }) {
-  return agendaProFetch(accountId, `/available_slots${query(params)}`)
+  return agendaProFetch(accountId, `/services/${serviceId}/available_hours${query(params)}`)
 }
 
 // ------------------------------------------------------------
-// Clients
+// Clients ("Clientes")
 // ------------------------------------------------------------
 
-export async function listAgendaProClients(accountId: string, params: { page?: number; per_page?: number } = {}) {
-  return agendaProFetch(accountId, `/clients${query(params)}`)
+export async function listAgendaProClients(accountId: string) {
+  return agendaProFetch(accountId, '/clients')
 }
 
 export async function createAgendaProClient(accountId: string, body: {
-  first_name: string; last_name?: string; email?: string; phone?: string
+  first_name: string; last_name?: string; email?: string; phone?: string; identification_number?: string
 }) {
   return agendaProFetch(accountId, '/clients', { method: 'POST', body: JSON.stringify(body) })
 }
 
 // ------------------------------------------------------------
-// Catalog (locations/services/providers/products) — fetch-through, no local cache
+// Catalog (locations/services/providers) — fetch-through, no local cache
 // ------------------------------------------------------------
 
-export async function listAgendaProLocations(accountId: string, params: { active?: boolean; page?: number; per_page?: number } = {}) {
-  return agendaProFetch(accountId, `/locations${query(params)}`)
+export async function listAgendaProLocations(accountId: string) {
+  return agendaProFetch(accountId, '/locations')
 }
 
-export async function listAgendaProServices(accountId: string, params: { provider_id?: number; page?: number; per_page?: number } = {}) {
-  return agendaProFetch(accountId, `/services${query(params)}`)
+export async function listAgendaProServices(accountId: string) {
+  return agendaProFetch(accountId, '/services')
 }
 
-export async function listAgendaProProviders(accountId: string, params: {
-  location_ids?: string; service_ids?: string; public_name?: string; active?: boolean; page?: number; per_page?: number
-} = {}) {
-  return agendaProFetch(accountId, `/providers${query(params)}`)
-}
-
-export async function listAgendaProProducts(accountId: string, params: { active?: boolean; search?: string; page?: number; per_page?: number } = {}) {
-  return agendaProFetch(accountId, `/products${query(params)}`)
+export async function listAgendaProProviders(accountId: string) {
+  return agendaProFetch(accountId, '/service_providers')
 }
 
 // ------------------------------------------------------------
-// Sales (read-only) + Carts/Payment Requests
+// Payments ("Pagos") — V1 records an ALREADY-COLLECTED payment (cash/card/
+// etc. via `transactions`); unlike Connect v3 there is no "payment
+// request"/checkout-URL concept confirmed in this API, so there is no
+// "send a payment link via WhatsApp" capability here.
 // ------------------------------------------------------------
 
-export async function listAgendaProSales(accountId: string, params: {
-  paid_at_start?: string; paid_at_end?: string; location_id?: number; client_id?: number; page?: number; per_page?: number
-} = {}) {
-  return agendaProFetch(accountId, `/sales${query(params)}`)
+export async function listAgendaProPayments(accountId: string) {
+  return agendaProFetch(accountId, '/payments')
 }
 
-/** Cart item shape isn't fully pinned down from the docs yet — kept as a generic passthrough
- *  body (not a guessed strict type) until a cart-creation UI is actually built. */
-export async function createAgendaProCart(accountId: string, body: Record<string, unknown>) {
-  return agendaProFetch(accountId, '/carts', { method: 'POST', body: JSON.stringify(body) })
+/** Body shape is intentionally a generic passthrough (transactions[]/receipts[].items[]) —
+ *  see docs.agendapro.com's "Crear Pagos" reference for the full item-type union
+ *  (service/product/giftcard/other) before building a UI on top of this. */
+export async function createAgendaProPayment(accountId: string, body: Record<string, unknown>) {
+  return agendaProFetch(accountId, '/payments', { method: 'POST', body: JSON.stringify(body) })
 }
 
-export async function getAgendaProCart(accountId: string, cartId: number) {
-  return agendaProFetch(accountId, `/carts/${cartId}`)
-}
-
-/** Covers the cart's full total; cancels any previous pending request on the same cart. */
-export async function createAgendaProPaymentRequest(accountId: string, cartId: number) {
-  return agendaProFetch(accountId, `/carts/${cartId}/payment_requests`, { method: 'POST' })
-}
-
-export async function cancelAgendaProPaymentRequest(accountId: string, paymentRequestId: number) {
-  return agendaProFetch(accountId, `/payment_requests/${paymentRequestId}/cancel`, { method: 'PATCH' })
-}
-
-// ------------------------------------------------------------
-// Webhook signature verification
-// https://developers.agendapro.com/docs/webhooks
-// ------------------------------------------------------------
-
-const WEBHOOK_MAX_SKEW_SECONDS = 5 * 60
-
-export function verifyAgendaProSignature(
-  webhookId: string | null,
-  timestamp: string | null,
-  rawBody: string,
-  signature: string | null,
-  secret: string,
-): boolean {
-  if (!webhookId || !timestamp || !signature) return false
-  const timestampSeconds = Number(timestamp)
-  if (!Number.isFinite(timestampSeconds)) return false
-  if (Math.abs(Date.now() / 1000 - timestampSeconds) > WEBHOOK_MAX_SKEW_SECONDS) return false
-
-  const content = `${webhookId}.${timestamp}.${rawBody}`
-  const expected = crypto.createHmac('sha256', secret).update(content).digest('base64')
-  const received = signature.startsWith('v1,') ? signature.slice(3) : signature
-  const expectedBuf = Buffer.from(expected)
-  const receivedBuf = Buffer.from(received)
-  if (expectedBuf.length !== receivedBuf.length) return false
-  return crypto.timingSafeEqual(expectedBuf, receivedBuf)
-}

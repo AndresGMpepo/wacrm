@@ -4,6 +4,13 @@
 -- existing Appointments module (specialists/google_calendar_connections/
 -- appointments) by explicit product decision. One AgendaPro API key per
 -- tenant, pasted in Settings (NOT a shared env-var key like Zernio's).
+--
+-- NOTE: this is the ORIGINAL, ALREADY-APPLIED version of this migration —
+-- it targeted "Connect v3" (Bearer API key), which turned out to be the
+-- WRONG AgendaPro API generation for this account (it actually uses
+-- "Agendapro Public V1", HTTP Basic Auth). Per the never-edit-an-applied-
+-- migration rule, this file is restored to what actually ran; the
+-- correction to V1's real shape lives in 133_agendapro_v1_credentials.sql.
 -- ============================================================
 
 ALTER TABLE public.accounts
@@ -119,3 +126,4 @@ ALTER TABLE public.agendapro_webhook_receipts ENABLE ROW LEVEL SECURITY;
 
 COMMENT ON TABLE public.agendapro_configs IS
   'Per-tenant AgendaPro API key + webhook secret (encrypted). No client RLS policies — service-role only, independent from the Appointments module.';
+
