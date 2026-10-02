@@ -278,6 +278,37 @@ export class NexoOmniClient {
     return this.request('GET', '/appointments/availability', { query });
   }
 
+  // --- AgendaPro (independent of the Appointments module above) --------
+
+  listAgendaProBookings(query: {
+    range_from?: string;
+    range_to?: string;
+    location_id?: string;
+    service_id?: string;
+    provider_id?: string;
+    contact_id?: string;
+    page?: number;
+  }): Promise<Paginated<unknown>> {
+    return this.list('/agendapro/bookings', query);
+  }
+
+  createAgendaProBooking(body: unknown): Promise<{ data: unknown }> {
+    return this.request('POST', '/agendapro/bookings', { body });
+  }
+
+  getAgendaProAvailableSlots(query: {
+    service_id: string;
+    date: string;
+    provider_id?: string;
+    location_id?: string;
+  }): Promise<{ data: unknown }> {
+    return this.request('GET', '/agendapro/available-slots', { query });
+  }
+
+  listAgendaProCatalog(resource: 'locations' | 'services' | 'providers'): Promise<{ data: unknown }> {
+    return this.request('GET', '/agendapro/catalog', { query: { resource } });
+  }
+
   // --- Broadcasts ---------------------------------------------------
 
   sendBroadcast(body: unknown): Promise<{ data: unknown }> {

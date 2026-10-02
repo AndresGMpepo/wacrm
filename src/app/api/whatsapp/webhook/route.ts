@@ -14,6 +14,7 @@ import {
 } from '@/lib/whatsapp/template-webhook'
 import { isValidStatusTransition } from '@/lib/whatsapp/recipient-status-ladder'
 import { flagBroadcastReplyIfAny as flagBroadcastReplyIfAnyShared } from '@/lib/whatsapp/broadcast-reply-flag'
+import { handleAgendaProConfirmationReply } from '@/lib/agendapro/confirmation'
 
 // The `after()` callback in POST runs within this route's max duration.
 // Inbound processing can fan out to per-media Meta verification calls, so
@@ -670,6 +671,16 @@ async function processMessage(
   // so the broadcast's `replied_count` advances (via the aggregate
   // trigger installed in migration 003).
   await flagBroadcastReplyIfAny(accountId, contactRecord.id, conversation.id)
+
+  // AgendaPro 24h confirmation: a plain-text SI/NO reply is matched
+  // against the contact's nearest pending confirmation, if any. Runs
+  // before the flow/automation dispatch below but never blocks it —
+  // most inbound text has no pending confirmation and is a fast no-op.
+  if (message.type === 'text' && !interactiveReplyId && contentText?.trim()) {
+    await handleAgendaProConfirmationReply(supabaseAdmin(), accountId, contactRecord.id, contentText).catch((error) => {
+      console.error('[agendapro] could not process a confirmation reply:', error)
+    })
+  }
 
   // ============================================================
   // Flow runner dispatch.

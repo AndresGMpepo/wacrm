@@ -113,7 +113,8 @@ export function IncomingMessageAlert() {
         notification.type !== 'nexo_memory_alert' &&
         notification.type !== 'task_reminder' &&
         notification.type !== 'conversation_assigned' &&
-        notification.type !== 'conversation_transferred'
+        notification.type !== 'conversation_transferred' &&
+        notification.type !== 'agendapro_unconfirmed_appointment'
       ) {
         return;
       }
@@ -132,7 +133,7 @@ export function IncomingMessageAlert() {
       playAlert(notification.type);
       const notify = notification.type === 'negative_sentiment'
         ? toast.error
-        : notification.type === 'call_follow_up' || notification.type === 'nexo_memory_alert' || notification.type === 'task_reminder'
+        : notification.type === 'call_follow_up' || notification.type === 'nexo_memory_alert' || notification.type === 'task_reminder' || notification.type === 'agendapro_unconfirmed_appointment'
           ? toast.warning
           : notification.type === 'conversation_assigned'
             ? toast.info
@@ -150,7 +151,9 @@ export function IncomingMessageAlert() {
             ? { label: 'Ver seguimientos', onClick: () => router.push('/call-tasks') }
             : notification.type === 'nexo_memory_alert'
               ? { label: 'Ver reportes', onClick: () => router.push('/reports') }
-              : undefined,
+              : notification.type === 'agendapro_unconfirmed_appointment'
+                ? { label: 'Ver AgendaPro', onClick: () => router.push('/agendapro') }
+                : undefined,
       });
 
       if (

@@ -20,6 +20,7 @@ cosas como:
 > "Agenda una tarea para llamar a Juan Pérez mañana a las 3pm."
 > "¿Qué notas internas dejó el equipo en esta conversación?"
 > "¿Qué horarios libres tiene la Dra. López esta semana?"
+> "¿Qué citas de AgendaPro tiene agendadas este cliente?"
 
 Es una capa fina sobre la misma [API pública](./api-publica.md) — todo
 queda igual de protegido y con los mismos permisos que le diste a tu

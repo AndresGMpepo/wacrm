@@ -9,6 +9,7 @@ import {
   AlarmClock,
   Bell,
   Brain,
+  CalendarClock,
   CheckCheck,
   Loader2,
   MessageSquare,
@@ -33,6 +34,7 @@ const TYPE_ICON: Record<Notification['type'], typeof Bell> = {
   call_follow_up: PhoneCall,
   nexo_memory_alert: Brain,
   task_reminder: AlarmClock,
+  agendapro_unconfirmed_appointment: CalendarClock,
 };
 
 export default function NotificationsPage() {
@@ -140,6 +142,8 @@ export default function NotificationsPage() {
         router.push('/call-tasks');
       } else if (n.type === 'nexo_memory_alert') {
         router.push('/reports');
+      } else if (n.type === 'agendapro_unconfirmed_appointment') {
+        router.push('/agendapro');
       }
     },
     [markRead, router]

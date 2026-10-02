@@ -25,6 +25,7 @@ import {
   routeConversationToQueue,
 } from '@/lib/ai/insights-apply'
 import { alertCommitmentOverdue, alertStaleProspect, alertTaskDueSoon, sendDailyNexoMemoryDigest } from '@/lib/notifications/nexo-memory-alerts'
+import { processAgendaProConfirmationReminders, escalateUnconfirmedAgendaProBookings } from '@/lib/agendapro/confirmation'
 
 /** How far ahead of a task's due_at the reminder notification fires. */
 const TASK_REMINDER_LEAD_MINUTES = 10
@@ -240,6 +241,8 @@ export async function POST(request: Request) {
   }
   const followUps = await processCallFollowUps(db)
   const appointmentReminders = await processAppointmentReminders(db)
+  const agendaproConfirmations = await processAgendaProConfirmationReminders(db)
+  const agendaproEscalations = await escalateUnconfirmedAgendaProBookings(db)
   const overdueCommitments = await markOverdueCommitments(db)
   const taskReminders = await sendTaskReminders(db)
   const staleProspects = await alertStaleProspects(db)
@@ -252,7 +255,7 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error('[appointments] Google Calendar inbound sync could not start:', error)
   }
-  return NextResponse.json({ completed, skipped, failed, media: mediaResult, follow_ups: followUps, appointment_reminders: appointmentReminders, overdue_commitments: overdueCommitments, task_reminders: taskReminders, stale_prospects: staleProspects, google_calendar: googleCalendar })
+  return NextResponse.json({ completed, skipped, failed, media: mediaResult, follow_ups: followUps, appointment_reminders: appointmentReminders, agendapro_confirmations: agendaproConfirmations, agendapro_escalations: agendaproEscalations, overdue_commitments: overdueCommitments, task_reminders: taskReminders, stale_prospects: staleProspects, google_calendar: googleCalendar })
 }
 
 async function processAppointmentReminders(db: ReturnType<typeof supabaseAdmin>) {

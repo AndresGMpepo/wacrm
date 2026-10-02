@@ -249,6 +249,56 @@ export function registerReadTools(server: McpServer, client: NexoOmniClient): vo
   );
 
   server.registerTool(
+    'list_agendapro_bookings',
+    {
+      title: 'List AgendaPro bookings',
+      description:
+        'List bookings (reservas) from the connected AgendaPro account — an appointment scheduler independent from NexoOmni\'s own Appointments module. Optionally filter by a date range, location, service, provider, or contact_id.',
+      inputSchema: {
+        range_from: z.string().optional().describe('ISO date (YYYY-MM-DD). Defaults to AgendaPro\'s own default window.'),
+        range_to: z.string().optional().describe('ISO date (YYYY-MM-DD).'),
+        location_id: z.string().optional().describe('AgendaPro location id.'),
+        service_id: z.string().optional().describe('AgendaPro service id.'),
+        provider_id: z.string().optional().describe('AgendaPro service-provider id.'),
+        contact_id: z.string().optional().describe('NexoOmni contact id — resolved to its linked AgendaPro client, if any.'),
+        page: z.number().int().min(1).optional(),
+      },
+      annotations: { ...READ_ONLY, title: 'List AgendaPro bookings' },
+    },
+    handle(async (args) => jsonResult(await client.listAgendaProBookings(args))),
+  );
+
+  server.registerTool(
+    'get_agendapro_available_slots',
+    {
+      title: 'Get available AgendaPro slots',
+      description:
+        'Find free time slots for an AgendaPro service on a given date, for a specific provider or location. Call this before create_agendapro_booking to offer the customer real options instead of guessing.',
+      inputSchema: {
+        service_id: z.string().describe('AgendaPro service id.'),
+        date: z.string().describe('ISO date (YYYY-MM-DD).'),
+        provider_id: z.string().optional().describe('AgendaPro service-provider id. Provide this or location_id.'),
+        location_id: z.string().optional().describe('AgendaPro location id. Provide this or provider_id.'),
+      },
+      annotations: { ...READ_ONLY, title: 'Get available AgendaPro slots' },
+    },
+    handle(async (args) => jsonResult(await client.getAgendaProAvailableSlots(args))),
+  );
+
+  server.registerTool(
+    'list_agendapro_catalog',
+    {
+      title: 'List AgendaPro catalog',
+      description: 'List AgendaPro\'s locations, services, or service providers — look these ids up before booking.',
+      inputSchema: {
+        resource: z.enum(['locations', 'services', 'providers']),
+      },
+      annotations: { ...READ_ONLY, title: 'List AgendaPro catalog' },
+    },
+    handle(async ({ resource }) => jsonResult(await client.listAgendaProCatalog(resource))),
+  );
+
+  server.registerTool(
     'get_contact_memory',
     {
       title: 'Get contact memory',

@@ -55,10 +55,12 @@ docs/manuals/
     webhooks-y-automatizacion-externa.md
     servidor-mcp.md
     api-publica.md
+    agendapro.md
   notificaciones/
     notificaciones.md
   changelog/
     2026-09.md               ← un archivo por mes, mejoras + bugs resueltos
+    2026-10.md
 ```
 
 Cada carpeta = una sección del menú del sitio de documentación. El
@@ -106,10 +108,11 @@ al día.
 | Webhooks salientes + integración n8n | [integraciones/webhooks-y-automatizacion-externa.md](./integraciones/webhooks-y-automatizacion-externa.md) | ✅ |
 | Servidor MCP (conectar un asistente de IA externo) | [integraciones/servidor-mcp.md](./integraciones/servidor-mcp.md) | ✅ |
 | API pública v1 | [integraciones/api-publica.md](./integraciones/api-publica.md) | ✅ (enlaza a [../public-api.md](../public-api.md) para la referencia técnica completa) |
+| AgendaPro (reservas + confirmación automática por WhatsApp) | [integraciones/agendapro.md](./integraciones/agendapro.md) | ✅ |
 | Notificaciones | [notificaciones/notificaciones.md](./notificaciones/notificaciones.md) | ✅ |
 | Panel de plataforma (solo operador NexoOmni, no clientes) | — | Fuera de alcance de este catálogo — es interno, no se documenta como manual de cliente |
 
-Sin pendientes conocidos a la fecha (2026-09-28) — si agregas una
+Sin pendientes conocidos a la fecha (2026-10-02) — si agregas una
 funcionalidad nueva, agrega su fila aquí en el mismo cambio (regla 7 de
 [AGENTS.md](../../AGENTS.md)).
 

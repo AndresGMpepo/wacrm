@@ -57,6 +57,8 @@ it. Grant the minimum.
 | `deals:write`        | Create and update deals (including moving stage or status) |
 | `appointments:read`  | List and read appointments               |
 | `appointments:write` | Create and update appointments            |
+| `agendapro:read`     | List AgendaPro bookings, services, providers, locations, and available slots |
+| `agendapro:write`    | Create AgendaPro bookings                |
 | `broadcasts:send`    | Launch broadcast campaigns               |
 | `webhooks:manage`    | Register and manage outbound webhooks    |
 
@@ -351,6 +353,42 @@ range), `duration` (minutes, default 30).
   }
 }
 ```
+
+### `GET /api/v1/agendapro/bookings`
+
+List bookings (reservas) from the connected AgendaPro account —
+independent of the `appointments` endpoints above (AgendaPro is a
+separate, optional integration; see Settings → AgendaPro). Scope:
+`agendapro:read`. Fetched live through to AgendaPro's own API, not
+paginated by this server. Optional filters: `?range_from=`/
+`?range_to=` (`YYYY-MM-DD`), `?location_id=`, `?service_id=`,
+`?provider_id=`, `?contact_id=` (resolved to its linked AgendaPro
+client, if any), `?page=`.
+
+### `POST /api/v1/agendapro/bookings`
+
+Create an AgendaPro booking. Scope: `agendapro:write`. Requires
+`contact_id` (an existing NexoOmni contact — its name/phone/email are
+used to find-or-create the matching AgendaPro client), `service_id`,
+`provider_id`, `start`, `end` (ISO 8601); `price` is optional. Returns
+`400` if the slot is no longer available — call
+`GET /api/v1/agendapro/available-slots` first.
+
+```json
+{ "contact_id": "…", "service_id": 12, "provider_id": 4, "start": "2026-10-01T15:00:00-06:00", "end": "2026-10-01T15:30:00-06:00" }
+```
+
+### `GET /api/v1/agendapro/available-slots`
+
+Find free time slots for an AgendaPro service. Scope:
+`agendapro:read`. Query: `service_id`, `date` (`YYYY-MM-DD`), and
+either `provider_id` or `location_id`.
+
+### `GET /api/v1/agendapro/catalog`
+
+List AgendaPro's locations, services, or service providers. Scope:
+`agendapro:read`. Query: `?resource=locations` / `services` /
+`providers`.
 
 ### `GET /api/v1/conversations`
 

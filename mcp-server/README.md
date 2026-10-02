@@ -89,6 +89,9 @@ when their guard is set.
 | `list_appointments`  | read      | `appointments:read`   | List appointments in a date window |
 | `get_appointment`    | read      | `appointments:read`   | Read one appointment |
 | `get_availability`   | read      | `appointments:read`   | Find free time slots for a specialist or agent |
+| `list_agendapro_bookings` | read | `agendapro:read`     | List AgendaPro bookings (independent of the Appointments module) |
+| `get_agendapro_available_slots` | read | `agendapro:read` | Find free AgendaPro slots for a service/provider/location |
+| `list_agendapro_catalog` | read  | `agendapro:read`     | List AgendaPro's locations, services, or providers |
 | `send_message`       | write     | `messages:send`      | Send a WhatsApp message (text/template/media)   |
 | `create_contact`     | write     | `contacts:write`     | Create (find-or-create) a contact               |
 | `update_contact`     | write     | `contacts:write`     | Update a contact / replace its tags             |
@@ -101,6 +104,7 @@ when their guard is set.
 | `update_deal`        | write     | `deals:write`         | Move a deal's stage, or update its value/status/notes |
 | `create_appointment` | write     | `appointments:write`  | Schedule an appointment (checks for conflicts) |
 | `update_appointment` | write     | `appointments:write`  | Reschedule, change status, or update an appointment |
+| `create_agendapro_booking` | write | `agendapro:write`  | Create an AgendaPro booking for an existing contact |
 | `send_broadcast`     | broadcast | `broadcasts:send`    | Launch a template broadcast (requires `confirm`)|
 
 ## Safety model

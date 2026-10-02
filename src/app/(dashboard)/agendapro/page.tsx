@@ -1,9 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { CalendarClock, Loader2, Plus, RefreshCw, X } from 'lucide-react';
+import { CalendarClock, CalendarDays, List, Loader2, Plus, RefreshCw, X } from 'lucide-react';
 import { toast } from 'sonner';
+import { endOfMonth, endOfWeek, format, startOfMonth, startOfWeek } from 'date-fns';
 
 import { useAuth } from '@/hooks/use-auth';
 import { createClient } from '@/lib/supabase/client';
@@ -11,6 +12,8 @@ import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { AgendaProMonthCalendar } from '@/components/agendapro/month-calendar';
+import { colorForStatus } from '@/lib/agendapro/status-colors';
 
 type Location = { id: number; name: string };
 type Service = { id: number; name: string; duration: number };
@@ -51,6 +54,11 @@ export default function AgendaProPage() {
   const [loadingBookings, setLoadingBookings] = useState(false);
   const [filterLocationId, setFilterLocationId] = useState('');
   const [filterServiceId, setFilterServiceId] = useState('');
+
+  const [viewMode, setViewMode] = useState<'calendar' | 'list'>('calendar');
+  const [month, setMonth] = useState(() => startOfMonth(new Date()));
+  const [selectedDate, setSelectedDate] = useState(todayISODate());
+  const [statusColors, setStatusColors] = useState<Record<string, string>>({});
 
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -95,10 +103,13 @@ export default function AgendaProPage() {
       const params = new URLSearchParams();
       if (filterLocationId) params.set('location_id', filterLocationId);
       if (filterServiceId) params.set('service_id', filterServiceId);
-      params.set('range_from', todayISODate());
-      const to = new Date();
-      to.setDate(to.getDate() + 30);
-      params.set('range_to', to.toISOString().slice(0, 10));
+      // The grid shows a few days of the adjacent months too, so the
+      // fetched range covers the whole visible 6-week grid, not just the
+      // calendar month itself — otherwise those edge days would look empty.
+      const gridStart = startOfWeek(startOfMonth(month), { weekStartsOn: 1 });
+      const gridEnd = endOfWeek(endOfMonth(month), { weekStartsOn: 1 });
+      params.set('range_from', format(gridStart, 'yyyy-MM-dd'));
+      params.set('range_to', format(gridEnd, 'yyyy-MM-dd'));
       const response = await fetch(`/api/agendapro/bookings?${params.toString()}`, { cache: 'no-store' });
       const payload = (await response.json().catch(() => null)) as Booking[] | { error?: string } | null;
       if (!response.ok) throw new Error((payload as { error?: string })?.error || 'No se pudieron cargar las reservas.');
@@ -108,7 +119,18 @@ export default function AgendaProPage() {
     } finally {
       setLoadingBookings(false);
     }
-  }, [connected, filterLocationId, filterServiceId]);
+  }, [connected, filterLocationId, filterServiceId, month]);
+
+  const loadStatusColors = useCallback(async () => {
+    try {
+      const response = await fetch('/api/agendapro/status-colors', { cache: 'no-store' });
+      if (!response.ok) return;
+      const payload = (await response.json()) as { colors?: Record<string, string> };
+      setStatusColors(payload.colors ?? {});
+    } catch {
+      // Non-critical — the calendar still renders with deterministic default colors.
+    }
+  }, []);
 
   useEffect(() => {
     void loadCatalog();
@@ -117,6 +139,10 @@ export default function AgendaProPage() {
   useEffect(() => {
     void loadBookings();
   }, [loadBookings]);
+
+  useEffect(() => {
+    void loadStatusColors();
+  }, [loadStatusColors]);
 
   useEffect(() => {
     if (!accountId) return;
@@ -198,6 +224,14 @@ export default function AgendaProPage() {
     }
   }
 
+  const bookingsForSelectedDay = useMemo(
+    () =>
+      bookings
+        .filter((booking) => booking.start.slice(0, 10) === selectedDate)
+        .sort((a, b) => a.start.localeCompare(b.start)),
+    [bookings, selectedDate],
+  );
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -236,14 +270,28 @@ export default function AgendaProPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-foreground">AgendaPro</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Reservas de los próximos 30 días.</p>
+          <p className="mt-1 text-sm text-muted-foreground">Calendario de reservas.</p>
         </div>
         <div className="flex gap-2">
+          <div className="flex rounded-lg border p-0.5">
+            <Button
+              variant={viewMode === 'calendar' ? 'default' : 'ghost'}
+              size="sm"
+              onClick={() => setViewMode('calendar')}
+            >
+              <CalendarDays className="h-4 w-4" />
+              Calendario
+            </Button>
+            <Button variant={viewMode === 'list' ? 'default' : 'ghost'} size="sm" onClick={() => setViewMode('list')}>
+              <List className="h-4 w-4" />
+              Lista
+            </Button>
+          </div>
           <Button variant="outline" onClick={() => void loadBookings()} disabled={loadingBookings}>
             <RefreshCw className={loadingBookings ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />
             Actualizar
           </Button>
-          <Button onClick={() => setShowForm(true)}>
+          <Button onClick={() => { setFormDate(selectedDate || todayISODate()); setShowForm(true); }}>
             <Plus className="h-4 w-4" />
             Nueva reserva
           </Button>
@@ -351,34 +399,72 @@ export default function AgendaProPage() {
         </Card>
       ) : null}
 
-      <div className="mt-6 space-y-2">
+      <div className="mt-6">
         {loadingBookings ? (
           <div className="flex items-center justify-center py-10">
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
           </div>
+        ) : viewMode === 'calendar' ? (
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
+            <AgendaProMonthCalendar
+              month={month}
+              onMonthChange={setMonth}
+              bookings={bookings}
+              statusColors={statusColors}
+              selectedDate={selectedDate}
+              onSelectDate={setSelectedDate}
+            />
+            <div>
+              <h2 className="mb-3 text-sm font-semibold text-foreground">
+                {new Intl.DateTimeFormat('es-MX', { dateStyle: 'full' }).format(new Date(`${selectedDate}T00:00:00`))}
+              </h2>
+              <div className="space-y-2">
+                {bookingsForSelectedDay.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No hay reservas este día.</p>
+                ) : (
+                  bookingsForSelectedDay.map((booking) => <BookingCard key={booking.id} booking={booking} statusColors={statusColors} />)
+                )}
+              </div>
+            </div>
+          </div>
         ) : bookings.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No hay reservas en los próximos 30 días.</p>
+          <p className="text-sm text-muted-foreground">No hay reservas en el mes mostrado.</p>
         ) : (
-          bookings.map((booking) => (
-            <Card key={booking.id}>
-              <CardContent className="flex flex-wrap items-center justify-between gap-2 py-4 text-sm">
-                <div>
-                  <p className="font-medium text-foreground">
-                    {booking.client ? `${booking.client.first_name} ${booking.client.last_name ?? ''}`.trim() : 'Sin cliente'}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {booking.service} · {booking.service_provider} · {booking.location}
-                  </p>
-                </div>
-                <div className="text-right">
-                  <p className="text-foreground">{formatDateTime(booking.start)}</p>
-                  <p className="text-xs text-muted-foreground">{booking.status}</p>
-                </div>
-              </CardContent>
-            </Card>
-          ))
+          <div className="space-y-2">
+            {[...bookings]
+              .sort((a, b) => a.start.localeCompare(b.start))
+              .map((booking) => (
+                <BookingCard key={booking.id} booking={booking} statusColors={statusColors} />
+              ))}
+          </div>
         )}
       </div>
     </div>
   );
 }
+
+function BookingCard({ booking, statusColors }: { booking: Booking; statusColors: Record<string, string> }) {
+  const color = colorForStatus(booking.status, statusColors);
+  return (
+    <Card className="overflow-hidden">
+      <CardContent className="flex flex-wrap items-center justify-between gap-2 border-l-4 py-4 text-sm" style={{ borderLeftColor: color }}>
+        <div>
+          <p className="font-medium text-foreground">
+            {booking.client ? `${booking.client.first_name} ${booking.client.last_name ?? ''}`.trim() : 'Sin cliente'}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {booking.service} · {booking.service_provider} · {booking.location}
+          </p>
+        </div>
+        <div className="text-right">
+          <p className="text-foreground">{formatDateTime(booking.start)}</p>
+          <p className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+            <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: color }} />
+            {booking.status}
+          </p>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+

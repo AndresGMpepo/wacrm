@@ -33,6 +33,7 @@ Algunas operaciones comunes:
 - Enviar una plantilla aprobada a un número.
 - Leer los mensajes de una conversación.
 - Asignar una conversación a un agente.
+- Consultar o crear reservas de [AgendaPro](./agendapro.md).
 
 ## Preguntas frecuentes
 

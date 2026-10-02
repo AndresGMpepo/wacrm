@@ -20,6 +20,7 @@ import { POST as createDealPOST } from '@/app/api/v1/deals/route';
 import { PATCH as updateDealPATCH } from '@/app/api/v1/deals/[id]/route';
 import { POST as createAppointmentPOST } from '@/app/api/v1/appointments/route';
 import { PATCH as updateAppointmentPATCH } from '@/app/api/v1/appointments/[id]/route';
+import { POST as createAgendaProBookingPOST } from '@/app/api/v1/agendapro/bookings/route';
 
 const templateSchema = z
   .object({
@@ -275,6 +276,29 @@ export function registerWriteTools(server: McpServer, authHeader: string, scopes
             })
           ).data,
         ),
+      ),
+    );
+  }
+
+  if (hasScope(scopes, 'agendapro:write')) {
+    server.registerTool(
+      'create_agendapro_booking',
+      {
+        title: 'Create AgendaPro booking',
+        description:
+          'Create a booking (reserva) in the connected AgendaPro account for an existing NexoOmni contact. Call get_agendapro_available_slots first to find a real open slot — AgendaPro rejects a start/end that conflicts with an existing booking.',
+        inputSchema: {
+          contact_id: z.string().describe('NexoOmni contact id — used to match or create the AgendaPro client by name/phone/email.'),
+          service_id: z.string().describe('AgendaPro service id.'),
+          provider_id: z.string().describe('AgendaPro service-provider id.'),
+          start: z.string().describe('ISO 8601 date-time — from get_agendapro_available_slots.'),
+          end: z.string().describe('ISO 8601 date-time — from get_agendapro_available_slots.'),
+          price: z.number().optional(),
+        },
+        annotations: { title: 'Create AgendaPro booking', readOnlyHint: false, openWorldHint: true },
+      },
+      handle(async (body: Record<string, unknown>) =>
+        jsonResult((await callRoute(createAgendaProBookingPOST, '/agendapro/bookings', authHeader, { body })).data),
       ),
     );
   }

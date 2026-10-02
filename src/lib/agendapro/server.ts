@@ -119,6 +119,98 @@ export async function getAgendaProConfig(db: SupabaseClient, accountId: string):
   }
 }
 
+// ------------------------------------------------------------
+// Confirmation settings (24h-before WhatsApp reminder, see migration 134
+// and src/lib/agendapro/confirmation.ts) — independent of the
+// connect/disconnect credentials above.
+// ------------------------------------------------------------
+
+export type AgendaProConfirmationSettings = {
+  enabled: boolean
+  receptionPhone: string | null
+  confirmationTemplateName: string
+  confirmationTemplateLanguage: string
+  receptionTemplateName: string
+  receptionTemplateLanguage: string
+}
+
+export async function getAgendaProConfirmationSettings(db: SupabaseClient, accountId: string): Promise<AgendaProConfirmationSettings | null> {
+  const { data, error } = await db
+    .from('agendapro_configs')
+    .select('confirmation_reminder_enabled, reception_phone, confirmation_template_name, confirmation_template_language, reception_template_name, reception_template_language')
+    .eq('account_id', accountId)
+    .maybeSingle()
+  if (error) throw error
+  if (!data) return null
+  return {
+    enabled: data.confirmation_reminder_enabled,
+    receptionPhone: data.reception_phone,
+    confirmationTemplateName: data.confirmation_template_name,
+    confirmationTemplateLanguage: data.confirmation_template_language,
+    receptionTemplateName: data.reception_template_name,
+    receptionTemplateLanguage: data.reception_template_language,
+  }
+}
+
+/** Requires AgendaPro to already be connected (the row this upserts into
+ *  is created by saveAgendaProConfig). Template names are free text —
+ *  intentionally not validated against Meta here; they only get checked
+ *  for real the first time a reminder tries to send, at which point a
+ *  wrong/unapproved name surfaces as a failed confirmation_reminder_status
+ *  with Meta's own error message logged (see processAgendaProConfirmationReminders). */
+export async function saveAgendaProConfirmationSettings(accountId: string, settings: {
+  enabled: boolean
+  receptionPhone: string | null
+  confirmationTemplateName: string
+  confirmationTemplateLanguage: string
+  receptionTemplateName: string
+  receptionTemplateLanguage: string
+}) {
+  const db = admin()
+  const { error } = await db.from('agendapro_configs').update({
+    confirmation_reminder_enabled: settings.enabled,
+    reception_phone: settings.receptionPhone,
+    confirmation_template_name: settings.confirmationTemplateName,
+    confirmation_template_language: settings.confirmationTemplateLanguage,
+    reception_template_name: settings.receptionTemplateName,
+    reception_template_language: settings.receptionTemplateLanguage,
+    updated_at: new Date().toISOString(),
+  }).eq('account_id', accountId)
+  if (error) throw error
+}
+
+// ------------------------------------------------------------
+// Calendar status colors (migration 135) — see
+// src/lib/agendapro/status-colors.ts for the deterministic-default +
+// override scheme this backs.
+// ------------------------------------------------------------
+
+export async function getAgendaProStatusColors(db: SupabaseClient, accountId: string): Promise<Record<string, string>> {
+  const { data, error } = await db
+    .from('agendapro_configs')
+    .select('status_colors')
+    .eq('account_id', accountId)
+    .maybeSingle()
+  if (error) throw error
+  return (data?.status_colors as Record<string, string> | null) ?? {}
+}
+
+const HEX_COLOR_RE = /^#[0-9a-f]{6}$/i
+
+export async function saveAgendaProStatusColors(accountId: string, colors: Record<string, string>) {
+  for (const [key, value] of Object.entries(colors)) {
+    if (!key.trim() || !HEX_COLOR_RE.test(value)) {
+      throw new Error(`Color inválido para "${key}" — usa un hexadecimal como #10b981.`)
+    }
+  }
+  const db = admin()
+  const { error } = await db.from('agendapro_configs').update({
+    status_colors: colors,
+    updated_at: new Date().toISOString(),
+  }).eq('account_id', accountId)
+  if (error) throw error
+}
+
 /** Validates the credentials against AgendaPro (a cheap `GET /locations` call) before persisting them. */
 export async function saveAgendaProConfig(accountId: string, apiUser: string, apiPassword: string, userId: string) {
   const db = admin()

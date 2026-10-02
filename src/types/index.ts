@@ -222,7 +222,9 @@ export type NotificationType =
   | 'call_follow_up'
   | 'nexo_memory_alert'
   /** "10 minutes before" reminder for a scheduled follow-up task (contact_commitments.due_at). */
-  | 'task_reminder';
+  | 'task_reminder'
+  /** A client declined (or never answered) the 24h AgendaPro confirmation reminder — see src/lib/agendapro/confirmation.ts. */
+  | 'agendapro_unconfirmed_appointment';
 
 export interface Notification {
   id: string;

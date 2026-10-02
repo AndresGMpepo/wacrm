@@ -28,6 +28,8 @@ export const API_SCOPES = [
   'deals:write',
   'appointments:read',
   'appointments:write',
+  'agendapro:read',
+  'agendapro:write',
   'broadcasts:send',
   'webhooks:manage',
 ] as const;
@@ -48,6 +50,8 @@ export const SCOPE_DESCRIPTIONS: Record<ApiScope, string> = {
   'deals:write': 'Create and update deals (including moving stage or status)',
   'appointments:read': 'List and read appointments',
   'appointments:write': 'Create and update appointments',
+  'agendapro:read': 'List AgendaPro bookings, services, providers, locations, and available slots',
+  'agendapro:write': 'Create AgendaPro bookings',
   'broadcasts:send': 'Launch broadcast campaigns',
   'webhooks:manage': 'Register and manage outbound event webhooks',
 };

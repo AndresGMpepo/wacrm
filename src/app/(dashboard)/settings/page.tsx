@@ -23,6 +23,8 @@ import { QuickRepliesManager } from '@/components/settings/quick-replies-manager
 import { FieldsAndTagsPanel } from '@/components/settings/fields-and-tags-panel';
 import { DealsSettings } from '@/components/settings/deals-settings';
 import { AgendaProConfig } from '@/components/settings/agendapro-config';
+import { AgendaProConfirmationSettings } from '@/components/settings/agendapro-confirmation-settings';
+import { AgendaProStatusColors } from '@/components/settings/agendapro-status-colors';
 import { MembersTab } from '@/components/settings/members-tab';
 import { ApiKeysSettings } from '@/components/settings/api-keys-settings';
 import {
@@ -91,7 +93,7 @@ function SettingsPageInner() {
     'quick-replies': <QuickRepliesManager />,
     fields: <FieldsAndTagsPanel />,
     deals: <DealsSettings />,
-    agendapro: <AgendaProConfig />,
+    agendapro: <div className="space-y-6"><AgendaProConfig /><AgendaProStatusColors /><AgendaProConfirmationSettings /></div>,
     members: <MembersTab />,
     api: <ApiKeysSettings />,
   };
