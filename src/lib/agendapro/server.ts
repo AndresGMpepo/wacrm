@@ -272,6 +272,22 @@ export async function getAgendaProBooking(accountId: string, bookingId: number) 
   return agendaProFetch(accountId, `/bookings/${bookingId}`)
 }
 
+/** `PATCH /bookings/{id}` — confirmed from
+ *  developers.agendapro.com/v1.0/reference/editar-una-reserva. Only
+ *  `start`, `end`, `provider_id`, and `status_id` are documented as
+ *  editable; `status_id` explicitly excludes "cancelado" (that's a
+ *  separate, undocumented-here endpoint this integration does not
+ *  implement) — enforced by only ever sending one of the six ids in
+ *  AGENDAPRO_STATUS_OPTIONS (see status-colors.ts). AgendaPro itself
+ *  may still reject the edit with a 422 if the merchant's own booking
+ *  policy restricts it (e.g. too close to start time).
+ */
+export async function updateAgendaProBooking(accountId: string, bookingId: number, body: {
+  start?: string; end?: string; provider_id?: number; status_id?: number
+}) {
+  return agendaProFetch(accountId, `/bookings/${bookingId}`, { method: 'PATCH', body: JSON.stringify(body) })
+}
+
 export async function listAvailableHours(accountId: string, serviceId: number, params: {
   date: string; provider_id?: number; location_id?: number
 }) {

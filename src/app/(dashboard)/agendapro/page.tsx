@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { CalendarClock, CalendarDays, List, Loader2, Plus, RefreshCw, X } from 'lucide-react';
+import { CalendarClock, CalendarDays, ChevronLeft, ChevronRight, List, Loader2, Plus, RefreshCw, X } from 'lucide-react';
 import { toast } from 'sonner';
-import { endOfMonth, endOfWeek, format, startOfMonth, startOfWeek } from 'date-fns';
+import { addDays, endOfMonth, endOfWeek, format, startOfMonth, startOfWeek, subDays } from 'date-fns';
 
 import { useAuth } from '@/hooks/use-auth';
 import { createClient } from '@/lib/supabase/client';
@@ -13,6 +13,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { AgendaProMonthCalendar } from '@/components/agendapro/month-calendar';
+import { AgendaProDaySchedule } from '@/components/agendapro/day-schedule';
+import { AgendaProBookingPopover } from '@/components/agendapro/booking-popover';
 import { colorForStatus } from '@/lib/agendapro/status-colors';
 
 type Location = { id: number; name: string };
@@ -26,9 +28,12 @@ type Booking = {
   price: number;
   service: string;
   service_provider: string;
+  service_provider_id: number;
   location: string;
   status: string;
-  client: { id: number; first_name: string; last_name: string | null } | null;
+  notes?: string | null;
+  company_comment?: string | null;
+  client: { id: number; first_name: string; last_name: string | null; phone?: string | null; email?: string | null } | null;
 };
 type AvailableHour = { start_time: string; end_time: string; provider_id: number; provider_name: string; start_block: string };
 
@@ -54,11 +59,14 @@ export default function AgendaProPage() {
   const [loadingBookings, setLoadingBookings] = useState(false);
   const [filterLocationId, setFilterLocationId] = useState('');
   const [filterServiceId, setFilterServiceId] = useState('');
+  const [filterProviderId, setFilterProviderId] = useState('');
 
-  const [viewMode, setViewMode] = useState<'calendar' | 'list'>('calendar');
+  const [viewMode, setViewMode] = useState<'day' | 'calendar' | 'list'>('day');
   const [month, setMonth] = useState(() => startOfMonth(new Date()));
   const [selectedDate, setSelectedDate] = useState(todayISODate());
   const [statusColors, setStatusColors] = useState<Record<string, string>>({});
+  const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
+  const [popoverAnchor, setPopoverAnchor] = useState<HTMLElement | null>(null);
 
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -103,6 +111,7 @@ export default function AgendaProPage() {
       const params = new URLSearchParams();
       if (filterLocationId) params.set('location_id', filterLocationId);
       if (filterServiceId) params.set('service_id', filterServiceId);
+      if (filterProviderId) params.set('provider_id', filterProviderId);
       // The grid shows a few days of the adjacent months too, so the
       // fetched range covers the whole visible 6-week grid, not just the
       // calendar month itself — otherwise those edge days would look empty.
@@ -119,7 +128,7 @@ export default function AgendaProPage() {
     } finally {
       setLoadingBookings(false);
     }
-  }, [connected, filterLocationId, filterServiceId, month]);
+  }, [connected, filterLocationId, filterServiceId, filterProviderId, month]);
 
   const loadStatusColors = useCallback(async () => {
     try {
@@ -143,6 +152,14 @@ export default function AgendaProPage() {
   useEffect(() => {
     void loadStatusColors();
   }, [loadStatusColors]);
+
+  // Keeps the fetched month-grid range following the day view's date
+  // picker/prev-next-day controls, so crossing a month boundary there
+  // still has data to show instead of silently going empty.
+  useEffect(() => {
+    const picked = startOfMonth(new Date(`${selectedDate}T00:00:00`));
+    setMonth((current) => (current.getTime() === picked.getTime() ? current : picked));
+  }, [selectedDate]);
 
   useEffect(() => {
     if (!accountId) return;
@@ -274,13 +291,17 @@ export default function AgendaProPage() {
         </div>
         <div className="flex gap-2">
           <div className="flex rounded-lg border p-0.5">
+            <Button variant={viewMode === 'day' ? 'default' : 'ghost'} size="sm" onClick={() => setViewMode('day')}>
+              <CalendarClock className="h-4 w-4" />
+              Día
+            </Button>
             <Button
               variant={viewMode === 'calendar' ? 'default' : 'ghost'}
               size="sm"
               onClick={() => setViewMode('calendar')}
             >
               <CalendarDays className="h-4 w-4" />
-              Calendario
+              Mes
             </Button>
             <Button variant={viewMode === 'list' ? 'default' : 'ghost'} size="sm" onClick={() => setViewMode('list')}>
               <List className="h-4 w-4" />
@@ -311,7 +332,48 @@ export default function AgendaProPage() {
             <option key={service.id} value={service.id}>{service.name}</option>
           ))}
         </select>
+        <select value={filterProviderId} onChange={(event) => setFilterProviderId(event.target.value)} className="border-input h-9 rounded-lg border bg-transparent px-2 text-sm">
+          <option value="">Todos los prestadores</option>
+          {providers
+            .filter((provider) => !filterLocationId || String(provider.location_id) === filterLocationId)
+            .map((provider) => (
+              <option key={provider.id} value={provider.id}>{provider.name}</option>
+            ))}
+        </select>
       </div>
+
+      {viewMode === 'day' ? (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <Button
+            variant="outline"
+            size="icon"
+            aria-label="Día anterior"
+            onClick={() => setSelectedDate(format(subDays(new Date(`${selectedDate}T00:00:00`), 1), 'yyyy-MM-dd'))}
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setSelectedDate(todayISODate())}>
+            Hoy
+          </Button>
+          <Button
+            variant="outline"
+            size="icon"
+            aria-label="Día siguiente"
+            onClick={() => setSelectedDate(format(addDays(new Date(`${selectedDate}T00:00:00`), 1), 'yyyy-MM-dd'))}
+          >
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+          <Input
+            type="date"
+            value={selectedDate}
+            onChange={(event) => setSelectedDate(event.target.value)}
+            className="w-auto"
+          />
+          <span className="text-sm font-medium capitalize text-foreground">
+            {new Intl.DateTimeFormat('es-MX', { dateStyle: 'full' }).format(new Date(`${selectedDate}T00:00:00`))}
+          </span>
+        </div>
+      ) : null}
 
       {showForm ? (
         <Card className="mt-4">
@@ -404,6 +466,35 @@ export default function AgendaProPage() {
           <div className="flex items-center justify-center py-10">
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
           </div>
+        ) : viewMode === 'day' ? (
+          <>
+            <AgendaProDaySchedule
+              providers={providers.filter(
+                (provider) =>
+                  (!filterLocationId || String(provider.location_id) === filterLocationId) &&
+                  (!filterProviderId || String(provider.id) === filterProviderId),
+              )}
+              bookings={bookingsForSelectedDay}
+              statusColors={statusColors}
+              selectedBookingId={selectedBooking?.id ?? null}
+              onSelectBooking={(booking, element) => {
+                setSelectedBooking(bookingsForSelectedDay.find((b) => b.id === booking.id) ?? null);
+                setPopoverAnchor(element);
+              }}
+            />
+            {selectedBooking && popoverAnchor ? (
+              <AgendaProBookingPopover
+                booking={selectedBooking}
+                anchor={popoverAnchor}
+                statusColors={statusColors}
+                onClose={() => { setSelectedBooking(null); setPopoverAnchor(null); }}
+                onStatusChanged={(bookingId, _statusId, newStatusLabel) => {
+                  setBookings((prev) => prev.map((b) => (b.id === bookingId ? { ...b, status: newStatusLabel } : b)));
+                  setSelectedBooking((prev) => (prev && prev.id === bookingId ? { ...prev, status: newStatusLabel } : prev));
+                }}
+              />
+            ) : null}
+          </>
         ) : viewMode === 'calendar' ? (
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
             <AgendaProMonthCalendar

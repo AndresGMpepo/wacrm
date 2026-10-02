@@ -90,23 +90,36 @@ El aviso a recepción llega como notificación dentro de NexoOmni (campana
 de notificaciones) y, si configuraste un teléfono, también por
 WhatsApp.
 
-### 4. Vista de calendario y colores por estado
+### 4. Vista de calendario por día y colores por estado
 
-El menú **AgendaPro** muestra un calendario mensual (no una lista),
-igual que el calendario de AgendaPro: cada reserva aparece como un
-bloque de color en su día, según su estado. Haz clic en cualquier día
-para ver el detalle completo a un lado.
+El menú **AgendaPro** se ve como el calendario de AgendaPro: una vista
+de **día** con una columna por prestador, donde cada reserva aparece
+como un bloque de color en su horario real. También hay vista de
+**Mes** y de **Lista**. Haz clic en cualquier reserva para ver el
+detalle (cliente, servicio, horario, teléfono con acceso directo a
+WhatsApp, correo, comentario interno) y para **cambiar su estado** con
+un clic, igual que en AgendaPro.
 
-Como AgendaPro no comparte un código de colores fijo por su API, cada
-estado arranca con un color automático (siempre el mismo para el mismo
-estado, para que sea consistente). Para que coincidan exactamente con
-los que usas en tu AgendaPro:
+Los colores vienen precargados con los seis estados de AgendaPro y el
+código de colores que ya usas:
 
-1. Ve a **Configuración → AgendaPro → "Colores del calendario por
-   estado"**.
-2. Elige el color que quieras para cada estado que veas en la lista
-   (se sugieren automáticamente a partir de tus reservas sincronizadas).
-3. Si falta algún estado, agrégalo escribiendo su nombre exacto.
+| Color | Estado (AgendaPro) |
+|---|---|
+| 🔵 Azul | Reservado |
+| 🟡 Amarillo | Confirmado (el cliente confirmó) |
+| 🌸 Rosa | Asiste |
+| 🟢 Verde | En espera |
+| 🔴 Rojo | Pendiente |
+| 🔴 Rojo claro | No asiste |
+
+Puedes ajustar cualquiera de estos colores, o agregar uno nuevo, desde
+**Configuración → AgendaPro → "Colores del calendario por estado"**.
+
+> **Nota:** cambiar el estado de una reserva desde NexoOmni no permite
+> marcarla como "Cancelada" — AgendaPro reserva eso a un flujo aparte.
+> Además, si la propia política de edición de AgendaPro restringe el
+> cambio (por ejemplo, por estar muy cerca de la hora de la cita),
+> AgendaPro rechaza el cambio y NexoOmni te lo muestra como error.
 
 ## Preguntas frecuentes
 

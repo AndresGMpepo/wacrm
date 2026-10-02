@@ -7,17 +7,17 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { STATUS_COLOR_PALETTE, colorForStatus, normalizeStatusKey } from '@/lib/agendapro/status-colors';
+import { STATUS_COLOR_PALETTE, AGENDAPRO_STATUS_OPTIONS, colorForStatus, normalizeStatusKey } from '@/lib/agendapro/status-colors';
 
 type ApiResponse = { colors: Record<string, string>; suggested_statuses: string[]; error?: string };
 
 /**
- * Lets an account override the calendar's deterministic default color
- * for any AgendaPro status (see status-colors.ts for why there's no
- * hardcoded status→color mapping — AgendaPro's status_name values
- * aren't a documented fixed set). Pre-fills suggestions from statuses
- * actually seen in synced bookings, but also accepts a free-text status
- * for anything the local cache hasn't seen yet.
+ * Lets an account override the calendar's default color for any
+ * AgendaPro status. AgendaPro's six documented statuses (Reservado,
+ * Confirmado, Asiste, En Espera, Pendiente, No Asiste) are always
+ * listed, pre-filled with this account's own real color code; any
+ * other status actually seen in synced bookings (or typed in free text)
+ * can be added too, for a custom status configured in their AgendaPro panel.
  */
 export function AgendaProStatusColors() {
   const [loading, setLoading] = useState(true);
@@ -37,10 +37,15 @@ export function AgendaProStatusColors() {
       const payload = (await response.json()) as ApiResponse;
       if (!response.ok) throw new Error(payload.error || 'No se pudieron cargar los colores.');
       setColors(payload.colors);
-      // Union of already-configured keys and suggestions seen in bookings,
-      // so a status that was overridden but later disappears from the
-      // cache doesn't vanish from the list.
-      const keys = new Set([...payload.suggested_statuses, ...Object.keys(payload.colors)]);
+      // Union of AgendaPro's six known statuses, whatever's already
+      // configured, and anything seen in synced bookings — so a status
+      // that was overridden but later disappears from the cache doesn't
+      // vanish from the list.
+      const keys = new Set([
+        ...AGENDAPRO_STATUS_OPTIONS.map((option) => option.label),
+        ...payload.suggested_statuses,
+        ...Object.keys(payload.colors),
+      ]);
       setStatuses(Array.from(keys).sort());
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'No se pudieron cargar los colores.');
@@ -111,9 +116,9 @@ export function AgendaProStatusColors() {
           Colores del calendario por estado
         </CardTitle>
         <CardDescription>
-          AgendaPro no comparte un código de colores fijo por API, así que cada estado arranca con un color
-          automático (siempre el mismo para el mismo estado). Ajusta aquí el de cualquier estado para que
-          coincida con el que usas en AgendaPro.
+          Los seis estados de AgendaPro ya vienen precargados con los colores que usas actualmente
+          (Reservado/azul, Confirmado/amarillo, Asiste/rosa, En espera/verde, Pendiente/rojo, No asiste/rojo
+          claro). Ajusta cualquiera si cambia, o agrega un estado personalizado que hayas creado en AgendaPro.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">

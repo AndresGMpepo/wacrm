@@ -1,20 +1,47 @@
 // ============================================================
 // Status → color for the AgendaPro calendar.
 //
-// AgendaPro's own `status_name` values are plain text with no
-// documented, fixed set (confirmed from src/lib/agendapro/server.ts —
-// only `status_id`/`status_name` as opaque fields, no enum ever
-// confirmed from AgendaPro's docs). Rather than guess specific
-// strings and risk silently mismatching a tenant's real AgendaPro
-// setup, every status gets a *stable* default color derived from its
-// own text (same status always renders the same color, even
-// unconfigured) — and an account can override any specific status to
-// match their real AgendaPro exactly from Settings → AgendaPro →
-// "Colores por estado" once they've checked it.
+// AgendaPro's "Agendapro Public V1" (the product this integration
+// targets — see src/lib/agendapro/server.ts) documents a fixed
+// status_id enum for a booking's editable (non-cancelled) states —
+// confirmed from developers.agendapro.com/v1.0/reference/editar-una-reserva:
+//   1 Reservado · 2 Confirmado · 3 Asiste · 6 No Asiste · 7 En Espera · 8 Pendiente
+// DEFAULT_STATUS_COLORS below matches this account's own real color
+// code (confirmed with the client, not guessed): azul=Reservado,
+// amarillo=Confirmado, rosa=Asiste, verde=En Espera, rojo=Pendiente
+// (repurposed in-house for "cita especial" — domicilio/paciente que se
+// agenda solo/masaje — same status_id, just their own business
+// meaning), rojo claro=No Asiste.
+//
+// Any status this tenant's AgendaPro returns that ISN'T one of these
+// six (a custom status added in their AgendaPro panel, for instance)
+// still gets a *stable* default color derived from its own text, and
+// any status — known or not — can be overridden from Settings →
+// AgendaPro → "Colores por estado" to match their real AgendaPro
+// exactly.
 // ============================================================
 
+/** The only non-cancelled status_id values PATCH /bookings/{id} accepts
+ *  (cancelling a booking is a separate, undocumented-here endpoint — not
+ *  implemented by this integration). */
+export const AGENDAPRO_STATUS_OPTIONS = [
+  { id: 1, label: 'Reservado', color: '#3b82f6' },
+  { id: 2, label: 'Confirmado', color: '#eab308' },
+  { id: 3, label: 'Asiste', color: '#ec4899' },
+  { id: 7, label: 'En Espera', color: '#22c55e' },
+  { id: 8, label: 'Pendiente', color: '#ef4444' },
+  { id: 6, label: 'No Asiste', color: '#fca5a5' },
+] as const;
+
+/** Keyed by the same normalized text colorForStatus looks up — built
+ *  from AGENDAPRO_STATUS_OPTIONS so the two can never drift apart. */
+const DEFAULT_STATUS_COLORS: Record<string, string> = Object.fromEntries(
+  AGENDAPRO_STATUS_OPTIONS.map((option) => [option.label.toLowerCase(), option.color]),
+)
+
 /** Ten visually distinct, accessible swatches — shown as the palette
- *  in the status-colors picker and used for the deterministic default. */
+ *  in the status-colors picker and used for the deterministic default
+ *  fallback for a status outside the known six above. */
 export const STATUS_COLOR_PALETTE = [
   '#10b981', // emerald
   '#f59e0b', // amber
@@ -46,10 +73,13 @@ function hashString(value: string): number {
 }
 
 /** The color to render for a given AgendaPro status_name: the account's
- *  own override if one is saved, otherwise a stable deterministic default. */
+ *  own override first, then the known default for AgendaPro's six
+ *  documented statuses, then a stable deterministic fallback for
+ *  anything else (e.g. a custom status added in their AgendaPro panel). */
 export function colorForStatus(status: string | null | undefined, overrides: Record<string, string>): string {
   const key = normalizeStatusKey(status || 'sin estado');
   if (overrides[key]) return overrides[key];
+  if (DEFAULT_STATUS_COLORS[key]) return DEFAULT_STATUS_COLORS[key];
   return STATUS_COLOR_PALETTE[hashString(key) % STATUS_COLOR_PALETTE.length];
 }
 
