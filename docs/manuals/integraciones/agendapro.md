@@ -120,6 +120,17 @@ código de colores que ya usas:
 Puedes ajustar cualquiera de estos colores, o agregar uno nuevo, desde
 **Configuración → AgendaPro → "Colores del calendario por estado"**.
 
+Si un prestador tiene **varias sesiones al mismo tiempo** (por ejemplo,
+una terapeuta con 2 o 3 pacientes en paralelo), la vista de día ya no
+las encima: las muestra una junto a otra, repartiendo el ancho de la
+columna entre ellas, igual que en AgendaPro. También aparece un bloque
+**gris con rayas** en los horarios en los que el prestador no trabaja
+ese día (fuera de su turno) y en el hueco entre dos turnos del mismo
+día (su comida) — esto se calcula a partir del horario real que cada
+prestador tiene configurado en AgendaPro (**Prestadores → horario**),
+así que para que se vea correctamente ese horario debe estar
+actualizado allá.
+
 > **Nota:** cambiar el estado de una reserva desde NexoOmni no permite
 > marcarla como "Cancelada" — AgendaPro reserva eso a un flujo aparte.
 > Además, si la propia política de edición de AgendaPro restringe el

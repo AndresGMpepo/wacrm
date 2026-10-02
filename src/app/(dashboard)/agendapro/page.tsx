@@ -13,7 +13,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { AgendaProMonthCalendar } from '@/components/agendapro/month-calendar';
-import { AgendaProDaySchedule } from '@/components/agendapro/day-schedule';
+import { AgendaProDaySchedule, type ProviderWorkingHours } from '@/components/agendapro/day-schedule';
 import { AgendaProBookingPopover } from '@/components/agendapro/booking-popover';
 import { colorForStatus } from '@/lib/agendapro/status-colors';
 import { parseAgendaProTime } from '@/lib/agendapro/time';
@@ -66,6 +66,7 @@ export default function AgendaProPage() {
   const [month, setMonth] = useState(() => startOfMonth(new Date()));
   const [selectedDate, setSelectedDate] = useState(todayISODate());
   const [statusColors, setStatusColors] = useState<Record<string, string>>({});
+  const [providerSchedules, setProviderSchedules] = useState<Record<number, ProviderWorkingHours[]>>({});
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
   const [popoverAnchor, setPopoverAnchor] = useState<HTMLElement | null>(null);
 
@@ -258,6 +259,42 @@ export default function AgendaProPage() {
         .sort((a, b) => a.start.localeCompare(b.start)),
     [bookings, selectedDate],
   );
+
+  const visibleProviders = useMemo(
+    () =>
+      providers.filter(
+        (provider) =>
+          (!filterLocationId || String(provider.location_id) === filterLocationId) &&
+          (!filterProviderId || String(provider.id) === filterProviderId),
+      ),
+    [providers, filterLocationId, filterProviderId],
+  );
+
+  // Working-hours schedules (used to render "profesional no disponible" /
+  // lunch-break blocks in the day view) only need to be fetched for the
+  // providers currently visible, and only once per provider — cache by id
+  // so switching days/filters doesn't keep re-fetching the same schedule.
+  useEffect(() => {
+    if (viewMode !== 'day' || visibleProviders.length === 0) return;
+    const missingIds = visibleProviders.map((p) => p.id).filter((id) => !(id in providerSchedules));
+    if (missingIds.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await fetch(`/api/agendapro/provider-schedules?provider_ids=${missingIds.join(',')}`);
+        if (!response.ok) return;
+        const data = await response.json();
+        if (!cancelled && data.schedules) {
+          setProviderSchedules((prev) => ({ ...prev, ...data.schedules }));
+        }
+      } catch {
+        // Non-fatal — the day view just won't show unavailable-hours blocks.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [viewMode, visibleProviders, providerSchedules]);
 
   if (loading) {
     return (
@@ -479,11 +516,9 @@ export default function AgendaProPage() {
         ) : viewMode === 'day' ? (
           <>
             <AgendaProDaySchedule
-              providers={providers.filter(
-                (provider) =>
-                  (!filterLocationId || String(provider.location_id) === filterLocationId) &&
-                  (!filterProviderId || String(provider.id) === filterProviderId),
-              )}
+              date={new Date(`${selectedDate}T00:00:00`)}
+              providers={visibleProviders}
+              providerSchedules={providerSchedules}
               bookings={bookingsForSelectedDay}
               statusColors={statusColors}
               selectedBookingId={selectedBooking?.id ?? null}

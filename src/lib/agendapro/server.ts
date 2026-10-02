@@ -375,6 +375,23 @@ export async function listAgendaProProviders(accountId: string) {
   return agendaProFetch(accountId, '/service_providers')
 }
 
+/** `GET /service_providers/{id}` — confirmed from
+ *  developers.agendapro.com/v1.0/reference/ver-un-prestador. `times` is
+ *  this provider's real weekly working-hours schedule (one entry per
+ *  open block; a provider with a lunch break can have two entries for
+ *  the same day — e.g. 09:00-13:00 and 14:00-18:00 — there's no
+ *  separate "break" field, so a gap between entries on the same day
+ *  IS the break). A weekday absent from `times` means closed all day.
+ *  Used by the calendar's day view to render "Profesional no
+ *  disponible" blocks instead of guessing a single fixed shift. */
+export async function getAgendaProProvider(accountId: string, providerId: number): Promise<{
+  id: number; name: string; location_id: number
+  times: { day: number; day_name: string; open: string; close: string }[]
+}> {
+  const body = await agendaProFetch(accountId, `/service_providers/${providerId}`)
+  return body as { id: number; name: string; location_id: number; times: { day: number; day_name: string; open: string; close: string }[] }
+}
+
 // ------------------------------------------------------------
 // Payments ("Pagos") — V1 records an ALREADY-COLLECTED payment (cash/card/
 // etc. via `transactions`); unlike Connect v3 there is no "payment
