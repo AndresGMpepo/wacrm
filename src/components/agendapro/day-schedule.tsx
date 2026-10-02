@@ -4,6 +4,7 @@ import { useMemo } from 'react';
 import { format } from 'date-fns';
 
 import { colorForStatus } from '@/lib/agendapro/status-colors';
+import { parseAgendaProTime } from '@/lib/agendapro/time';
 
 export type ScheduleBooking = {
   id: number;
@@ -25,7 +26,7 @@ function clientLabel(client: ScheduleBooking['client']) {
 }
 
 function minutesSinceMidnight(iso: string) {
-  const date = new Date(iso);
+  const date = parseAgendaProTime(iso);
   return date.getHours() * 60 + date.getMinutes();
 }
 
@@ -128,7 +129,7 @@ export function AgendaProDaySchedule({
                   >
                     <div className="truncate font-semibold">{clientLabel(booking.client)}</div>
                     <div className="truncate opacity-90">
-                      {format(new Date(booking.start), 'HH:mm')} · {booking.service}
+                      {format(parseAgendaProTime(booking.start), 'HH:mm')} · {booking.service}
                     </div>
                   </button>
                 );

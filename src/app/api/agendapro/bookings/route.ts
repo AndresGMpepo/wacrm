@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 
 import { requireAccountModule } from '@/lib/account/modules'
 import { toErrorResponse } from '@/lib/auth/account'
-import { createAgendaProBooking, listAgendaProBookings } from '@/lib/agendapro/server'
+import { createAgendaProBooking, listAllAgendaProBookings } from '@/lib/agendapro/server'
 
 export async function GET(request: Request) {
   try {
@@ -18,14 +18,16 @@ export async function GET(request: Request) {
     const locationId = url.searchParams.get('location_id')
     const serviceId = url.searchParams.get('service_id')
     const providerId = url.searchParams.get('provider_id')
-    const result = await listAgendaProBookings(accountId, {
+    // Always the full range, not one page — this route only backs our own
+    // calendar views (day/month/list), which need every booking in the
+    // range or they silently look emptier than AgendaPro's own calendar.
+    const result = await listAllAgendaProBookings(accountId, {
       clients,
       locations: locationId ? [Number(locationId)] : undefined,
       services: serviceId ? [Number(serviceId)] : undefined,
       providers: providerId ? [Number(providerId)] : undefined,
       range_from: url.searchParams.get('range_from') || undefined,
       range_to: url.searchParams.get('range_to') || undefined,
-      page: url.searchParams.get('page') ? Number(url.searchParams.get('page')) : undefined,
     })
     return NextResponse.json(result)
   } catch (error) { return toErrorResponse(error) }

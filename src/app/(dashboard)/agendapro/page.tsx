@@ -16,6 +16,7 @@ import { AgendaProMonthCalendar } from '@/components/agendapro/month-calendar';
 import { AgendaProDaySchedule } from '@/components/agendapro/day-schedule';
 import { AgendaProBookingPopover } from '@/components/agendapro/booking-popover';
 import { colorForStatus } from '@/lib/agendapro/status-colors';
+import { parseAgendaProTime } from '@/lib/agendapro/time';
 
 type Location = { id: number; name: string };
 type Service = { id: number; name: string; duration: number };
@@ -38,7 +39,7 @@ type Booking = {
 type AvailableHour = { start_time: string; end_time: string; provider_id: number; provider_name: string; start_block: string };
 
 function formatDateTime(value: string) {
-  return new Intl.DateTimeFormat('es-MX', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value));
+  return new Intl.DateTimeFormat('es-MX', { dateStyle: 'medium', timeStyle: 'short' }).format(parseAgendaProTime(value));
 }
 
 function todayISODate() {
@@ -112,13 +113,22 @@ export default function AgendaProPage() {
       if (filterLocationId) params.set('location_id', filterLocationId);
       if (filterServiceId) params.set('service_id', filterServiceId);
       if (filterProviderId) params.set('provider_id', filterProviderId);
-      // The grid shows a few days of the adjacent months too, so the
-      // fetched range covers the whole visible 6-week grid, not just the
-      // calendar month itself — otherwise those edge days would look empty.
-      const gridStart = startOfWeek(startOfMonth(month), { weekStartsOn: 1 });
-      const gridEnd = endOfWeek(endOfMonth(month), { weekStartsOn: 1 });
-      params.set('range_from', format(gridStart, 'yyyy-MM-dd'));
-      params.set('range_to', format(gridEnd, 'yyyy-MM-dd'));
+      if (viewMode === 'day') {
+        // Narrow to just the selected day — the day view never needs
+        // the rest of the month, and keeping the range small avoids
+        // walking dozens of AgendaPro's own paginated (30/page) results
+        // just to throw most of them away.
+        params.set('range_from', selectedDate);
+        params.set('range_to', selectedDate);
+      } else {
+        // The grid shows a few days of the adjacent months too, so the
+        // fetched range covers the whole visible 6-week grid, not just the
+        // calendar month itself — otherwise those edge days would look empty.
+        const gridStart = startOfWeek(startOfMonth(month), { weekStartsOn: 1 });
+        const gridEnd = endOfWeek(endOfMonth(month), { weekStartsOn: 1 });
+        params.set('range_from', format(gridStart, 'yyyy-MM-dd'));
+        params.set('range_to', format(gridEnd, 'yyyy-MM-dd'));
+      }
       const response = await fetch(`/api/agendapro/bookings?${params.toString()}`, { cache: 'no-store' });
       const payload = (await response.json().catch(() => null)) as Booking[] | { error?: string } | null;
       if (!response.ok) throw new Error((payload as { error?: string })?.error || 'No se pudieron cargar las reservas.');
@@ -128,7 +138,7 @@ export default function AgendaProPage() {
     } finally {
       setLoadingBookings(false);
     }
-  }, [connected, filterLocationId, filterServiceId, filterProviderId, month]);
+  }, [connected, filterLocationId, filterServiceId, filterProviderId, viewMode, month, selectedDate]);
 
   const loadStatusColors = useCallback(async () => {
     try {

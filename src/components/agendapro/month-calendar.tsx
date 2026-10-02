@@ -19,6 +19,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { colorForStatus } from '@/lib/agendapro/status-colors';
+import { parseAgendaProTime } from '@/lib/agendapro/time';
 
 export type CalendarBooking = {
   id: number;
@@ -132,9 +133,9 @@ export function AgendaProMonthCalendar({
                     key={booking.id}
                     className="truncate rounded px-1 py-0.5 text-[10px] font-medium text-white"
                     style={{ backgroundColor: colorForStatus(booking.status, statusColors) }}
-                    title={`${format(new Date(booking.start), 'HH:mm')} · ${clientLabel(booking.client)} · ${booking.service}`}
+                    title={`${format(parseAgendaProTime(booking.start), 'HH:mm')} · ${clientLabel(booking.client)} · ${booking.service}`}
                   >
-                    {format(new Date(booking.start), 'HH:mm')} {clientLabel(booking.client)}
+                    {format(parseAgendaProTime(booking.start), 'HH:mm')} {clientLabel(booking.client)}
                   </div>
                 ))}
                 {overflow > 0 ? (
@@ -150,5 +151,5 @@ export function AgendaProMonthCalendar({
 }
 
 export function isSameCalendarDay(isoA: string, isoB: string) {
-  return isSameDay(new Date(isoA), new Date(isoB));
+  return isSameDay(parseAgendaProTime(isoA), parseAgendaProTime(isoB));
 }

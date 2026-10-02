@@ -41,6 +41,11 @@ NexoOmni (ver [Agenda de citas](../pipelines-y-citas/agenda-de-citas.md)).
    **Configuraciones → API Pública → Webhooks** ("Crear Webhook"). Esto
    mantiene sincronizadas las reservas, aunque se creen directamente
    desde el panel de AgendaPro.
+4. Si tus locales **no** operan en Ciudad de México, ajusta la zona
+   horaria en **Configuración → AgendaPro → "Zona horaria de
+   AgendaPro"** — AgendaPro reporta la hora de cada cita sin indicar
+   correctamente la zona horaria, así que NexoOmni necesita saber la
+   zona real para mostrar y registrar la hora correcta.
 
 ### 2. Crear las plantillas de WhatsApp (requerido por Meta)
 
@@ -122,6 +127,13 @@ Puedes ajustar cualquiera de estos colores, o agregar uno nuevo, desde
 > AgendaPro rechaza el cambio y NexoOmni te lo muestra como error.
 
 ## Preguntas frecuentes
+
+**¿Por qué no veía todas mis reservas del día?**
+Si tienes muchos profesionales con agenda llena, es posible que
+NexoOmni mostrara solo una parte — AgendaPro entrega las reservas en
+páginas de 30, y la versión anterior solo pedía la primera. Esto ya
+está corregido: NexoOmni ahora pide todas las páginas necesarias para
+el rango que estás viendo.
 
 **¿Qué pasa si el cliente responde algo distinto a SI o NO?**
 NexoOmni solo reconoce variantes directas (sí, confirmo, no, cancelar,

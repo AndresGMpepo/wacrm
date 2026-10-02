@@ -3,6 +3,8 @@ import { createClient as createAdminClient } from '@supabase/supabase-js'
 import crypto from 'node:crypto'
 
 import { recordAgendaProMemoryEvent } from '@/lib/agendapro/memory'
+import { correctAgendaProInstant } from '@/lib/agendapro/time'
+import { getAgendaProTimezone } from '@/lib/agendapro/server'
 import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe'
 import { resolveAuditUserId } from '@/lib/api/v1/contacts'
 
@@ -101,6 +103,9 @@ async function upsertAgendaProBooking(db: ReturnType<typeof admin>, accountId: s
   // does carry one, else leave unlinked (best-effort cache, not guaranteed).
   const agendaproClientId = id(client.id)
   const contactId = await linkedContactId(db, accountId, agendaproClientId)
+  const timezone = await getAgendaProTimezone(db, accountId)
+  const rawStart = text(booking.start)
+  const rawEnd = text(booking.end)
   const { error } = await db.from('agendapro_bookings').upsert({
     account_id: accountId,
     contact_id: contactId,
@@ -110,8 +115,11 @@ async function upsertAgendaProBooking(db: ReturnType<typeof admin>, accountId: s
     provider_name: text(booking.service_provider),
     location_id: id(booking.location_id),
     location_name: text(booking.location),
-    start_time: text(booking.start),
-    end_time: text(booking.end),
+    // AgendaPro's start/end carry a "Z" but are actually the clinic's own
+    // local wall-clock time (see src/lib/agendapro/time.ts) — corrected
+    // here before this timestamptz column ever sees the raw value.
+    start_time: rawStart ? correctAgendaProInstant(rawStart, timezone) : null,
+    end_time: rawEnd ? correctAgendaProInstant(rawEnd, timezone) : null,
     status_id: typeof booking.status_id === 'number' ? booking.status_id : null,
     status_name: text(booking.status),
     price: booking.price != null ? String(booking.price) : null,

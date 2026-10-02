@@ -211,6 +211,33 @@ export async function saveAgendaProStatusColors(accountId: string, colors: Recor
   if (error) throw error
 }
 
+// ------------------------------------------------------------
+// Timezone (migration 136) — see src/lib/agendapro/time.ts for why
+// this is needed at all (AgendaPro mislabels local time as UTC).
+// ------------------------------------------------------------
+
+export async function getAgendaProTimezone(db: SupabaseClient, accountId: string): Promise<string> {
+  const { data, error } = await db.from('agendapro_configs').select('timezone').eq('account_id', accountId).maybeSingle()
+  if (error) throw error
+  return data?.timezone || 'America/Mexico_City'
+}
+
+export async function saveAgendaProTimezone(accountId: string, timezone: string) {
+  // Intl throws RangeError on an unrecognized IANA zone — the cheapest
+  // validation available without a hardcoded zone list.
+  try {
+    Intl.DateTimeFormat(undefined, { timeZone: timezone })
+  } catch {
+    throw new Error(`"${timezone}" no es una zona horaria IANA válida (ej. America/Mexico_City).`)
+  }
+  const db = admin()
+  const { error } = await db.from('agendapro_configs').update({
+    timezone,
+    updated_at: new Date().toISOString(),
+  }).eq('account_id', accountId)
+  if (error) throw error
+}
+
 /** Validates the credentials against AgendaPro (a cheap `GET /locations` call) before persisting them. */
 export async function saveAgendaProConfig(accountId: string, apiUser: string, apiPassword: string, userId: string) {
   const db = admin()
@@ -252,13 +279,37 @@ export async function disconnectAgendaPro(accountId: string) {
 // Bookings ("Reservas")
 // ------------------------------------------------------------
 
-export async function listAgendaProBookings(accountId: string, params: {
+export type AgendaProBookingListParams = {
   range_from?: string; range_to?: string; created_from?: string; created_to?: string
   updated_from?: string; updated_to?: string
   statuses?: number[]; services?: number[]; providers?: number[]; locations?: number[]; clients?: number[]
   page?: number
-}) {
+}
+
+export async function listAgendaProBookings(accountId: string, params: AgendaProBookingListParams) {
   return agendaProFetch(accountId, `/bookings${query(params)}`)
+}
+
+/** `GET /bookings` paginates 30 at a time (confirmed from
+ *  developers.agendapro.com/v1.0/reference/ver-reservas: "Paginado de
+ *  a 30"), with no total-count/next-page field in the response — just
+ *  a flat array. A single clinic day with several providers can easily
+ *  have 40+ bookings, so anything that needs "every booking in this
+ *  range" (the calendar views) MUST walk every page or it silently
+ *  drops most of them. Stops once a page comes back with fewer than 30
+ *  rows (the last page) or MAX_PAGES is hit (a hard safety cap, not a
+ *  real limit AgendaPro documents). */
+export async function listAllAgendaProBookings(accountId: string, params: Omit<AgendaProBookingListParams, 'page'>) {
+  const PAGE_SIZE = 30
+  const MAX_PAGES = 30
+  const all: Record<string, unknown>[] = []
+  for (let page = 1; page <= MAX_PAGES; page++) {
+    const batch = await listAgendaProBookings(accountId, { ...params, page })
+    if (!Array.isArray(batch) || batch.length === 0) break
+    all.push(...(batch as Record<string, unknown>[]))
+    if (batch.length < PAGE_SIZE) break
+  }
+  return all
 }
 
 export async function createAgendaProBooking(accountId: string, body: {

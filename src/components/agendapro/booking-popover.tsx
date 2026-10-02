@@ -1,13 +1,15 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { Loader2, Mail, MessageCircle, Phone, StickyNote, X } from 'lucide-react';
+import { Loader2, Mail, MessageCircle, PhoneCall, StickyNote, X } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { AGENDAPRO_STATUS_OPTIONS, colorForStatus, normalizeStatusKey } from '@/lib/agendapro/status-colors';
-import { sanitizePhoneForMeta } from '@/lib/whatsapp/phone-utils';
+import { useTelephony } from '@/components/telephony/telephony-provider';
+import { parseAgendaProTime } from '@/lib/agendapro/time';
 
 export type PopoverBooking = {
   id: number;
@@ -29,6 +31,13 @@ export type PopoverBooking = {
  * Status is changed via PATCH /api/agendapro/bookings/{id}, confirmed
  * against developers.agendapro.com/v1.0 (see that route for why only
  * these six status ids are offered — "cancelado" isn't one of them).
+ *
+ * The phone number calls out through NexPhone (the account's own
+ * telephony, not the device's dialer), and "Hablar por WhatsApp" opens
+ * the Inbox conversation inside NexoOmni (find-or-create) instead of a
+ * `wa.me` link — a `wa.me` link would hand the chat off to the agent's
+ * personal WhatsApp app, completely outside NexoOmni (no shared
+ * inbox record, no template, no handoff to another agent).
  */
 export function AgendaProBookingPopover({
   booking,
@@ -43,8 +52,14 @@ export function AgendaProBookingPopover({
   onClose: () => void;
   onStatusChanged: (bookingId: number, newStatusId: number, newStatusLabel: string) => void;
 }) {
+  const router = useRouter();
+  const telephony = useTelephony();
   const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
   const [updatingStatus, setUpdatingStatus] = useState<number | null>(null);
+  const [openingConversation, setOpeningConversation] = useState(false);
+
+  const clientName = booking.client ? `${booking.client.first_name} ${booking.client.last_name ?? ''}`.trim() : 'Sin cliente';
+  const clientPhone = booking.client?.phone ?? null;
 
   useEffect(() => {
     const rect = anchor.getBoundingClientRect();
@@ -74,8 +89,24 @@ export function AgendaProBookingPopover({
     }
   }
 
-  const clientName = booking.client ? `${booking.client.first_name} ${booking.client.last_name ?? ''}`.trim() : 'Sin cliente';
-  const waLink = booking.client?.phone ? `https://wa.me/${sanitizePhoneForMeta(booking.client.phone)}` : null;
+  async function openWhatsAppInInbox() {
+    if (!clientPhone) return;
+    setOpeningConversation(true);
+    try {
+      const response = await fetch('/api/agendapro/open-conversation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: clientPhone, name: clientName }),
+      });
+      const payload = (await response.json().catch(() => null)) as { conversation_id?: string; error?: string } | null;
+      if (!response.ok || !payload?.conversation_id) throw new Error(payload?.error || 'No se pudo abrir la conversación.');
+      router.push(`/inbox?c=${payload.conversation_id}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'No se pudo abrir la conversación.');
+    } finally {
+      setOpeningConversation(false);
+    }
+  }
 
   return (
     <>
@@ -93,21 +124,32 @@ export function AgendaProBookingPopover({
         </div>
         <p className="text-muted-foreground">{booking.service}</p>
         <p className="mt-1 text-xs text-muted-foreground">
-          {format(new Date(booking.start), "EEEE dd 'de' MMMM", { locale: es })} · {format(new Date(booking.start), 'HH:mm')} a{' '}
-          {format(new Date(booking.end), 'HH:mm')} hrs
+          {format(parseAgendaProTime(booking.start), "EEEE dd 'de' MMMM", { locale: es })} · {format(parseAgendaProTime(booking.start), 'HH:mm')} a{' '}
+          {format(parseAgendaProTime(booking.end), 'HH:mm')} hrs
         </p>
         <p className="mt-2 text-xs text-muted-foreground">Se atenderá con: {booking.service_provider}</p>
 
-        {booking.client?.phone ? (
-          <div className="mt-2 flex items-center gap-2 text-xs">
-            <Phone className="h-3.5 w-3.5 text-muted-foreground" />
-            <span>{booking.client.phone}</span>
-            {waLink ? (
-              <a href={waLink} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-emerald-600 hover:underline dark:text-emerald-400">
-                <MessageCircle className="h-3.5 w-3.5" />
-                Hablar por WhatsApp
-              </a>
-            ) : null}
+        {clientPhone ? (
+          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+            <button
+              type="button"
+              onClick={() => void telephony.call(clientPhone)}
+              disabled={!telephony.connected}
+              title={telephony.connected ? 'Llamar por NexPhone' : 'NexPhone no está conectado'}
+              className="inline-flex items-center gap-1 text-foreground transition-colors hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <PhoneCall className="h-3.5 w-3.5" />
+              {clientPhone}
+            </button>
+            <button
+              type="button"
+              onClick={() => void openWhatsAppInInbox()}
+              disabled={openingConversation}
+              className="inline-flex items-center gap-1 text-emerald-600 hover:underline disabled:opacity-50 dark:text-emerald-400"
+            >
+              {openingConversation ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <MessageCircle className="h-3.5 w-3.5" />}
+              Hablar por WhatsApp
+            </button>
           </div>
         ) : null}
         {booking.client?.email ? (
