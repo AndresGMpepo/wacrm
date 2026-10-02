@@ -55,7 +55,7 @@ export async function proxy(request: NextRequest) {
     // (reports, broadcasts, automations, flows, supervision, AI agents,
     // settings, dashboard, call transcriptions) is owner/admin territory.
     // Keep this list in sync with AGENT_ALLOWED_PATHS in sidebar.tsx.
-    const AGENT_ALLOWED_PATHS = ['/inbox', '/notifications', '/call-tasks', '/contacts', '/pipelines', '/appointments']
+    const AGENT_ALLOWED_PATHS = ['/inbox', '/notifications', '/call-tasks', '/contacts', '/pipelines', '/appointments', '/agendapro']
     const isAgentAllowed = AGENT_ALLOWED_PATHS.some((path) => request.nextUrl.pathname.startsWith(path))
     if (!isAgentAllowed) {
       const { data: profileRows } = await supabase.from('profiles').select('account_role').eq('user_id', user.id).maybeSingle()

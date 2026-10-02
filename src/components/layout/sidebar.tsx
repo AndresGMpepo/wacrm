@@ -12,6 +12,7 @@ import {
   Bell,
   Brain,
   Building2,
+  CalendarClock,
   ChartNoAxesCombined,
   Bot,
   CalendarDays,
@@ -106,14 +107,14 @@ interface NavItem {
   beta?: boolean;
   /** Executive reports aggregate the whole account, so they are for admins. */
   adminOnly?: boolean;
-  module?: 'pipelines' | 'appointments';
+  module?: 'pipelines' | 'appointments' | 'agendapro';
 }
 
 // The agent role only gets an operational subset — everything else
 // (reports, broadcasts, automations, flows, supervision, AI agents,
 // call transcriptions, dashboard) is owner/admin/supervisor territory.
 // Keep in sync with the server-side guard in src/proxy.ts.
-const AGENT_ALLOWED_PATHS = ['/inbox', '/notifications', '/call-tasks', '/contacts', '/pipelines', '/appointments'];
+const AGENT_ALLOWED_PATHS = ['/inbox', '/notifications', '/call-tasks', '/contacts', '/pipelines', '/appointments', '/agendapro'];
 
 // The supervisor role gets everything an agent does, PLUS these 4 menus
 // with full functionality (Broadcasts, Reports, Call transcriptions,
@@ -130,6 +131,7 @@ const navItems: NavItem[] = [
   { href: "/contacts", labelKey: "contacts", icon: Users },
   { href: "/pipelines", labelKey: "pipelines", icon: GitBranch, module: 'pipelines' },
   { href: "/appointments", labelKey: "appointments", icon: CalendarDays, module: 'appointments' },
+  { href: "/agendapro", labelKey: "agendapro", icon: CalendarClock, module: 'agendapro' },
   { href: "/broadcasts", labelKey: "broadcasts", icon: Radio },
   { href: "/automations", labelKey: "automations", icon: Zap },
   { href: "/reports", labelKey: "reports", icon: ChartNoAxesCombined, adminOnly: true },
