@@ -98,9 +98,25 @@ export function AgendaProBookingPopover({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone: clientPhone, name: clientName }),
       });
-      const payload = (await response.json().catch(() => null)) as { conversation_id?: string; error?: string } | null;
-      if (!response.ok || !payload?.conversation_id) throw new Error(payload?.error || 'No se pudo abrir la conversación.');
-      router.push(`/inbox?c=${payload.conversation_id}`);
+      const payload = (await response.json().catch(() => null)) as
+        | { conversation_id?: string; needs_template?: boolean; contact_id?: string; error?: string }
+        | null;
+      if (!response.ok) throw new Error(payload?.error || 'No se pudo abrir la conversación.');
+      if (payload?.conversation_id) {
+        router.push(`/inbox?c=${payload.conversation_id}`);
+        return;
+      }
+      if (payload?.needs_template && payload.contact_id) {
+        // This account's WhatsApp is Zernio-connected and this cliente
+        // has no thread yet — Zernio (like Meta) requires the opening
+        // message to be an approved template, so we send the agent to
+        // the Contact page's existing "Enviar plantilla" flow instead
+        // of a broken, empty Inbox conversation.
+        toast.info('Este cliente no tiene una conversación de WhatsApp todavía. Envíale una plantilla aprobada para iniciarla.');
+        router.push(`/contacts?contact=${payload.contact_id}`);
+        return;
+      }
+      throw new Error('No se pudo abrir la conversación.');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'No se pudo abrir la conversación.');
     } finally {

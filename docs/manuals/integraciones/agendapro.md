@@ -105,6 +105,15 @@ detalle (cliente, servicio, horario, teléfono con acceso directo a
 WhatsApp, correo, comentario interno) y para **cambiar su estado** con
 un clic, igual que en AgendaPro.
 
+> **"Hablar por WhatsApp" y "Llamar"**: nunca abren tu WhatsApp o
+> marcador personal — "Hablar por WhatsApp" te lleva a la conversación
+> en la Bandeja de entrada de NexoOmni (o, si tu WhatsApp está
+> conectado por Zernio y este cliente nunca ha escrito, a su ficha de
+> contacto para enviarle la plantilla que abre la conversación, como
+> lo exige Meta) y "Llamar" marca por NexPhone. Si ves el error
+> "WhatsApp not configured" sin tener WhatsApp conectado por ningún
+> medio, revisa **Configuración → WhatsApp** o tu conector de Zernio.
+
 Los colores vienen precargados con los seis estados de AgendaPro y el
 código de colores que ya usas:
 

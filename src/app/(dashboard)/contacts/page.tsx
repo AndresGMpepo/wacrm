@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { displayContactPhone } from '@/lib/contacts/contact-identity';
 import { toast } from 'sonner';
@@ -67,11 +68,24 @@ interface ContactWithTags extends Contact {
   tags?: Tag[];
 }
 
+// `useSearchParams` (the `?contact=<id>` deep link below) requires a
+// Suspense boundary or the production build bails to CSR and errors out.
+// Thin wrapper supplies it; the inner component holds all the page state.
 export default function ContactsPage() {
+  return (
+    <Suspense fallback={null}>
+      <ContactsPageInner />
+    </Suspense>
+  );
+}
+
+function ContactsPageInner() {
   const t = useTranslations('Contacts.page');
   const supabase = createClient();
   const canEdit = useCan('send-messages');
   const canEditSettings = useCan('edit-settings');
+  const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [contacts, setContacts] = useState<ContactWithTags[]>([]);
   const [loading, setLoading] = useState(true);
@@ -252,6 +266,20 @@ export default function ContactsPage() {
     setDetailContactId(contactId);
     setDetailOpen(true);
   }
+
+  // Deep link support: other pages (e.g. the AgendaPro calendar's booking
+  // popover, when the account's WhatsApp is only Zernio-connected and
+  // needs a template to cold-start) send the agent here with
+  // `?contact=<id>` to open this contact straight into the "Enviar
+  // plantilla" flow. Strip the param right after so a refresh/back
+  // doesn't reopen the sheet.
+  useEffect(() => {
+    const contactId = searchParams.get('contact');
+    if (!contactId) return;
+    openDetail(contactId);
+    router.replace('/contacts');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   function confirmDelete(contact: Contact) {
     setDeleteTarget(contact);
