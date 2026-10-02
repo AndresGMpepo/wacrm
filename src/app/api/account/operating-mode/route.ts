@@ -4,7 +4,7 @@ import { getCurrentAccount, requireRole, toErrorResponse } from '@/lib/auth/acco
 import { checkRateLimit, RATE_LIMITS, rateLimitResponse } from '@/lib/rate-limit'
 
 const MODES = ['commercial', 'support', 'services', 'hybrid'] as const
-const MODULES = ['pipelines', 'appointments'] as const
+const MODULES = ['pipelines', 'appointments', 'agendapro'] as const
 type OperatingMode = (typeof MODES)[number]
 type AccountModule = (typeof MODULES)[number]
 

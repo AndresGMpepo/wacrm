@@ -11,7 +11,7 @@ import { cn } from '@/lib/utils'
 import { SettingsPanelHead } from './settings-panel-head'
 
 type OperatingMode = 'commercial' | 'support' | 'services' | 'hybrid'
-type AccountModule = 'pipelines' | 'appointments'
+type AccountModule = 'pipelines' | 'appointments' | 'agendapro'
 
 const OPTIONS: { value: OperatingMode; title: string; description: string; icon: typeof BriefcaseBusiness }[] = [
   { value: 'commercial', title: 'Comercial', description: 'Prioriza pipeline, campañas, oportunidades y conversión.', icon: BriefcaseBusiness },
@@ -99,6 +99,10 @@ export function OperatingModeSettings() {
             <label className="flex items-start gap-3 rounded-lg border border-border p-3">
               <input type="checkbox" checked={selectedModules.includes('appointments')} disabled={!canEditSettings || loading || profileLoading} onChange={(event) => setSelectedModules((current) => event.target.checked ? [...current, 'appointments'] : current.filter((module) => module !== 'appointments'))} className="mt-0.5 size-4" />
               <span><span className="block text-sm font-medium">Agenda de citas</span><span className="text-xs text-muted-foreground">Prepara la cuenta para agenda, confirmaciones y futuras integraciones de calendario.</span></span>
+            </label>
+            <label className="flex items-start gap-3 rounded-lg border border-border p-3">
+              <input type="checkbox" checked={selectedModules.includes('agendapro')} disabled={!canEditSettings || loading || profileLoading} onChange={(event) => setSelectedModules((current) => event.target.checked ? [...current, 'agendapro'] : current.filter((module) => module !== 'agendapro'))} className="mt-0.5 size-4" />
+              <span><span className="block text-sm font-medium">AgendaPro</span><span className="text-xs text-muted-foreground">Conecta reservas, clientes y pagos de AgendaPro (independiente de la agenda interna).</span></span>
             </label>
           </div>
           {!canEditSettings ? <p className="text-xs text-muted-foreground">Solo propietarios y administradores pueden cambiar este objetivo.</p> : null}
