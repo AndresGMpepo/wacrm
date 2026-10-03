@@ -11,6 +11,7 @@ import { extractZernioMedia, extractZernioReaction, isZernioPlaceholderName, nor
 import { getZernioParticipantProfile, verifyZernioSignature, type ZernioChannel } from '@/lib/zernio/server'
 import { isValidStatusTransition } from '@/lib/whatsapp/recipient-status-ladder'
 import { flagBroadcastReplyIfAny } from '@/lib/whatsapp/broadcast-reply-flag'
+import { handleAgendaProConfirmationReply } from '@/lib/agendapro/confirmation'
 import type { ChannelType } from '@/types'
 
 export const dynamic = 'force-dynamic'
@@ -736,6 +737,14 @@ export async function POST(request: Request) {
       // up the same as a reply on the native (direct Meta) connection.
       if (typed.provider === 'zernio_whatsapp') {
         await flagBroadcastReplyIfAny(db, typed.account_id, contactId, conversationRow.id)
+        // AgendaPro 24h confirmation: same SI/NO handling as the native
+        // WhatsApp webhook — a Zernio-only account sends its reminders
+        // through this number, so the client's reply arrives here.
+        if (contentType === 'text' && content.trim()) {
+          await handleAgendaProConfirmationReply(db, typed.account_id, contactId, content).catch((error) => {
+            console.error('[agendapro] could not process a confirmation reply (zernio):', error)
+          })
+        }
       }
       await db.rpc('auto_assign_inbound_conversation', { p_account_id: typed.account_id, p_conversation_id: conversationRow.id })
       // Flows run before automations and the AI: a customer navigating a bot

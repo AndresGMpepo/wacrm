@@ -1,8 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { CalendarClock, CalendarDays, ChevronLeft, ChevronRight, List, Loader2, Plus, RefreshCw, X } from 'lucide-react';
+import { CalendarClock, CalendarDays, CalendarRange, ChevronLeft, ChevronRight, List, Loader2, Plus, RefreshCw, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { addDays, endOfMonth, endOfWeek, format, startOfMonth, startOfWeek, subDays } from 'date-fns';
 
@@ -13,9 +13,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { AgendaProMonthCalendar } from '@/components/agendapro/month-calendar';
-import { AgendaProDaySchedule, type ProviderWorkingHours } from '@/components/agendapro/day-schedule';
+import { AgendaProDaySchedule, clockFromMinutes, type ProviderWorkingHours } from '@/components/agendapro/day-schedule';
+import { AgendaProWeekSchedule } from '@/components/agendapro/week-schedule';
+import { AgendaProRescheduleDialog } from '@/components/agendapro/reschedule-dialog';
 import { AgendaProBookingPopover } from '@/components/agendapro/booking-popover';
-import { colorForStatus } from '@/lib/agendapro/status-colors';
+import { AGENDAPRO_STATUS_OPTIONS, colorForStatus, normalizeStatusKey } from '@/lib/agendapro/status-colors';
 import { parseAgendaProTime } from '@/lib/agendapro/time';
 
 type Location = { id: number; name: string };
@@ -28,9 +30,11 @@ type Booking = {
   end: string;
   price: number;
   service: string;
+  service_id?: number;
   service_provider: string;
   service_provider_id: number;
   location: string;
+  location_id?: number;
   status: string;
   notes?: string | null;
   company_comment?: string | null;
@@ -65,10 +69,16 @@ export default function AgendaProPage() {
   const [filterServiceId, setFilterServiceId] = useState('');
   const [filterProviderId, setFilterProviderId] = useState('');
 
-  const [viewMode, setViewMode] = useState<'day' | 'calendar' | 'list'>('day');
+  const [viewMode, setViewMode] = useState<'day' | 'week' | 'calendar' | 'list'>('day');
   const [month, setMonth] = useState(() => startOfMonth(new Date()));
   const [selectedDate, setSelectedDate] = useState(todayISODate());
   const [statusColors, setStatusColors] = useState<Record<string, string>>({});
+  // Normalized status keys hidden from every view. Cancelled bookings are
+  // hidden by default so a just-cancelled appointment leaves the grid
+  // (its slot is free again); the "Cancelado" chip brings them back.
+  const [hiddenStatuses, setHiddenStatuses] = useState<Set<string>>(() => new Set(['cancelado']));
+  const [rescheduleBooking, setRescheduleBooking] = useState<Booking | null>(null);
+  const formRef = useRef<HTMLDivElement>(null);
   const [providerSchedules, setProviderSchedules] = useState<Record<number, ProviderWorkingHours[] | null>>({});
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
   const [popoverAnchor, setPopoverAnchor] = useState<HTMLElement | null>(null);
@@ -83,6 +93,9 @@ export default function AgendaProPage() {
   const [availableHours, setAvailableHours] = useState<AvailableHour[]>([]);
   const [loadingHours, setLoadingHours] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState<AvailableHour | null>(null);
+  // "HH:mm" picked by clicking an empty spot on the day/week grid — matched
+  // against AgendaPro's own `start_block` once free slots load.
+  const [preferredBlock, setPreferredBlock] = useState<string | null>(null);
 
   const loadCatalog = useCallback(async () => {
     try {
@@ -130,6 +143,10 @@ export default function AgendaProPage() {
         const day = new Date(`${selectedDate}T00:00:00`);
         params.set('range_from', format(subDays(day, 1), 'yyyy-MM-dd'));
         params.set('range_to', format(addDays(day, 1), 'yyyy-MM-dd'));
+      } else if (viewMode === 'week') {
+        const weekStart = startOfWeek(new Date(`${selectedDate}T00:00:00`), { weekStartsOn: 1 });
+        params.set('range_from', format(subDays(weekStart, 1), 'yyyy-MM-dd'));
+        params.set('range_to', format(addDays(weekStart, 7), 'yyyy-MM-dd'));
       } else {
         // The grid shows a few days of the adjacent months too, so the
         // fetched range covers the whole visible 6-week grid, not just the
@@ -229,7 +246,34 @@ export default function AgendaProPage() {
     setFormDate(todayISODate());
     setAvailableHours([]);
     setSelectedSlot(null);
+    setPreferredBlock(null);
   }
+
+  /** Opens "Nueva reserva" prefilled from a click on an empty spot of the
+   *  day/week grid. The service still has to be chosen (a free spot says
+   *  nothing about which service), after which the matching slot is
+   *  selected automatically if AgendaPro offers it. */
+  function openFormAt(dateISO: string, minutes: number, providerId?: number) {
+    const provider = providerId ? providers.find((p) => p.id === providerId) : undefined;
+    setFormDate(dateISO);
+    setFormProviderId(providerId ? String(providerId) : '');
+    setFormLocationId(provider ? String(provider.location_id) : filterLocationId);
+    setSelectedSlot(null);
+    setPreferredBlock(clockFromMinutes(minutes));
+    setShowForm(true);
+    requestAnimationFrame(() => formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  }
+
+  useEffect(() => {
+    if (!preferredBlock || selectedSlot || availableHours.length === 0) return;
+    const match = availableHours.find(
+      (hour) => hour.start_block === preferredBlock && (!formProviderId || String(hour.provider_id) === formProviderId),
+    );
+    if (match) {
+      setSelectedSlot(match);
+      if (!formProviderId) setFormProviderId(String(match.provider_id));
+    }
+  }, [availableHours, preferredBlock, selectedSlot, formProviderId]);
 
   async function createBooking() {
     if (!formContactId || !formServiceId || !formProviderId || !selectedSlot) {
@@ -261,12 +305,53 @@ export default function AgendaProPage() {
     }
   }
 
+  // Status filter applied to every view (day/week/month/list).
+  const filteredBookings = useMemo(
+    () => bookings.filter((booking) => !hiddenStatuses.has(normalizeStatusKey(booking.status || ''))),
+    [bookings, hiddenStatuses],
+  );
+
+  // Chips: AgendaPro's six documented statuses + "Cancelado", plus any
+  // other (custom) status that actually shows up in the loaded bookings.
+  const statusChips = useMemo(() => {
+    const chips = new Map<string, string>();
+    for (const option of AGENDAPRO_STATUS_OPTIONS) chips.set(normalizeStatusKey(option.label), option.label);
+    chips.set('cancelado', 'Cancelado');
+    for (const booking of bookings) {
+      const key = normalizeStatusKey(booking.status || '');
+      if (key && !chips.has(key)) chips.set(key, booking.status);
+    }
+    return [...chips.entries()].map(([key, label]) => ({ key, label }));
+  }, [bookings]);
+
+  function toggleStatus(key: string) {
+    setHiddenStatuses((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  const weekStart = useMemo(
+    () => startOfWeek(new Date(`${selectedDate}T00:00:00`), { weekStartsOn: 1 }),
+    [selectedDate],
+  );
+  const weekBookings = useMemo(() => {
+    const first = format(weekStart, 'yyyy-MM-dd');
+    const last = format(addDays(weekStart, 6), 'yyyy-MM-dd');
+    return filteredBookings.filter((booking) => {
+      const day = booking.start.slice(0, 10);
+      return day >= first && day <= last;
+    });
+  }, [filteredBookings, weekStart]);
+
   const bookingsForSelectedDay = useMemo(
     () =>
-      bookings
+      filteredBookings
         .filter((booking) => booking.start.slice(0, 10) === selectedDate)
         .sort((a, b) => a.start.localeCompare(b.start)),
-    [bookings, selectedDate],
+    [filteredBookings, selectedDate],
   );
 
   const visibleProviders = useMemo(
@@ -367,6 +452,10 @@ export default function AgendaProPage() {
               <CalendarClock className="h-4 w-4" />
               Día
             </Button>
+            <Button variant={viewMode === 'week' ? 'default' : 'ghost'} size="sm" onClick={() => setViewMode('week')}>
+              <CalendarRange className="h-4 w-4" />
+              Semana
+            </Button>
             <Button
               variant={viewMode === 'calendar' ? 'default' : 'ghost'}
               size="sm"
@@ -384,7 +473,7 @@ export default function AgendaProPage() {
             <RefreshCw className={loadingBookings ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />
             Actualizar
           </Button>
-          <Button onClick={() => { setFormDate(selectedDate || todayISODate()); setShowForm(true); }}>
+          <Button onClick={() => { setFormDate(selectedDate || todayISODate()); setPreferredBlock(null); setShowForm(true); }}>
             <Plus className="h-4 w-4" />
             Nueva reserva
           </Button>
@@ -414,13 +503,36 @@ export default function AgendaProPage() {
         </select>
       </div>
 
-      {viewMode === 'day' ? (
+      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+        <span className="mr-1 text-xs text-muted-foreground">Estados:</span>
+        {statusChips.map((chip) => {
+          const visible = !hiddenStatuses.has(chip.key);
+          const color = colorForStatus(chip.label, statusColors);
+          return (
+            <button
+              key={chip.key}
+              type="button"
+              onClick={() => toggleStatus(chip.key)}
+              aria-pressed={visible}
+              className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-opacity ${
+                visible ? 'border-border text-foreground' : 'border-dashed border-border text-muted-foreground opacity-60'
+              }`}
+              title={visible ? `Ocultar "${chip.label}"` : `Mostrar "${chip.label}"`}
+            >
+              <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: color, opacity: visible ? 1 : 0.4 }} />
+              {chip.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {viewMode === 'day' || viewMode === 'week' ? (
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <Button
             variant="outline"
             size="icon"
-            aria-label="Día anterior"
-            onClick={() => setSelectedDate(format(subDays(new Date(`${selectedDate}T00:00:00`), 1), 'yyyy-MM-dd'))}
+            aria-label={viewMode === 'week' ? 'Semana anterior' : 'Día anterior'}
+            onClick={() => setSelectedDate(format(subDays(new Date(`${selectedDate}T00:00:00`), viewMode === 'week' ? 7 : 1), 'yyyy-MM-dd'))}
           >
             <ChevronLeft className="h-4 w-4" />
           </Button>
@@ -430,8 +542,8 @@ export default function AgendaProPage() {
           <Button
             variant="outline"
             size="icon"
-            aria-label="Día siguiente"
-            onClick={() => setSelectedDate(format(addDays(new Date(`${selectedDate}T00:00:00`), 1), 'yyyy-MM-dd'))}
+            aria-label={viewMode === 'week' ? 'Semana siguiente' : 'Día siguiente'}
+            onClick={() => setSelectedDate(format(addDays(new Date(`${selectedDate}T00:00:00`), viewMode === 'week' ? 7 : 1), 'yyyy-MM-dd'))}
           >
             <ChevronRight className="h-4 w-4" />
           </Button>
@@ -442,13 +554,15 @@ export default function AgendaProPage() {
             className="w-auto"
           />
           <span className="text-sm font-medium capitalize text-foreground">
-            {new Intl.DateTimeFormat('es-MX', { dateStyle: 'full' }).format(new Date(`${selectedDate}T00:00:00`))}
+            {viewMode === 'week'
+              ? `${new Intl.DateTimeFormat('es-MX', { day: 'numeric', month: 'short' }).format(weekStart)} – ${new Intl.DateTimeFormat('es-MX', { day: 'numeric', month: 'short', year: 'numeric' }).format(addDays(weekStart, 6))}`
+              : new Intl.DateTimeFormat('es-MX', { dateStyle: 'full' }).format(new Date(`${selectedDate}T00:00:00`))}
           </span>
         </div>
       ) : null}
 
       {showForm ? (
-        <Card className="mt-4">
+        <Card className="mt-4" ref={formRef}>
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle className="text-base">Nueva reserva</CardTitle>
             <Button variant="outline" size="icon" onClick={resetForm} aria-label="Cerrar">
@@ -503,6 +617,17 @@ export default function AgendaProPage() {
 
             <div className="space-y-2">
               <Label>Horarios disponibles</Label>
+              {preferredBlock ? (
+                <p className="text-xs text-muted-foreground">
+                  {selectedSlot?.start_block === preferredBlock
+                    ? `Horario de las ${preferredBlock} seleccionado.`
+                    : !formServiceId
+                      ? `Elegiste las ${preferredBlock}. Selecciona el servicio para confirmar que ese horario está libre.`
+                      : !loadingHours && availableHours.length > 0
+                        ? `El horario de las ${preferredBlock} no está disponible para este servicio; elige otro.`
+                        : null}
+                </p>
+              ) : null}
               {loadingHours ? (
                 <p className="text-sm text-muted-foreground"><Loader2 className="inline h-4 w-4 animate-spin" /> Buscando horarios…</p>
               ) : !formServiceId || (!formProviderId && !formLocationId) ? (
@@ -539,38 +664,43 @@ export default function AgendaProPage() {
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
           </div>
         ) : viewMode === 'day' ? (
-          <>
-            <AgendaProDaySchedule
-              date={new Date(`${selectedDate}T00:00:00`)}
-              providers={scheduleProviders}
-              providerSchedules={providerSchedules}
-              bookings={bookingsForSelectedDay}
-              statusColors={statusColors}
-              selectedBookingId={selectedBooking?.id ?? null}
-              onSelectBooking={(booking, element) => {
-                setSelectedBooking(bookingsForSelectedDay.find((b) => b.id === booking.id) ?? null);
-                setPopoverAnchor(element);
-              }}
-            />
-            {selectedBooking && popoverAnchor ? (
-              <AgendaProBookingPopover
-                booking={selectedBooking}
-                anchor={popoverAnchor}
-                statusColors={statusColors}
-                onClose={() => { setSelectedBooking(null); setPopoverAnchor(null); }}
-                onStatusChanged={(bookingId, _statusId, newStatusLabel) => {
-                  setBookings((prev) => prev.map((b) => (b.id === bookingId ? { ...b, status: newStatusLabel } : b)));
-                  setSelectedBooking((prev) => (prev && prev.id === bookingId ? { ...prev, status: newStatusLabel } : prev));
-                }}
-              />
-            ) : null}
-          </>
+          <AgendaProDaySchedule
+            date={new Date(`${selectedDate}T00:00:00`)}
+            providers={scheduleProviders}
+            providerSchedules={providerSchedules}
+            bookings={bookingsForSelectedDay}
+            statusColors={statusColors}
+            selectedBookingId={selectedBooking?.id ?? null}
+            onSelectBooking={(booking, element) => {
+              setSelectedBooking(bookingsForSelectedDay.find((b) => b.id === booking.id) ?? null);
+              setPopoverAnchor(element);
+            }}
+            onEmptySlotClick={(providerId, minutes) => openFormAt(selectedDate, minutes, providerId)}
+          />
+        ) : viewMode === 'week' ? (
+          <AgendaProWeekSchedule
+            weekStart={weekStart}
+            bookings={weekBookings}
+            statusColors={statusColors}
+            selectedBookingId={selectedBooking?.id ?? null}
+            onSelectBooking={(booking, element) => {
+              setSelectedBooking(weekBookings.find((b) => b.id === booking.id) ?? null);
+              setPopoverAnchor(element);
+            }}
+            onEmptySlotClick={(dateISO, minutes) =>
+              openFormAt(dateISO, minutes, filterProviderId ? Number(filterProviderId) : undefined)
+            }
+            onSelectDay={(dateISO) => {
+              setSelectedDate(dateISO);
+              setViewMode('day');
+            }}
+          />
         ) : viewMode === 'calendar' ? (
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
             <AgendaProMonthCalendar
               month={month}
               onMonthChange={setMonth}
-              bookings={bookings}
+              bookings={filteredBookings}
               statusColors={statusColors}
               selectedDate={selectedDate}
               onSelectDate={setSelectedDate}
@@ -588,11 +718,11 @@ export default function AgendaProPage() {
               </div>
             </div>
           </div>
-        ) : bookings.length === 0 ? (
+        ) : filteredBookings.length === 0 ? (
           <p className="text-sm text-muted-foreground">No hay reservas en el mes mostrado.</p>
         ) : (
           <div className="space-y-2">
-            {[...bookings]
+            {[...filteredBookings]
               .sort((a, b) => a.start.localeCompare(b.start))
               .map((booking) => (
                 <BookingCard key={booking.id} booking={booking} statusColors={statusColors} />
@@ -600,6 +730,41 @@ export default function AgendaProPage() {
           </div>
         )}
       </div>
+
+      {selectedBooking && popoverAnchor && (viewMode === 'day' || viewMode === 'week') ? (
+        <AgendaProBookingPopover
+          booking={selectedBooking}
+          anchor={popoverAnchor}
+          statusColors={statusColors}
+          onClose={() => { setSelectedBooking(null); setPopoverAnchor(null); }}
+          onStatusChanged={(bookingId, _statusId, newStatusLabel) => {
+            setBookings((prev) => prev.map((b) => (b.id === bookingId ? { ...b, status: newStatusLabel } : b)));
+            setSelectedBooking((prev) => (prev && prev.id === bookingId ? { ...prev, status: newStatusLabel } : prev));
+          }}
+          onReschedule={() => {
+            setRescheduleBooking(selectedBooking);
+            setSelectedBooking(null);
+            setPopoverAnchor(null);
+          }}
+          onCancelled={() => {
+            setSelectedBooking(null);
+            setPopoverAnchor(null);
+            void loadBookings();
+          }}
+        />
+      ) : null}
+
+      {rescheduleBooking ? (
+        <AgendaProRescheduleDialog
+          booking={rescheduleBooking}
+          providers={providers}
+          onClose={() => setRescheduleBooking(null)}
+          onRescheduled={() => {
+            setRescheduleBooking(null);
+            void loadBookings();
+          }}
+        />
+      ) : null}
     </div>
   );
 }

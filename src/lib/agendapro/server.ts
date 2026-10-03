@@ -3,6 +3,7 @@ import { createClient as createAdminClient } from '@supabase/supabase-js'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 import { encrypt, decrypt } from '@/lib/whatsapp/encryption'
+import { correctAgendaProInstant } from '@/lib/agendapro/time'
 
 // "Agendapro Public V1" (developers.agendapro.com/v1) — HTTP Basic Auth
 // (a USER + PASSWORD pair issued per company from their "API Pública"
@@ -359,6 +360,64 @@ export async function updateAgendaProBooking(accountId: string, bookingId: numbe
   start?: string; end?: string; provider_id?: number; status_id?: number
 }) {
   return agendaProFetch(accountId, `/bookings/${bookingId}`, { method: 'PATCH', body: JSON.stringify(body) })
+}
+
+/** `DELETE /bookings/{id}` — confirmed from
+ *  developers.agendapro.com/v1.0/reference/eliminar-una-reserva: despite
+ *  the name it does NOT erase the booking, it cancels it (the documented
+ *  response is the same booking with status "Cancelado" and a history
+ *  entry "Cancelada por API"). This is the only documented way to cancel —
+ *  PATCH's status_id explicitly excludes "cancelado". */
+export async function cancelAgendaProBooking(accountId: string, bookingId: number) {
+  return agendaProFetch(accountId, `/bookings/${bookingId}`, { method: 'DELETE' })
+}
+
+/** True for a cancelled booking. AgendaPro's own docs disagree on the id
+ *  (the bookings list documents 5=Cancelado, the cancel endpoint's example
+ *  returns status_id 4 with status "Cancelado"), so the status name is the
+ *  primary signal and both documented ids are accepted. */
+export function isAgendaProCancelled(statusId: unknown, statusName: unknown): boolean {
+  const name = typeof statusName === 'string'
+    ? statusName.normalize('NFD').replace(/\p{Diacritic}/gu, '').trim().toLowerCase()
+    : ''
+  if (name.startsWith('cancelad')) return true
+  return !name && (statusId === 4 || statusId === 5)
+}
+
+/**
+ * Applies a booking returned by PATCH/DELETE to our local
+ * `agendapro_bookings` copy immediately, instead of waiting for AgendaPro's
+ * webhook (whether an API-made change fires one isn't documented). This
+ * row drives the 24h WhatsApp confirmation: a new start_time re-queues the
+ * reminder (DB trigger from migration 134), and a cancellation stops it.
+ * Only updates a row that already exists — creating the cache row stays
+ * the webhook's job. Best-effort: never fails the user's action.
+ */
+export async function syncLocalAgendaProBooking(accountId: string, booking: unknown) {
+  if (!booking || typeof booking !== 'object') return
+  const b = booking as Record<string, unknown>
+  const bookingId = typeof b.id === 'number' || typeof b.id === 'string' ? String(b.id) : ''
+  if (!bookingId) return
+  try {
+    const db = admin()
+    const timezone = await getAgendaProTimezone(db, accountId)
+    const patch: Record<string, unknown> = { synced_at: new Date().toISOString() }
+    if (typeof b.start === 'string' && b.start) patch.start_time = correctAgendaProInstant(b.start, timezone)
+    if (typeof b.end === 'string' && b.end) patch.end_time = correctAgendaProInstant(b.end, timezone)
+    if (typeof b.status_id === 'number') patch.status_id = b.status_id
+    if (typeof b.status === 'string') patch.status_name = b.status
+    if (typeof b.service_provider === 'string') patch.provider_name = b.service_provider
+    const { error } = await db.from('agendapro_bookings').update(patch)
+      .eq('account_id', accountId).eq('agendapro_booking_id', bookingId)
+    if (error) throw error
+    if (isAgendaProCancelled(b.status_id, b.status)) {
+      await db.from('agendapro_bookings').update({ confirmation_reminder_status: 'skipped' })
+        .eq('account_id', accountId).eq('agendapro_booking_id', bookingId)
+        .in('confirmation_reminder_status', ['queued', 'failed'])
+    }
+  } catch (error) {
+    console.error('[agendapro] could not sync local booking cache:', error)
+  }
 }
 
 export async function listAvailableHours(accountId: string, serviceId: number, params: {

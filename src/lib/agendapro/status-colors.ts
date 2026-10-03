@@ -22,8 +22,8 @@
 // ============================================================
 
 /** The only non-cancelled status_id values PATCH /bookings/{id} accepts
- *  (cancelling a booking is a separate, undocumented-here endpoint — not
- *  implemented by this integration). */
+ *  (cancelling is DELETE /bookings/{id} — see cancelAgendaProBooking in
+ *  server.ts). */
 export const AGENDAPRO_STATUS_OPTIONS = [
   { id: 1, label: 'Reservado', color: '#3b82f6' },
   { id: 2, label: 'Confirmado', color: '#eab308' },

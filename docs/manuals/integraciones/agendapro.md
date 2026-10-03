@@ -69,6 +69,14 @@ detecta.
 La aprobación de Meta suele tardar de minutos a unas horas. Mientras
 una plantilla esté en estado "Pendiente", no actives el paso 3.
 
+> **Si tu WhatsApp está conectado por Zernio** (y no tienes WhatsApp
+> nativo conectado), NexoOmni envía el recordatorio, el aviso a recepción
+> y recibe la respuesta SI/NO por ese número. Crea las dos plantillas
+> **para ese mismo número** en **Configuración → Plantillas** (al crear
+> la plantilla, elige el número de WhatsApp conectado por Zernio): una
+> plantilla aprobada en otro número no sirve para enviar desde este. Si
+> tienes ambos conectados, se usa el WhatsApp nativo.
+
 ### 3. Activar la confirmación automática
 
 En **Configuración → AgendaPro**, en la sección "Confirmación de citas
@@ -95,15 +103,17 @@ El aviso a recepción llega como notificación dentro de NexoOmni (campana
 de notificaciones) y, si configuraste un teléfono, también por
 WhatsApp.
 
-### 4. Vista de calendario por día y colores por estado
+### 4. Vista de calendario por día, semana y mes, y colores por estado
 
 El menú **AgendaPro** se ve como el calendario de AgendaPro: una vista
 de **día** con una columna por prestador, donde cada reserva aparece
 como un bloque de color en su horario real. También hay vista de
-**Mes** y de **Lista**. Haz clic en cualquier reserva para ver el
-detalle (cliente, servicio, horario, teléfono con acceso directo a
-WhatsApp, correo, comentario interno) y para **cambiar su estado** con
-un clic, igual que en AgendaPro.
+**Semana** (lunes a domingo, todas las reservas de la semana con el
+nombre del prestador en cada bloque; haz clic en el encabezado de un día
+para abrirlo en la vista de día), de **Mes** y de **Lista**. Haz clic en
+cualquier reserva para ver el detalle (cliente, servicio, horario,
+teléfono con acceso directo a WhatsApp, correo, comentario interno) y
+para **cambiar su estado** con un clic, igual que en AgendaPro.
 
 > **"Hablar por WhatsApp" y "Llamar"**: nunca abren tu WhatsApp o
 > marcador personal — "Hablar por WhatsApp" te lleva a la conversación
@@ -140,11 +150,40 @@ prestador tiene configurado en AgendaPro (**Prestadores → horario**),
 así que para que se vea correctamente ese horario debe estar
 actualizado allá.
 
-> **Nota:** cambiar el estado de una reserva desde NexoOmni no permite
-> marcarla como "Cancelada" — AgendaPro reserva eso a un flujo aparte.
-> Además, si la propia política de edición de AgendaPro restringe el
+### 5. Filtrar por estado
+
+Debajo de los filtros de local, servicio y prestador hay una fila de
+**Estados**, con el color de cada uno. Haz clic en un estado para
+ocultarlo o mostrarlo en todas las vistas (por ejemplo, ver solo las
+citas "Reservado" que aún no confirman). Las citas **canceladas** vienen
+ocultas por defecto; activa "Cancelado" para verlas.
+
+### 6. Crear una cita haciendo clic en un horario libre
+
+En la vista de **día** o de **semana**, haz clic en un espacio vacío del
+calendario. Se abre "Nueva reserva" con la fecha, la hora (redondeada al
+cuarto de hora) y, en la vista de día, el prestador de esa columna ya
+elegidos. Solo falta escoger el contacto y el servicio: si AgendaPro
+tiene libre ese horario para ese servicio, queda seleccionado solo; si
+no, te avisa para que elijas otro de los horarios disponibles.
+
+### 7. Reagendar o cancelar una cita
+
+Haz clic en la cita y usa los botones del detalle:
+
+- **Reagendar**: elige la nueva fecha y, si quieres, otro prestador.
+  NexoOmni te muestra solo los horarios que AgendaPro tiene libres para
+  ese servicio, y al confirmar mueve la cita en AgendaPro. El
+  recordatorio de confirmación de 24 horas se reprograma solo para la
+  nueva fecha.
+- **Cancelar cita**: pide confirmación y cancela la cita en AgendaPro
+  (queda con estado "Cancelado", no se borra). El horario queda libre y
+  ya **no se envía** el recordatorio de confirmación.
+
+> **Nota:** si la propia política de edición de AgendaPro restringe el
 > cambio (por ejemplo, por estar muy cerca de la hora de la cita),
-> AgendaPro rechaza el cambio y NexoOmni te lo muestra como error.
+> AgendaPro rechaza el cambio de estado, el reagendado o la
+> cancelación, y NexoOmni te lo muestra como error.
 
 ## Preguntas frecuentes
 

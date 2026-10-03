@@ -4,9 +4,10 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { Loader2, Mail, MessageCircle, PhoneCall, StickyNote, X } from 'lucide-react';
+import { Ban, CalendarClock, Loader2, Mail, MessageCircle, PhoneCall, StickyNote, X } from 'lucide-react';
 import { toast } from 'sonner';
 
+import { Button } from '@/components/ui/button';
 import { AGENDAPRO_STATUS_OPTIONS, colorForStatus, normalizeStatusKey } from '@/lib/agendapro/status-colors';
 import { useTelephony } from '@/components/telephony/telephony-provider';
 import { parseAgendaProTime } from '@/lib/agendapro/time';
@@ -30,7 +31,9 @@ export type PopoverBooking = {
  * provider, phone/email, internal comment, quick status change).
  * Status is changed via PATCH /api/agendapro/bookings/{id}, confirmed
  * against developers.agendapro.com/v1.0 (see that route for why only
- * these six status ids are offered — "cancelado" isn't one of them).
+ * these six status ids are offered — cancelling is its own DELETE call,
+ * behind a confirmation step, and "Reagendar" opens the caller's
+ * reschedule dialog).
  *
  * The phone number calls out through NexPhone (the account's own
  * telephony, not the device's dialer), and "Hablar por WhatsApp" opens
@@ -45,18 +48,25 @@ export function AgendaProBookingPopover({
   statusColors,
   onClose,
   onStatusChanged,
+  onReschedule,
+  onCancelled,
 }: {
   booking: PopoverBooking;
   anchor: HTMLElement;
   statusColors: Record<string, string>;
   onClose: () => void;
   onStatusChanged: (bookingId: number, newStatusId: number, newStatusLabel: string) => void;
+  onReschedule?: () => void;
+  onCancelled?: () => void;
 }) {
   const router = useRouter();
   const telephony = useTelephony();
   const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
   const [updatingStatus, setUpdatingStatus] = useState<number | null>(null);
   const [openingConversation, setOpeningConversation] = useState(false);
+  const [confirmingCancel, setConfirmingCancel] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const isCancelled = normalizeStatusKey(booking.status).startsWith('cancelad');
 
   const clientName = booking.client ? `${booking.client.first_name} ${booking.client.last_name ?? ''}`.trim() : 'Sin cliente';
   const clientPhone = booking.client?.phone ?? null;
@@ -66,9 +76,25 @@ export function AgendaProBookingPopover({
     const cardWidth = 304;
     const spaceOnRight = window.innerWidth - rect.right;
     const left = spaceOnRight > cardWidth + 16 ? rect.right + 8 : Math.max(8, rect.left - cardWidth - 8);
-    const top = Math.min(window.scrollY + rect.top, window.scrollY + window.innerHeight - 420);
+    const top = Math.min(window.scrollY + rect.top, window.scrollY + window.innerHeight - 480);
     setPosition({ top: Math.max(window.scrollY + 8, top), left: left + window.scrollX });
   }, [anchor]);
+
+  async function cancelBooking() {
+    setCancelling(true);
+    try {
+      const response = await fetch(`/api/agendapro/bookings/${booking.id}`, { method: 'DELETE' });
+      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+      if (!response.ok) throw new Error(payload?.error || 'No se pudo cancelar la cita.');
+      toast.success('Cita cancelada en AgendaPro.');
+      onCancelled?.();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'No se pudo cancelar la cita.');
+    } finally {
+      setCancelling(false);
+      setConfirmingCancel(false);
+    }
+  }
 
   async function changeStatus(statusId: number, label: string) {
     setUpdatingStatus(statusId);
@@ -181,6 +207,9 @@ export function AgendaProBookingPopover({
           </div>
         ) : null}
 
+        {isCancelled ? (
+          <p className="mt-3 border-t pt-3 text-xs font-medium text-destructive">Esta cita está cancelada.</p>
+        ) : (
         <div className="mt-3 border-t pt-3">
           <p className="mb-1.5 text-xs font-medium text-muted-foreground">Cambiar estado</p>
           <div className="flex flex-wrap gap-2">
@@ -201,7 +230,41 @@ export function AgendaProBookingPopover({
               );
             })}
           </div>
+
+          {onReschedule || onCancelled ? (
+            confirmingCancel ? (
+              <div className="mt-3 rounded-md border border-destructive/40 bg-destructive/5 p-2 text-xs">
+                <p className="font-medium text-foreground">¿Cancelar esta cita en AgendaPro?</p>
+                <p className="mt-0.5 text-muted-foreground">El horario queda libre y ya no se enviará el recordatorio de confirmación.</p>
+                <div className="mt-2 flex gap-2">
+                  <Button size="sm" variant="destructive" disabled={cancelling} onClick={() => void cancelBooking()}>
+                    {cancelling ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                    Sí, cancelar
+                  </Button>
+                  <Button size="sm" variant="outline" disabled={cancelling} onClick={() => setConfirmingCancel(false)}>
+                    No
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="mt-3 flex gap-2">
+                {onReschedule ? (
+                  <Button size="sm" variant="outline" className="flex-1" onClick={onReschedule}>
+                    <CalendarClock className="h-3.5 w-3.5" />
+                    Reagendar
+                  </Button>
+                ) : null}
+                {onCancelled ? (
+                  <Button size="sm" variant="outline" className="flex-1 text-destructive hover:text-destructive" onClick={() => setConfirmingCancel(true)}>
+                    <Ban className="h-3.5 w-3.5" />
+                    Cancelar cita
+                  </Button>
+                ) : null}
+              </div>
+            )
+          ) : null}
         </div>
+        )}
       </div>
     </>
   );

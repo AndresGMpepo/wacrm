@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, type MouseEvent as ReactMouseEvent } from 'react';
 import { format } from 'date-fns';
 
 import { colorForStatus } from '@/lib/agendapro/status-colors';
@@ -22,19 +22,36 @@ export type ScheduleBooking = {
  *  gap between entries on the same day IS the break. */
 export type ProviderWorkingHours = { day: number; day_name: string; open: string; close: string };
 
-const PX_PER_MINUTE = 1.3;
-const DEFAULT_START_HOUR = 8;
-const DEFAULT_END_HOUR = 20;
+export const PX_PER_MINUTE = 1.3;
+export const DEFAULT_START_HOUR = 8;
+export const DEFAULT_END_HOUR = 20;
 const MIN_GAP_MINUTES = 5;
+/** Granularity a click on an empty slot snaps down to ("10:37" → "10:30"). */
+const SLOT_SNAP_MINUTES = 15;
 
-function clientLabel(client: ScheduleBooking['client']) {
+export function clientLabel(client: ScheduleBooking['client']) {
   if (!client) return 'Sin cliente';
   return `${client.first_name} ${client.last_name ?? ''}`.trim();
 }
 
-function minutesSinceMidnight(iso: string) {
+export function minutesSinceMidnight(iso: string) {
   const date = parseAgendaProTime(iso);
   return date.getHours() * 60 + date.getMinutes();
+}
+
+/** Minutes-since-midnight under the pointer in a time-grid column, snapped
+ *  down to SLOT_SNAP_MINUTES. */
+export function clickedMinutes(event: ReactMouseEvent<HTMLElement>, startHour: number) {
+  const rect = event.currentTarget.getBoundingClientRect();
+  const raw = (event.clientY - rect.top) / PX_PER_MINUTE + startHour * 60;
+  return Math.max(0, Math.floor(raw / SLOT_SNAP_MINUTES) * SLOT_SNAP_MINUTES);
+}
+
+/** "HH:mm" for minutes-since-midnight — the same shape as AgendaPro's own
+ *  `start_block` on available_hours, so a clicked time can be matched to a
+ *  real slot without any timezone conversion. */
+export function clockFromMinutes(minutes: number) {
+  return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
 }
 
 function normalizeDayName(value: string) {
@@ -50,7 +67,7 @@ function minutesFromClock(value: string) {
   return (h || 0) * 60 + (m || 0);
 }
 
-type LaidOutBooking = ScheduleBooking & { col: number; totalCols: number };
+export type LaidOutBooking<T extends ScheduleBooking = ScheduleBooking> = T & { col: number; totalCols: number };
 
 /** Side-by-side layout for bookings that overlap in time on the same
  *  provider (e.g. a therapist double- or triple-booked, or several
@@ -59,9 +76,9 @@ type LaidOutBooking = ScheduleBooking & { col: number; totalCols: number };
  *  unreadable/unclickable. Standard day-view packing: group into
  *  disjoint time clusters, then greedily assign each booking the first
  *  column whose last booking already ended. */
-function layoutOverlaps(bookings: ScheduleBooking[]): LaidOutBooking[] {
+export function layoutOverlaps<T extends ScheduleBooking>(bookings: T[]): LaidOutBooking<T>[] {
   const sorted = [...bookings].sort((a, b) => minutesSinceMidnight(a.start) - minutesSinceMidnight(b.start));
-  const result: LaidOutBooking[] = [];
+  const result: LaidOutBooking<T>[] = [];
   let clusterStartIndex = 0;
   let clusterEnd = -Infinity;
   let columnEnds: number[] = [];
@@ -141,7 +158,9 @@ function unavailableRanges(
  * or a month grid). Colors come from colorForStatus; clicking a block
  * opens the caller's popover with the full booking detail. Gray
  * hatched blocks show when a provider isn't working at all that day,
- * after their shift ends, or on a break between two shifts.
+ * after their shift ends, or on a break between two shifts. Clicking
+ * an empty spot in a column calls onEmptySlotClick with that provider
+ * and the time under the pointer, to start a new booking there.
  */
 export function AgendaProDaySchedule({
   date,
@@ -150,6 +169,7 @@ export function AgendaProDaySchedule({
   statusColors,
   providerSchedules,
   onSelectBooking,
+  onEmptySlotClick,
   selectedBookingId,
 }: {
   date: Date;
@@ -158,6 +178,7 @@ export function AgendaProDaySchedule({
   statusColors: Record<string, string>;
   providerSchedules: Record<number, ProviderWorkingHours[] | null>;
   onSelectBooking: (booking: ScheduleBooking, element: HTMLElement) => void;
+  onEmptySlotClick?: (providerId: number, minutes: number) => void;
   selectedBookingId: number | null;
 }) {
   const weekdayName = useMemo(
@@ -225,7 +246,12 @@ export function AgendaProDaySchedule({
               <div className="flex h-12 flex-col items-center justify-center border-b bg-muted/30 px-2 text-center">
                 <span className="truncate text-xs font-medium text-foreground">{provider.name}</span>
               </div>
-              <div className="relative" style={{ height: gridHeight }}>
+              <div
+                className={`relative ${onEmptySlotClick ? 'cursor-cell' : ''}`}
+                style={{ height: gridHeight }}
+                onClick={onEmptySlotClick ? (event) => onEmptySlotClick(provider.id, clickedMinutes(event, startHour)) : undefined}
+                title={onEmptySlotClick ? 'Clic en un espacio libre para crear una reserva' : undefined}
+              >
                 {hours.map((hour) => (
                   <div
                     key={hour}
@@ -258,7 +284,11 @@ export function AgendaProDaySchedule({
                     <button
                       key={booking.id}
                       type="button"
-                      onClick={(event) => onSelectBooking(booking, event.currentTarget)}
+                      onClick={(event) => {
+                        // Don't let the column's "click empty slot" handler fire too.
+                        event.stopPropagation();
+                        onSelectBooking(booking, event.currentTarget);
+                      }}
                       className={`absolute overflow-hidden rounded px-1.5 py-1 text-left text-[11px] leading-tight text-white shadow-sm transition-transform hover:z-10 hover:scale-[1.02] ${
                         selectedBookingId === booking.id ? 'ring-2 ring-foreground' : ''
                       }`}

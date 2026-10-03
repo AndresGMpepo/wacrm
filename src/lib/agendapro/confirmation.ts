@@ -5,6 +5,9 @@ import { sanitizePhoneForMeta, isValidE164, phoneVariants, isRecipientNotAllowed
 import { engineSendTemplate } from '@/lib/automations/meta-send'
 import { resolveAuditUserId } from '@/lib/api/v1/contacts'
 import { isUniqueViolation } from '@/lib/contacts/dedupe'
+import { isAgendaProCancelled } from '@/lib/agendapro/server'
+import { listZernioWhatsAppConnectors, sendZernioTemplateToContact } from '@/lib/zernio/send-template-to-contact'
+import { sendZernioTemplateMessage } from '@/lib/zernio/server'
 
 type Db = ReturnType<typeof aiAdmin>
 
@@ -32,6 +35,8 @@ type BookingRow = {
   service_name: string | null
   location_name: string | null
   start_time: string | null
+  status_id?: number | null
+  status_name?: string | null
 }
 
 function normalizeReply(text: string): string {
@@ -106,7 +111,7 @@ async function findOrCreateWhatsAppConversation(db: Db, accountId: string, conta
 export async function processAgendaProConfirmationReminders(db: Db) {
   const { data, error } = await db
     .from('agendapro_bookings')
-    .select('id, account_id, contact_id, service_name, location_name, start_time')
+    .select('id, account_id, contact_id, service_name, location_name, start_time, status_id, status_name')
     .eq('confirmation_reminder_status', 'queued')
     .lte('confirmation_reminder_due_at', new Date().toISOString())
     .order('confirmation_reminder_due_at')
@@ -137,6 +142,10 @@ export async function processAgendaProConfirmationReminders(db: Db) {
       await skip('la cita ya pasó')
       continue
     }
+    if (isAgendaProCancelled(booking.status_id, booking.status_name)) {
+      await skip('la cita está cancelada')
+      continue
+    }
     if (!booking.contact_id) {
       await skip('la reserva no tiene un contacto vinculado')
       continue
@@ -155,23 +164,47 @@ export async function processAgendaProConfirmationReminders(db: Db) {
 
     try {
       const ownerUserId = await resolveAuditUserId(db, booking.account_id)
-      const conversationId = await findOrCreateWhatsAppConversation(db, booking.account_id, contact.id, ownerUserId)
       const { day, time } = formatBookingDateTime(booking.start_time)
-      await engineSendTemplate({
-        accountId: booking.account_id,
-        userId: ownerUserId,
-        conversationId,
-        contactId: contact.id,
-        templateName: settings.confirmation_template_name,
-        language: settings.confirmation_template_language,
-        params: [
-          contact.name || 'Cliente',
-          booking.service_name || 'tu cita',
-          day,
-          time,
-          booking.location_name || '',
-        ],
-      })
+      const params = [
+        contact.name || 'Cliente',
+        booking.service_name || 'tu cita',
+        day,
+        time,
+        booking.location_name || '',
+      ]
+      // Native (direct Meta) WhatsApp when the account has it — unchanged
+      // behavior. Otherwise the account's Zernio-connected WhatsApp number:
+      // before this, a Zernio-only account (no whatsapp_config) failed every
+      // reminder because the send always went through the native engine.
+      const { data: nativeConfig } = await db.from('whatsapp_config').select('id').eq('account_id', booking.account_id).maybeSingle()
+      if (nativeConfig) {
+        const conversationId = await findOrCreateWhatsAppConversation(db, booking.account_id, contact.id, ownerUserId)
+        await engineSendTemplate({
+          accountId: booking.account_id,
+          userId: ownerUserId,
+          conversationId,
+          contactId: contact.id,
+          templateName: settings.confirmation_template_name,
+          language: settings.confirmation_template_language,
+          params,
+        })
+      } else {
+        const connectors = await listZernioWhatsAppConnectors(db, booking.account_id)
+        if (connectors.length === 0) {
+          await skip('la cuenta no tiene WhatsApp conectado (ni nativo ni por Zernio)')
+          continue
+        }
+        await sendZernioTemplateToContact(db, {
+          accountId: booking.account_id,
+          contactId: contact.id,
+          phone: contact.phone,
+          ownerUserId,
+          templateName: settings.confirmation_template_name,
+          templateLanguage: settings.confirmation_template_language,
+          bodyParams: params,
+          connectors,
+        })
+      }
       await db.from('agendapro_bookings').update({
         confirmation_reminder_status: 'sent',
         confirmation_reminder_sent_at: new Date().toISOString(),
@@ -199,8 +232,24 @@ async function sendReceptionWhatsAppAlert(db: Db, accountId: string, receptionPh
     console.error('[agendapro] reception_phone is not a valid E.164 number:', receptionPhone)
     return
   }
-  const { data: config } = await db.from('whatsapp_config').select('phone_number_id, access_token').eq('account_id', accountId).single()
-  if (!config) return
+  const { data: config } = await db.from('whatsapp_config').select('phone_number_id, access_token').eq('account_id', accountId).maybeSingle()
+  if (!config) {
+    // Zernio-only account: same template, through its connected number.
+    try {
+      const [connector] = await listZernioWhatsAppConnectors(db, accountId)
+      if (!connector) return
+      await sendZernioTemplateMessage({
+        zernioAccountId: connector.zernio_account_id,
+        phone: sanitized,
+        templateName,
+        templateLanguage: language,
+        templateParams: params,
+      })
+    } catch (cause) {
+      console.error('[agendapro] could not send reception WhatsApp alert via Zernio:', cause instanceof Error ? cause.message : cause)
+    }
+    return
+  }
   const accessToken = decrypt(config.access_token)
   for (const candidate of phoneVariants(sanitized)) {
     try {
@@ -259,7 +308,7 @@ export async function escalateUnconfirmedAgendaProBookings(db: Db) {
   const cutoff = new Date(Date.now() - 6 * 60 * 60_000).toISOString()
   const { data, error } = await db
     .from('agendapro_bookings')
-    .select('id, account_id, contact_id, service_name, location_name, start_time')
+    .select('id, account_id, contact_id, service_name, location_name, start_time, status_id, status_name')
     .eq('confirmation_status', 'pending')
     .eq('confirmation_reminder_status', 'sent')
     .is('reception_alert_sent_at', null)
@@ -280,6 +329,10 @@ export async function escalateUnconfirmedAgendaProBookings(db: Db) {
       .select('id')
       .maybeSingle()
     if (!claimed) continue
+    // Already cancelled (in AgendaPro or from NexoOmni) after the reminder
+    // went out — nothing for reception to follow up on. Claimed above so
+    // the sweep doesn't pick it up again.
+    if (isAgendaProCancelled(booking.status_id, booking.status_name)) continue
     try {
       await notifyReceptionUnconfirmed(db, booking, 'no_response')
       notified++
