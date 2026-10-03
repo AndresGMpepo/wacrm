@@ -78,7 +78,7 @@ export async function GET(
           platformMessageId,
         )
         const res = await fetch(freshUrl, { redirect: 'error', signal: AbortSignal.timeout(15_000) })
-        if (!res.ok) throw new Error(`No se pudo descargar el medio de Zernio (${res.status}).`)
+        if (!res.ok) throw new Error(`No se pudo descargar el medio del canal conectado (${res.status}).`)
         resolved = { bytes: Buffer.from(await res.arrayBuffer()), mimeType: res.headers.get('content-type') }
       } catch (resolveError) {
         console.error('[zernio media proxy] resolve-attachment failed, falling back:', resolveError instanceof Error ? resolveError.message : resolveError)

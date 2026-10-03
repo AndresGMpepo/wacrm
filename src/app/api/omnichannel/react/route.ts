@@ -123,7 +123,7 @@ export async function POST(request: Request) {
       if (isZernio) {
         let platformMessageId = targetMessage.platform_message_id ?? extractZernioPlatformMessageId(targetMessage.message_id);
         if (!platformMessageId || !conversation.external_session_id) {
-          throw new Error('This Zernio message does not have a platform message id available for reactions.');
+          throw new Error('Este mensaje no tiene un identificador disponible para reaccionar.');
         }
         if (!targetMessage.platform_message_id) {
           const storedMessageId = targetMessage.message_id?.replace(/^zernio:(?:out:)?[^:]+:/, '') ?? '';
@@ -133,14 +133,14 @@ export async function POST(request: Request) {
             storedMessageId,
           );
           if (resolvedPlatformId) platformMessageId = resolvedPlatformId;
-          else throw new Error('Zernio no devolvió el platformMessageId de este mensaje. Sin ese ID no es posible reaccionar.');
+          else throw new Error('El canal conectado no devolvió el identificador de este mensaje. Sin ese dato no es posible reaccionar.');
         }
         if (emoji === '') {
           await removeZernioReaction(conversation.external_session_id, platformMessageId, accessToken ?? '');
         } else {
           const success = await addZernioReaction(conversation.external_session_id, platformMessageId, accessToken ?? '', emoji);
           if (!success) {
-            throw new Error('Zernio rejected the reaction request.');
+            throw new Error('El canal conectado rechazó la reacción.');
           }
         }
       } else if (conversation.channel_type === 'facebook' || conversation.channel_type === 'instagram') {

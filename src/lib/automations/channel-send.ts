@@ -161,5 +161,5 @@ export async function sendAutomationTemplate(
     .update({ last_message_text: args.templateName, last_message_at: now, updated_at: now })
     .eq('id', args.conversationId)
     .eq('account_id', args.accountId)
-  return `template sent via Zernio (${messageId})`
+  return `template sent via Conexión NexoOmni (${messageId})`
 }

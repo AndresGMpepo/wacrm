@@ -69,13 +69,15 @@ detecta.
 La aprobación de Meta suele tardar de minutos a unas horas. Mientras
 una plantilla esté en estado "Pendiente", no actives el paso 3.
 
-> **Si tu WhatsApp está conectado por Zernio** (y no tienes WhatsApp
-> nativo conectado), NexoOmni envía el recordatorio, el aviso a recepción
-> y recibe la respuesta SI/NO por ese número. Crea las dos plantillas
-> **para ese mismo número** en **Configuración → Plantillas** (al crear
-> la plantilla, elige el número de WhatsApp conectado por Zernio): una
-> plantilla aprobada en otro número no sirve para enviar desde este. Si
-> tienes ambos conectados, se usa el WhatsApp nativo.
+> **Si tu WhatsApp está conectado con la Conexión NexoOmni** (la
+> "Conexión rápida de canales" de **Configuración → WhatsApp**) y no
+> tienes "WhatsApp directo" conectado, NexoOmni envía el recordatorio, el
+> aviso a recepción y recibe la respuesta SI/NO por ese número. Crea las
+> dos plantillas **para ese mismo número** en **Configuración →
+> Plantillas** (al crear la plantilla, elige ese número en lugar de
+> "WhatsApp directo"): una plantilla aprobada en otro número no sirve
+> para enviar desde este. Si tienes ambos conectados, se usa el WhatsApp
+> directo.
 
 ### 3. Activar la confirmación automática
 
@@ -118,11 +120,11 @@ para **cambiar su estado** con un clic, igual que en AgendaPro.
 > **"Hablar por WhatsApp" y "Llamar"**: nunca abren tu WhatsApp o
 > marcador personal — "Hablar por WhatsApp" te lleva a la conversación
 > en la Bandeja de entrada de NexoOmni (o, si tu WhatsApp está
-> conectado por Zernio y este cliente nunca ha escrito, a su ficha de
-> contacto para enviarle la plantilla que abre la conversación, como
-> lo exige Meta) y "Llamar" marca por NexPhone. Si ves el error
-> "WhatsApp not configured" sin tener WhatsApp conectado por ningún
-> medio, revisa **Configuración → WhatsApp** o tu conector de Zernio.
+> conectado con la Conexión NexoOmni y este cliente nunca ha escrito, a
+> su ficha de contacto para enviarle la plantilla que abre la
+> conversación, como lo exige Meta) y "Llamar" marca por NexPhone. Si ves
+> un error de "WhatsApp no configurado", revisa que tu número esté
+> conectado en **Configuración → WhatsApp**.
 
 Los colores vienen precargados con los seis estados de AgendaPro y el
 código de colores que ya usas:

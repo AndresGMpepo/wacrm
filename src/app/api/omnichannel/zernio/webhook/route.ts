@@ -291,7 +291,7 @@ async function handleAccountLifecycleEvent(
         .eq('zernio_account_id', zernioAccountId)
       return
     }
-    const reason = text(account.reason, account.disconnectionType) || 'Desconectado desde Zernio/Meta.'
+    const reason = text(account.reason, account.disconnectionType) || 'El canal se desconectó (desde Meta o desde la conexión).'
     await db.from('omnichannel_connectors')
       .update({ status: 'error', last_error: reason, updated_at: now })
       .eq('provider', `zernio_${channel}`)
@@ -373,7 +373,7 @@ async function handleOutboundStatusEvent(
   const update: Record<string, unknown> = { status }
   if (status === 'delivered') update.delivered_at = now
   if (status === 'read') update.read_at = now
-  if (status === 'failed') update.error_message = text(errorInfo.message, errorInfo.title) || 'Envío fallido reportado por Zernio.'
+  if (status === 'failed') update.error_message = text(errorInfo.message, errorInfo.title) || 'El canal conectado reportó que el envío falló.'
 
   const { error: updateError } = await db.from('broadcast_recipients').update(update).eq('id', recipient.id)
   if (updateError) console.error('[zernio] could not update broadcast recipient status:', updateError.message)

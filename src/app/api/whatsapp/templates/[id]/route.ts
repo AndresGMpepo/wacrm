@@ -300,7 +300,7 @@ export async function DELETE(
         try {
           await deleteZernioWhatsAppTemplate(connector.zernio_account_id, existing.meta_template_id)
         } catch (e) {
-          const message = e instanceof Error ? e.message : 'Zernio delete failed.'
+          const message = e instanceof Error ? e.message : 'No se pudo eliminar la plantilla.'
           return NextResponse.json({ error: message }, { status: 502 })
         }
       }

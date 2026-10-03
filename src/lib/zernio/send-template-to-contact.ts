@@ -53,7 +53,7 @@ export async function sendZernioTemplateToContact(db: SupabaseClient, args: {
 }): Promise<{ conversationId: string; messageId: string | null }> {
   const phone = sanitizePhoneForMeta(args.phone);
   if (!isValidE164(phone)) throw new Error('El contacto no tiene un teléfono de WhatsApp válido.');
-  if (args.connectors.length === 0) throw new Error('No hay un número de WhatsApp conectado por Zernio.');
+  if (args.connectors.length === 0) throw new Error('No hay un número de WhatsApp conectado con la Conexión NexoOmni.');
 
   // Prefer the number this contact already talks to; otherwise the first.
   const connectorIds = args.connectors.map((c) => c.id);

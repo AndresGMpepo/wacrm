@@ -58,7 +58,7 @@ export async function resolveAgendaProWhatsApp(
   if (zernioWhatsappConnectors.length === 0) {
     throw new SendMessageError(
       'whatsapp_not_configured',
-      'WhatsApp not configured. Please set up your WhatsApp integration first.',
+      'WhatsApp no está conectado. Conecta tu número en Configuración → WhatsApp.',
       400
     );
   }

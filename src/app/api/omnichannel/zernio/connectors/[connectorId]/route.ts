@@ -48,7 +48,7 @@ export async function DELETE(_request: NextRequest, { params }: { params: Promis
     if (connector?.zernio_account_id) {
       const result = await disconnectZernioAccount(connector.zernio_account_id)
       if (!result.ok) {
-        warning = `Se eliminó la conexión en NexoOmni, pero no se pudo confirmar la desconexión en Zernio: ${result.error}. Verifica manualmente en el panel de Zernio.`
+        warning = `Se eliminó la conexión en NexoOmni, pero no se pudo confirmar la desconexión del canal: ${result.error}. Contacta a soporte para verificarla.`
       }
     }
 

@@ -210,7 +210,7 @@ export default function PlatformPage() {
   }
 
   const wipeAccountData = async (account: PlatformAccount) => {
-    if (!window.confirm(`¿Vaciar los datos operativos de “${account.name}” (contactos, conversaciones, mensajes, deals, difusiones, citas, notificaciones)? La conexión de WhatsApp/Zernio, las plantillas aprobadas, los usuarios y las automatizaciones/flujos se conservan. Esto no se puede deshacer.`)) return
+    if (!window.confirm(`¿Vaciar los datos operativos de “${account.name}” (contactos, conversaciones, mensajes, deals, difusiones, citas, notificaciones)? Las conexiones de WhatsApp y demás canales, las plantillas aprobadas, los usuarios y las automatizaciones/flujos se conservan. Esto no se puede deshacer.`)) return
     setActionId(`wipe:${account.id}`)
     try {
       const response = await fetch(`/api/platform/accounts/${account.id}/wipe-data`, { method: 'POST' })

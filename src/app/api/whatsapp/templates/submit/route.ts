@@ -184,7 +184,7 @@ export async function POST(request: Request) {
         metaTemplateId = created.id
         metaStatus = created.status
       } catch (e) {
-        const message = e instanceof Error ? e.message : 'Zernio submit failed.'
+        const message = e instanceof Error ? e.message : 'No se pudo enviar la plantilla a revisión.'
         await upsertTemplateRow(
           supabase,
           accountId,

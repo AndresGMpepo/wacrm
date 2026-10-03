@@ -191,7 +191,7 @@ export async function processAgendaProConfirmationReminders(db: Db) {
       } else {
         const connectors = await listZernioWhatsAppConnectors(db, booking.account_id)
         if (connectors.length === 0) {
-          await skip('la cuenta no tiene WhatsApp conectado (ni nativo ni por Zernio)')
+          await skip('la cuenta no tiene WhatsApp conectado (ni directo ni con la Conexión NexoOmni)')
           continue
         }
         await sendZernioTemplateToContact(db, {
