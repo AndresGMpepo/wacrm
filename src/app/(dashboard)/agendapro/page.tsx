@@ -66,7 +66,7 @@ export default function AgendaProPage() {
   const [month, setMonth] = useState(() => startOfMonth(new Date()));
   const [selectedDate, setSelectedDate] = useState(todayISODate());
   const [statusColors, setStatusColors] = useState<Record<string, string>>({});
-  const [providerSchedules, setProviderSchedules] = useState<Record<number, ProviderWorkingHours[]>>({});
+  const [providerSchedules, setProviderSchedules] = useState<Record<number, ProviderWorkingHours[] | null>>({});
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
   const [popoverAnchor, setPopoverAnchor] = useState<HTMLElement | null>(null);
 
@@ -114,21 +114,27 @@ export default function AgendaProPage() {
       if (filterLocationId) params.set('location_id', filterLocationId);
       if (filterServiceId) params.set('service_id', filterServiceId);
       if (filterProviderId) params.set('provider_id', filterProviderId);
+      // One extra day on each side of the visible range, trimmed back
+      // client-side by the booking's own wall-clock date
+      // (`booking.start.slice(0, 10)`, the same date we display).
+      // AgendaPro documents `range_from`/`range_to` as filtering on the
+      // booking's start date but not in which timezone, nor whether
+      // `range_to` is inclusive — and it already labels local times with
+      // a misleading "Z". Padding makes the result correct whichever way
+      // AgendaPro evaluates the edges, instead of silently dropping part
+      // of the day.
       if (viewMode === 'day') {
-        // Narrow to just the selected day — the day view never needs
-        // the rest of the month, and keeping the range small avoids
-        // walking dozens of AgendaPro's own paginated (30/page) results
-        // just to throw most of them away.
-        params.set('range_from', selectedDate);
-        params.set('range_to', selectedDate);
+        const day = new Date(`${selectedDate}T00:00:00`);
+        params.set('range_from', format(subDays(day, 1), 'yyyy-MM-dd'));
+        params.set('range_to', format(addDays(day, 1), 'yyyy-MM-dd'));
       } else {
         // The grid shows a few days of the adjacent months too, so the
         // fetched range covers the whole visible 6-week grid, not just the
         // calendar month itself — otherwise those edge days would look empty.
         const gridStart = startOfWeek(startOfMonth(month), { weekStartsOn: 1 });
         const gridEnd = endOfWeek(endOfMonth(month), { weekStartsOn: 1 });
-        params.set('range_from', format(gridStart, 'yyyy-MM-dd'));
-        params.set('range_to', format(gridEnd, 'yyyy-MM-dd'));
+        params.set('range_from', format(subDays(gridStart, 1), 'yyyy-MM-dd'));
+        params.set('range_to', format(addDays(gridEnd, 1), 'yyyy-MM-dd'));
       }
       const response = await fetch(`/api/agendapro/bookings?${params.toString()}`, { cache: 'no-store' });
       const payload = (await response.json().catch(() => null)) as Booking[] | { error?: string } | null;
@@ -270,13 +276,29 @@ export default function AgendaProPage() {
     [providers, filterLocationId, filterProviderId],
   );
 
+  // Columns for the day view: the catalog's providers, plus any provider
+  // that has a booking this day but isn't in the catalog list (e.g. a
+  // deactivated provider) — otherwise those bookings had no column to be
+  // drawn in and silently disappeared. Bookings are already filtered by
+  // location/provider server-side, so this never re-adds a filtered-out one.
+  const scheduleProviders = useMemo(() => {
+    const known = new Set(visibleProviders.map((p) => p.id));
+    const extra: { id: number; name: string }[] = [];
+    for (const booking of bookingsForSelectedDay) {
+      if (known.has(booking.service_provider_id)) continue;
+      known.add(booking.service_provider_id);
+      extra.push({ id: booking.service_provider_id, name: booking.service_provider || `Prestador ${booking.service_provider_id}` });
+    }
+    return [...visibleProviders, ...extra];
+  }, [visibleProviders, bookingsForSelectedDay]);
+
   // Working-hours schedules (used to render "profesional no disponible" /
   // lunch-break blocks in the day view) only need to be fetched for the
   // providers currently visible, and only once per provider — cache by id
   // so switching days/filters doesn't keep re-fetching the same schedule.
   useEffect(() => {
-    if (viewMode !== 'day' || visibleProviders.length === 0) return;
-    const missingIds = visibleProviders.map((p) => p.id).filter((id) => !(id in providerSchedules));
+    if (viewMode !== 'day' || scheduleProviders.length === 0) return;
+    const missingIds = scheduleProviders.map((p) => p.id).filter((id) => !(id in providerSchedules));
     if (missingIds.length === 0) return;
     let cancelled = false;
     (async () => {
@@ -294,7 +316,7 @@ export default function AgendaProPage() {
     return () => {
       cancelled = true;
     };
-  }, [viewMode, visibleProviders, providerSchedules]);
+  }, [viewMode, scheduleProviders, providerSchedules]);
 
   if (loading) {
     return (
@@ -517,7 +539,7 @@ export default function AgendaProPage() {
           <>
             <AgendaProDaySchedule
               date={new Date(`${selectedDate}T00:00:00`)}
-              providers={visibleProviders}
+              providers={scheduleProviders}
               providerSchedules={providerSchedules}
               bookings={bookingsForSelectedDay}
               statusColors={statusColors}

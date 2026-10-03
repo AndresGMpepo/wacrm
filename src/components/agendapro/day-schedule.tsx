@@ -105,12 +105,16 @@ function layoutOverlaps(bookings: ScheduleBooking[]): LaidOutBooking[] {
  *  per AgendaPro's docs) rather than the numeric `day`, since its
  *  Sunday/Saturday numbering isn't confirmed anywhere. */
 function unavailableRanges(
-  times: ProviderWorkingHours[] | undefined,
+  times: ProviderWorkingHours[] | null | undefined,
   weekdayName: string,
   gridStartMinutes: number,
   gridEndMinutes: number,
 ): { start: number; end: number }[] {
-  const todays = (times ?? []).filter((t) => normalizeDayName(t.day_name) === weekdayName);
+  // Schedule not loaded yet, or AgendaPro couldn't return it — unknown is
+  // NOT the same as "doesn't work today", so draw nothing rather than
+  // graying out a column that may be full of real bookings.
+  if (!times) return [];
+  const todays = times.filter((t) => normalizeDayName(t.day_name) === weekdayName);
   const open = todays
     .map((t) => ({ start: minutesFromClock(t.open), end: minutesFromClock(t.close) }))
     .filter((r) => r.end > r.start)
@@ -152,7 +156,7 @@ export function AgendaProDaySchedule({
   providers: { id: number; name: string }[];
   bookings: ScheduleBooking[];
   statusColors: Record<string, string>;
-  providerSchedules: Record<number, ProviderWorkingHours[]>;
+  providerSchedules: Record<number, ProviderWorkingHours[] | null>;
   onSelectBooking: (booking: ScheduleBooking, element: HTMLElement) => void;
   selectedBookingId: number | null;
 }) {

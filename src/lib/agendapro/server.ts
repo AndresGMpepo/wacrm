@@ -301,15 +301,37 @@ export async function listAgendaProBookings(accountId: string, params: AgendaPro
  *  real limit AgendaPro documents). */
 export async function listAllAgendaProBookings(accountId: string, params: Omit<AgendaProBookingListParams, 'page'>) {
   const PAGE_SIZE = 30
-  const MAX_PAGES = 30
-  const all: Record<string, unknown>[] = []
-  for (let page = 1; page <= MAX_PAGES; page++) {
-    const batch = await listAgendaProBookings(accountId, { ...params, page })
-    if (!Array.isArray(batch) || batch.length === 0) break
-    all.push(...(batch as Record<string, unknown>[]))
-    if (batch.length < PAGE_SIZE) break
+  // Hard safety cap (3,600 bookings), not a documented AgendaPro limit —
+  // sized for a busy multi-provider clinic's 6-week month grid.
+  const MAX_PAGES = 120
+  // A few pages in flight at once: the day view needs ~5–10 pages, the
+  // month grid can need dozens, and walking them strictly one by one made
+  // the calendar slow enough to time out. Kept small to stay polite with
+  // AgendaPro's API (no rate limit is documented).
+  const CONCURRENCY = 4
+  const byId = new Map<unknown, Record<string, unknown>>()
+  let reachedEnd = false
+  for (let first = 1; first <= MAX_PAGES && !reachedEnd; first += CONCURRENCY) {
+    const pages = Array.from({ length: Math.min(CONCURRENCY, MAX_PAGES - first + 1) }, (_, i) => first + i)
+    const batches = await Promise.all(pages.map((page) => listAgendaProBookings(accountId, { ...params, page })))
+    for (const batch of batches) {
+      if (!Array.isArray(batch) || batch.length === 0) {
+        reachedEnd = true
+        break
+      }
+      // Keyed by id: if a booking moves between pages while we walk them,
+      // it's counted once instead of showing up twice.
+      for (const booking of batch as Record<string, unknown>[]) byId.set(booking.id ?? byId.size, booking)
+      if (batch.length < PAGE_SIZE) {
+        reachedEnd = true
+        break
+      }
+    }
   }
-  return all
+  if (!reachedEnd) {
+    console.warn(`[agendapro] booking list hit the ${MAX_PAGES}-page safety cap for account ${accountId}; results may be incomplete.`)
+  }
+  return [...byId.values()]
 }
 
 export async function createAgendaProBooking(accountId: string, body: {

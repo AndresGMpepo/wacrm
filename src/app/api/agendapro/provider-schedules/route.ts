@@ -29,7 +29,9 @@ export async function GET(request: Request) {
         return [id, provider.times ?? []] as const
       } catch (error) {
         console.error(`[agendapro] could not load schedule for provider ${id}:`, error)
-        return [id, []] as const
+        // null = unknown (not "works no hours"), so the calendar draws no
+        // gray "no disponible" block instead of graying out the whole day.
+        return [id, null] as const
       }
     }))
     const schedules = Object.fromEntries(results)
