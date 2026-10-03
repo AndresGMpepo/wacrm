@@ -43,7 +43,10 @@ function formatDateTime(value: string) {
 }
 
 function todayISODate() {
-  return new Date().toISOString().slice(0, 10);
+  // Local calendar date, not `toISOString()` (UTC): in Mexico City
+  // (UTC-6) the UTC date is already "tomorrow" from 6 PM onward, which
+  // made the "Hoy" button jump to the next day every evening.
+  return format(new Date(), 'yyyy-MM-dd');
 }
 
 export default function AgendaProPage() {
