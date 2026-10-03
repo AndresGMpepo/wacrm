@@ -15,8 +15,12 @@ import { getAgendaProStatusColors, saveAgendaProStatusColors } from '@/lib/agend
 
 export async function GET() {
   try {
-    const { supabase, accountId } = await requireAccountModule('agendapro', 'admin')
-    const colors = await getAgendaProStatusColors(supabase, accountId)
+    // 'agent', not 'admin': the calendar itself (used by reception/agents)
+    // loads these to paint bookings in the account's own color code —
+    // with 'admin' every non-admin saw the default colors. Saving (POST)
+    // stays admin-only.
+    const { supabase, accountId } = await requireAccountModule('agendapro', 'agent')
+    const colors = await getAgendaProStatusColors(accountId)
     const { data } = await supabase
       .from('agendapro_bookings')
       .select('status_name')

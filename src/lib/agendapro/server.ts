@@ -1,6 +1,5 @@
 import crypto from 'node:crypto'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
-import type { SupabaseClient } from '@supabase/supabase-js'
 
 import { encrypt, decrypt } from '@/lib/whatsapp/encryption'
 import { correctAgendaProInstant } from '@/lib/agendapro/time'
@@ -104,8 +103,14 @@ export type AgendaProConfig = {
   connectedAt: string
 }
 
-export async function getAgendaProConfig(db: SupabaseClient, accountId: string): Promise<AgendaProConfig | null> {
-  const { data, error } = await db
+// `agendapro_configs` has RLS enabled with NO policies on purpose (it holds
+// the encrypted credentials) — it is only readable with the service role,
+// AFTER the calling route has done its own requireAccountModule() role
+// check. These getters therefore never take the caller's RLS-scoped client:
+// passing one silently returned no row (→ "not connected", a hidden
+// confirmations card, colors/timezone stuck on defaults).
+export async function getAgendaProConfig(accountId: string): Promise<AgendaProConfig | null> {
+  const { data, error } = await admin()
     .from('agendapro_configs')
     .select('status, last_error, webhook_token, created_at')
     .eq('account_id', accountId)
@@ -135,8 +140,8 @@ export type AgendaProConfirmationSettings = {
   receptionTemplateLanguage: string
 }
 
-export async function getAgendaProConfirmationSettings(db: SupabaseClient, accountId: string): Promise<AgendaProConfirmationSettings | null> {
-  const { data, error } = await db
+export async function getAgendaProConfirmationSettings(accountId: string): Promise<AgendaProConfirmationSettings | null> {
+  const { data, error } = await admin()
     .from('agendapro_configs')
     .select('confirmation_reminder_enabled, reception_phone, confirmation_template_name, confirmation_template_language, reception_template_name, reception_template_language')
     .eq('account_id', accountId)
@@ -186,8 +191,8 @@ export async function saveAgendaProConfirmationSettings(accountId: string, setti
 // override scheme this backs.
 // ------------------------------------------------------------
 
-export async function getAgendaProStatusColors(db: SupabaseClient, accountId: string): Promise<Record<string, string>> {
-  const { data, error } = await db
+export async function getAgendaProStatusColors(accountId: string): Promise<Record<string, string>> {
+  const { data, error } = await admin()
     .from('agendapro_configs')
     .select('status_colors')
     .eq('account_id', accountId)
@@ -217,8 +222,8 @@ export async function saveAgendaProStatusColors(accountId: string, colors: Recor
 // this is needed at all (AgendaPro mislabels local time as UTC).
 // ------------------------------------------------------------
 
-export async function getAgendaProTimezone(db: SupabaseClient, accountId: string): Promise<string> {
-  const { data, error } = await db.from('agendapro_configs').select('timezone').eq('account_id', accountId).maybeSingle()
+export async function getAgendaProTimezone(accountId: string): Promise<string> {
+  const { data, error } = await admin().from('agendapro_configs').select('timezone').eq('account_id', accountId).maybeSingle()
   if (error) throw error
   return data?.timezone || 'America/Mexico_City'
 }
@@ -400,7 +405,7 @@ export async function syncLocalAgendaProBooking(accountId: string, booking: unkn
   if (!bookingId) return
   try {
     const db = admin()
-    const timezone = await getAgendaProTimezone(db, accountId)
+    const timezone = await getAgendaProTimezone(accountId)
     const patch: Record<string, unknown> = { synced_at: new Date().toISOString() }
     if (typeof b.start === 'string' && b.start) patch.start_time = correctAgendaProInstant(b.start, timezone)
     if (typeof b.end === 'string' && b.end) patch.end_time = correctAgendaProInstant(b.end, timezone)

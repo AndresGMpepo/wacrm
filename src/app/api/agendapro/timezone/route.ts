@@ -13,10 +13,10 @@ import { getAgendaProConfig, getAgendaProTimezone, saveAgendaProTimezone } from 
 
 export async function GET() {
   try {
-    const { supabase, accountId } = await requireAccountModule('agendapro', 'admin')
-    const config = await getAgendaProConfig(supabase, accountId)
+    const { accountId } = await requireAccountModule('agendapro', 'admin')
+    const config = await getAgendaProConfig(accountId)
     if (!config) return NextResponse.json({ error: 'Conecta AgendaPro primero.' }, { status: 404 })
-    const timezone = await getAgendaProTimezone(supabase, accountId)
+    const timezone = await getAgendaProTimezone(accountId)
     return NextResponse.json({ timezone })
   } catch (error) { return toErrorResponse(error) }
 }

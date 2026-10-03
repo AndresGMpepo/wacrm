@@ -14,8 +14,8 @@ function publicOrigin(request: Request) {
 
 export async function GET(request: Request) {
   try {
-    const { supabase, accountId } = await requireAccountModule('agendapro', 'admin')
-    const config = await getAgendaProConfig(supabase, accountId)
+    const { accountId } = await requireAccountModule('agendapro', 'admin')
+    const config = await getAgendaProConfig(accountId)
     if (!config) return NextResponse.json({ connected: false })
     return NextResponse.json({
       connected: true,

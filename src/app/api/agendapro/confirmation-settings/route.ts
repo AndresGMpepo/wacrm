@@ -15,8 +15,8 @@ import { sanitizePhoneForMeta, isValidE164 } from '@/lib/whatsapp/phone-utils'
 
 export async function GET() {
   try {
-    const { supabase, accountId } = await requireAccountModule('agendapro', 'admin')
-    const settings = await getAgendaProConfirmationSettings(supabase, accountId)
+    const { accountId } = await requireAccountModule('agendapro', 'admin')
+    const settings = await getAgendaProConfirmationSettings(accountId)
     if (!settings) return NextResponse.json({ error: 'Conecta AgendaPro antes de configurar las confirmaciones.' }, { status: 404 })
     return NextResponse.json(settings)
   } catch (error) { return toErrorResponse(error) }

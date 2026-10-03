@@ -103,7 +103,7 @@ async function upsertAgendaProBooking(db: ReturnType<typeof admin>, accountId: s
   // does carry one, else leave unlinked (best-effort cache, not guaranteed).
   const agendaproClientId = id(client.id)
   const contactId = await linkedContactId(db, accountId, agendaproClientId)
-  const timezone = await getAgendaProTimezone(db, accountId)
+  const timezone = await getAgendaProTimezone(accountId)
   const rawStart = text(booking.start)
   const rawEnd = text(booking.end)
   const { error } = await db.from('agendapro_bookings').upsert({
