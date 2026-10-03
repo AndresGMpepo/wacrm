@@ -300,14 +300,74 @@ export async function downloadZernioInboundMedia(urlValue: string, channel: Zern
   return { bytes, mimeType: response.headers.get('content-type') || null }
 }
 
-/** Read the customer avatar maintained by Zernio's unified inbox. */
-export async function getZernioParticipantPicture(conversationId: string, zernioAccountId: string) {
+/**
+ * The customer's display name + avatar as Zernio's unified inbox currently
+ * knows them (GET /v1/inbox/conversations/{id} — `participantName` is
+ * documented at docs.zernio.com/messages/get-inbox-conversation;
+ * `participantPicture` is what this module already relied on). Zernio
+ * often resolves a Messenger profile a little after the first event of a
+ * conversation, so a webhook that arrived without a name can be completed
+ * from here later.
+ */
+export async function getZernioParticipantProfile(conversationId: string, zernioAccountId: string) {
   const query = new URLSearchParams({ accountId: zernioAccountId })
   const payload = await zernioFetch(`/inbox/conversations/${encodeURIComponent(conversationId)}?${query.toString()}`, {
     signal: AbortSignal.timeout(3_000),
   })
   const data = payload.data && typeof payload.data === 'object' ? payload.data as Record<string, unknown> : payload
-  return secureUrl(data.participantPicture ?? data.participant_picture)
+  const name = typeof data.participantName === 'string' ? data.participantName.trim() : ''
+  return {
+    name: name || null,
+    picture: secureUrl(data.participantPicture ?? data.participant_picture),
+  }
+}
+
+/** Read the customer avatar maintained by Zernio's unified inbox. */
+export async function getZernioParticipantPicture(conversationId: string, zernioAccountId: string) {
+  return (await getZernioParticipantProfile(conversationId, zernioAccountId)).picture
+}
+
+export type ZernioListedMessage = {
+  /** Platform message id (`mid` on Messenger/Instagram, `wamid` on
+   *  WhatsApp) — the same value webhooks deliver as
+   *  `message.platformMessageId`. */
+  id: string
+  text: string
+  direction: 'incoming' | 'outgoing'
+  createdAt: string
+  attachments: Record<string, unknown>[]
+}
+
+/**
+ * Newest page (up to 100) of a conversation's messages, per
+ * docs.zernio.com/messages/get-inbox-conversation-messages. Used to
+ * recover messages a webhook failed to store.
+ */
+export async function listZernioConversationMessages(conversationId: string, zernioAccountId: string): Promise<ZernioListedMessage[]> {
+  const query = new URLSearchParams({ accountId: zernioAccountId, limit: '100', sortOrder: 'desc' })
+  const payload = await zernioFetch(`/inbox/conversations/${encodeURIComponent(conversationId)}/messages?${query.toString()}`, {
+    signal: AbortSignal.timeout(8_000),
+  })
+  const raw = Array.isArray(payload.messages) ? payload.messages : []
+  const result: ZernioListedMessage[] = []
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue
+    const message = item as Record<string, unknown>
+    const id = typeof message.id === 'string' ? message.id.trim() : ''
+    const direction = message.direction === 'incoming' || message.direction === 'outgoing' ? message.direction : null
+    const createdAt = typeof message.createdAt === 'string' ? message.createdAt : ''
+    if (!id || !direction || !createdAt) continue
+    result.push({
+      id,
+      text: typeof message.message === 'string' ? message.message : '',
+      direction,
+      createdAt,
+      attachments: Array.isArray(message.attachments)
+        ? message.attachments.filter((a): a is Record<string, unknown> => Boolean(a) && typeof a === 'object')
+        : [],
+    })
+  }
+  return result
 }
 
 /**

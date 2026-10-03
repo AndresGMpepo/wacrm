@@ -7,8 +7,8 @@ import { dispatchInboundAutomations } from '@/lib/automations/inbound'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
 import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe'
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
-import { extractZernioMedia, extractZernioReaction, normalizeMetaText, safeZernioContactName } from '@/lib/omnichannel/webhook-normalizer'
-import { getZernioParticipantPicture, verifyZernioSignature, type ZernioChannel } from '@/lib/zernio/server'
+import { extractZernioMedia, extractZernioReaction, isZernioPlaceholderName, normalizeMetaText, safeZernioContactName } from '@/lib/omnichannel/webhook-normalizer'
+import { getZernioParticipantProfile, verifyZernioSignature, type ZernioChannel } from '@/lib/zernio/server'
 import { isValidStatusTransition } from '@/lib/whatsapp/recipient-status-ladder'
 import { flagBroadcastReplyIfAny } from '@/lib/whatsapp/broadcast-reply-flag'
 import type { ChannelType } from '@/types'
@@ -94,6 +94,31 @@ async function resolveContact(
         .eq('external_user_id', externalUserId)
       if (updateError) throw updateError
     }
+    // The first event of a conversation (often the Page's own automatic
+    // reply, delivered as `message.sent` before Meta/Zernio has resolved
+    // the customer's profile) can create the contact with a placeholder
+    // like "Cliente Facebook 123456". Upgrade it as soon as a later event
+    // carries the real name — never overwrite a name someone already set.
+    if (!isZernioPlaceholderName(name)) {
+      const { data: current, error: currentError } = await db
+        .from('contacts')
+        .select('name')
+        .eq('id', contactId)
+        .eq('account_id', connector.account_id)
+        .maybeSingle()
+      if (currentError) throw currentError
+      if (current && isZernioPlaceholderName(current.name as string | null) && current.name !== name) {
+        const { error: renameError } = await db.from('contacts')
+          .update({ name, updated_at: new Date().toISOString() })
+          .eq('id', contactId)
+          .eq('account_id', connector.account_id)
+        if (renameError) console.error('[zernio] could not update placeholder contact name:', renameError.message)
+        await db.from('omnichannel_contact_identities')
+          .update({ display_name: name })
+          .eq('connector_id', connector.id)
+          .eq('external_user_id', externalUserId)
+      }
+    }
     return { contactId, created: false }
   }
 
@@ -159,9 +184,66 @@ async function resolveContact(
       .eq('connector_id', connector.id)
       .eq('external_user_id', externalUserId)
       .maybeSingle()
-    if (concurrent?.contact_id) return { contactId: concurrent.contact_id as string, created: false }
+    if (concurrent?.contact_id) {
+      // Another event for the same customer (e.g. the inbound message and
+      // the Page's automatic reply, delivered at the same instant) won the
+      // race. The contact row this call just inserted is an orphan with no
+      // conversation or identity pointing at it — remove it instead of
+      // leaving a duplicate "Cliente Facebook …" in Contacts.
+      if (contactCreated && concurrent.contact_id !== contactId) {
+        await db.from('contacts').delete().eq('id', contactId).eq('account_id', connector.account_id)
+      }
+      return { contactId: concurrent.contact_id as string, created: false }
+    }
   }
   return { contactId, created: contactCreated }
+}
+
+type ConversationRow = { id: string; unread_count: number | null; status: string | null }
+
+/**
+ * Find-or-create the NexoOmni conversation for a Zernio thread. An inbound
+ * message and the Page's automatic reply (`message.sent`) for a brand-new
+ * conversation are delivered at practically the same instant; both used to
+ * insert and the loser hit the (account, connector, external_session_id)
+ * unique index — marking that event failed and silently dropping it (the
+ * customer's own message, in the worst case, leaving the thread with no
+ * inbound message and a falsely "expired" 24h window). On that violation
+ * we re-read the winner's row instead.
+ */
+async function findOrCreateZernioConversation(
+  db: ReturnType<typeof admin>,
+  connector: Connector,
+  contactId: string,
+  auditUserId: string,
+  externalConversationId: string,
+): Promise<{ row: ConversationRow; created: boolean }> {
+  const find = async () => {
+    const { data, error } = await db
+      .from('conversations')
+      .select('id, unread_count, status')
+      .eq('account_id', connector.account_id)
+      .eq('connector_id', connector.id)
+      .eq('external_session_id', externalConversationId)
+      .limit(1)
+    if (error) throw error
+    return (data?.[0] as ConversationRow | undefined) ?? null
+  }
+
+  const existing = await find()
+  if (existing) return { row: existing, created: false }
+
+  const { data, error } = await db
+    .from('conversations')
+    .insert({ account_id: connector.account_id, user_id: auditUserId, contact_id: contactId, channel_type: connector.provider, connector_id: connector.id, external_session_id: externalConversationId, channel_source_label: connector.display_name, queue_id: connector.queue_id })
+    .select('id, unread_count, status')
+    .single()
+  if (!error && data) return { row: data as ConversationRow, created: true }
+  if (isUniqueViolation(error)) {
+    const raced = await find()
+    if (raced) return { row: raced, created: false }
+  }
+  throw error ?? new Error('No se pudo crear la conversación del canal conectado.')
 }
 
 async function registerReceipt(
@@ -455,31 +537,24 @@ export async function POST(request: Request) {
           // called out in Zernio's docs). The customer is always
           // `conversation.participant*`, populated in both directions.
           const auditUserId = await resolveAuditUserId(db, typed.account_id)
-          const participantName = text(conversation.participantName, participant.name)
+          let participantName = text(conversation.participantName, participant.name)
+          let participantPicture: string | undefined
+          if (!participantName) {
+            // Usually the Page's automatic greeting, sent before Zernio has
+            // resolved the customer's profile — ask Zernio for it instead of
+            // naming the contact "Cliente Facebook 123456".
+            const profile = await getZernioParticipantProfile(externalConversationId, zernioAccountId).catch(() => null)
+            participantName = profile?.name ?? ''
+            participantPicture = profile?.picture ?? undefined
+          }
           const outgoingContactName = participantName || safeZernioContactName(channel, externalUserId)
           const outgoingContactPhone = channel === 'whatsapp' ? externalUserId : ''
           const { contactId: outgoingContactId } = await resolveContact(
-            db, typed, externalUserId, auditUserId, outgoingContactName, undefined, outgoingContactPhone || undefined, undefined,
+            db, typed, externalUserId, auditUserId, outgoingContactName, undefined, outgoingContactPhone || undefined, participantPicture,
           )
 
-          const { data: outRows, error: outFindError } = await db
-            .from('conversations')
-            .select('id')
-            .eq('account_id', typed.account_id)
-            .eq('connector_id', typed.id)
-            .eq('external_session_id', externalConversationId)
-            .limit(1)
-          if (outFindError) throw outFindError
-          let outConversationId = outRows?.[0]?.id as string | undefined
-          if (!outConversationId) {
-            const { data: createdConv, error: createConvError } = await db
-              .from('conversations')
-              .insert({ account_id: typed.account_id, user_id: auditUserId, contact_id: outgoingContactId, channel_type: typed.provider, connector_id: typed.id, external_session_id: externalConversationId, channel_source_label: typed.display_name, queue_id: typed.queue_id })
-              .select('id')
-              .single()
-            if (createConvError || !createdConv) throw createConvError ?? new Error('No se pudo crear la conversación saliente.')
-            outConversationId = createdConv.id
-          }
+          const { row: outConversation } = await findOrCreateZernioConversation(db, typed, outgoingContactId, auditUserId, externalConversationId)
+          const outConversationId = outConversation.id
 
           const outAttachment = extractZernioMedia(incoming)
           const outContent = normalizeMetaText(text(incoming.text), outAttachment?.caption || outAttachment?.fileName)
@@ -538,38 +613,25 @@ export async function POST(request: Request) {
         sender.avatarUrl ?? sender.avatar_url ?? sender.profilePicture ?? sender.profile_picture ?? sender.profileImage ?? sender.profile_image ?? sender.profilePhoto ?? sender.profile_photo ?? sender.picture ?? sender.pictureUrl ?? sender.picture_url ?? sender.imageUrl ?? sender.image_url ?? sender.photoUrl ?? sender.photo_url ??
         participant.avatarUrl ?? participant.avatar_url ?? participant.profilePicture ?? participant.profile_picture ?? participant.profileImage ?? participant.profile_image ?? participant.profilePhoto ?? participant.profile_photo ?? participant.picture ?? participant.pictureUrl ?? participant.picture_url ?? participant.imageUrl ?? participant.image_url ?? participant.photoUrl ?? participant.photo_url,
       )
-      const contactAvatarUrl = webhookAvatarUrl ?? await getZernioParticipantPicture(externalConversationId, zernioAccountId).catch(() => null)
+      // One lookup covers both gaps: a missing avatar (pre-existing
+      // behavior) and a missing name, which Zernio frequently fills in on
+      // its side a moment after the webhook was built.
+      const profile = !webhookAvatarUrl || !contactName
+        ? await getZernioParticipantProfile(externalConversationId, zernioAccountId).catch(() => null)
+        : null
+      const contactAvatarUrl = webhookAvatarUrl ?? profile?.picture ?? null
+      const resolvedContactName = contactName || profile?.name || ''
       const { contactId, created: contactCreated } = await resolveContact(
         db,
         typed,
         externalUserId,
         auditUserId,
-        contactName || safeZernioContactName(channel, externalUserId),
+        resolvedContactName || safeZernioContactName(channel, externalUserId),
         contactEmail || undefined,
         contactPhone || undefined,
         contactAvatarUrl ?? undefined,
       )
-      const { data: rows, error: findError } = await db
-        .from('conversations')
-        .select('id, unread_count, status')
-        .eq('account_id', typed.account_id)
-        .eq('connector_id', typed.id)
-        .eq('external_session_id', externalConversationId)
-        .limit(1)
-      if (findError) throw findError
-
-      let conversationRow = rows?.[0]
-      let created = false
-      if (!conversationRow) {
-        const { data, error } = await db
-          .from('conversations')
-          .insert({ account_id: typed.account_id, user_id: auditUserId, contact_id: contactId, channel_type: typed.provider, connector_id: typed.id, external_session_id: externalConversationId, channel_source_label: typed.display_name, queue_id: typed.queue_id })
-          .select('id, unread_count, status')
-          .single()
-        if (error || !data) throw error ?? new Error('No se pudo crear la conversación entrante.')
-        conversationRow = data
-        created = true
-      }
+      const { row: conversationRow, created } = await findOrCreateZernioConversation(db, typed, contactId, auditUserId, externalConversationId)
 
       const now = new Date().toISOString()
       const messageId = `zernio:${typed.id}:${externalMessageId || externalEventId}`

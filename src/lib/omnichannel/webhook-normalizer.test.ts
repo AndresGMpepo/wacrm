@@ -4,10 +4,27 @@ import {
   extractMetaReaction,
   extractZernioMedia,
   extractZernioReaction,
+  isZernioPlaceholderName,
   normalizeMetaText,
   safeMetaContactName,
   safeZernioContactName,
 } from '@/lib/omnichannel/webhook-normalizer'
+
+describe('isZernioPlaceholderName', () => {
+  it('flags empty names and the generated fallback names', () => {
+    expect(isZernioPlaceholderName('')).toBe(true)
+    expect(isZernioPlaceholderName(null)).toBe(true)
+    expect(isZernioPlaceholderName(safeZernioContactName('facebook', '25012345745751'))).toBe(true)
+    expect(isZernioPlaceholderName('Cliente Instagram 123456')).toBe(true)
+    expect(isZernioPlaceholderName('Cliente WhatsApp anon')).toBe(true)
+  })
+
+  it('never flags a real name, even one starting with "Cliente"', () => {
+    expect(isZernioPlaceholderName('Naya Ramirez-Villalobos')).toBe(false)
+    expect(isZernioPlaceholderName('Cliente Facebook VIP Juan')).toBe(false)
+    expect(isZernioPlaceholderName('Cliente frecuente')).toBe(false)
+  })
+})
 
 describe('extractMetaAttachment', () => {
   it('reads the media payload and caption without exposing technical ids', () => {

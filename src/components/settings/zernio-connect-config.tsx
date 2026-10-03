@@ -127,11 +127,16 @@ export function ZernioConnectConfig({ channels }: { channels: Channel[] }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ connectorId: connector.id }),
       })
-      const body = await response.json().catch(() => null) as { updated?: number; unavailable?: number; error?: string } | null
-      if (!response.ok) throw new Error(body?.error ?? 'No se pudieron sincronizar las fotos.')
-      toast.success(body?.updated ? `${body.updated} fotos de perfil sincronizadas.` : 'No hay fotos nuevas disponibles en este canal.')
+      const body = await response.json().catch(() => null) as { updated?: number; renamed?: number; recovered_messages?: number; error?: string } | null
+      if (!response.ok) throw new Error(body?.error ?? 'No se pudo sincronizar el canal.')
+      const parts = [
+        body?.updated ? `${body.updated} fotos` : null,
+        body?.renamed ? `${body.renamed} nombres` : null,
+        body?.recovered_messages ? `${body.recovered_messages} mensajes recuperados` : null,
+      ].filter(Boolean)
+      toast.success(parts.length ? `Sincronizado: ${parts.join(', ')}.` : 'Todo está al día en este canal.')
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'No se pudieron sincronizar las fotos.')
+      toast.error(error instanceof Error ? error.message : 'No se pudo sincronizar el canal.')
     } finally {
       setPending(null)
     }
@@ -189,9 +194,9 @@ export function ZernioConnectConfig({ channels }: { channels: Channel[] }) {
                     <p className="text-xs text-muted-foreground">{label} · {connector.status === 'paused' ? 'Pausado' : 'Conectado'}</p>
                   </div>
                   <div className="flex gap-2">
-                    <Button variant="outline" size="sm" disabled={!!busy} onClick={() => void syncAvatars(connector)}>
+                    <Button variant="outline" size="sm" disabled={!!busy} onClick={() => void syncAvatars(connector)} title="Actualiza fotos y nombres de clientes y recupera mensajes de clientes que falten">
                       {pending === `avatars:${connector.id}` ? <Loader2 className="mr-1 size-3.5 animate-spin" /> : <ImageDown className="mr-1 size-3.5" />}
-                      Sincronizar fotos
+                      Sincronizar fotos y mensajes
                     </Button>
                     <Button variant="outline" size="sm" disabled={!!busy} onClick={() => manage(connector, connector.status === 'paused' ? 'resume' : 'pause')}>
                       {connector.status === 'paused' ? <Play className="mr-1 size-3.5" /> : <Pause className="mr-1 size-3.5" />}
