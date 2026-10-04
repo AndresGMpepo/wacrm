@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server'
+import { after, NextResponse } from 'next/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 
 import { resolveAuditUserId } from '@/lib/api/v1/contacts'
@@ -15,7 +15,9 @@ import { handleAgendaProConfirmationReply } from '@/lib/agendapro/confirmation'
 import type { ChannelType } from '@/types'
 
 export const dynamic = 'force-dynamic'
-export const maxDuration = 20
+// Zernio requires a prompt HTTP acknowledgement. The actual handling (which
+// can include an AI request) is registered with `after()` below.
+export const maxDuration = 60
 
 type Json = Record<string, unknown>
 type Connector = {
@@ -394,6 +396,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'JSON inválido.' }, { status: 400 })
   }
 
+  const eventIdHeader = request.headers.get('x-zernio-event-id')
+  after(async () => {
+    await processZernioWebhook(payload, eventIdHeader)
+  })
+  return NextResponse.json({ ok: true })
+}
+
+async function processZernioWebhook(payload: Json, eventIdHeader: string | null) {
   const db = admin()
   try {
     for (const event of entries(payload)) {
@@ -426,7 +436,7 @@ export async function POST(request: Request) {
       const sender = record(incoming.sender ?? event.sender ?? participantSource ?? comment.author)
       const externalUserId = text(conversation.participantId, incoming.senderId, sender.id, sender._id, sender.userId, participant.id, participant._id, comment.author_id, comment.authorId, conversation.customerId, conversation.contactId, event.senderId)
       const externalMessageId = text(incoming.platformMessageId, incoming.id, incoming._id, event.messageId, event.id)
-      const externalEventId = text(event.id, request.headers.get('x-zernio-event-id'), externalMessageId)
+      const externalEventId = text(event.id, eventIdHeader, externalMessageId)
       const externalConversationId = text(
         conversation.id,
         conversation._id,
@@ -518,7 +528,21 @@ export async function POST(request: Request) {
       // work off an incomplete thread.
       if (eventType === 'message.sent') {
         try {
-          const zernioMessageId = text(incoming.id, incoming._id, event.messageId, event.id) || externalMessageId
+          // A send initiated by NexoOmni stores the provider id returned by
+          // Zernio in `platform_message_id`. `message.sent` can also carry a
+          // separate Zernio envelope id in `id`; preferring it made the echo
+          // miss our own row and rendered a second local bubble even though
+          // WhatsApp had received only one message.
+          const zernioMessageId = text(
+            incoming.platformMessageId,
+            incoming.platform_message_id,
+            incoming.nativeMessageId,
+            incoming.externalMessageId,
+            incoming.id,
+            incoming._id,
+            event.messageId,
+            event.id,
+          ) || externalMessageId
           const { data: existingOutbound, error: existingOutboundError } = await db
             .from('messages')
             .select('id')
@@ -791,9 +815,7 @@ export async function POST(request: Request) {
           .eq('connector_id', typed.id).eq('external_message_id', externalEventId)
       }
     }
-    return NextResponse.json({ ok: true })
   } catch (error) {
     console.error('[zernio] webhook failed', error)
-    return NextResponse.json({ error: 'No se pudo procesar el evento.' }, { status: 500 })
   }
 }

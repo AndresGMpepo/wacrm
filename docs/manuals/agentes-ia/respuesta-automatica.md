@@ -4,7 +4,7 @@ description: "Configura al agente de IA para que responda solo en WhatsApp, con 
 section: "agentes-ia"
 role: ["admin", "owner"]
 plan: ["crecimiento", "premium"]
-updated: "2026-10-02"
+updated: "2026-10-04"
 ---
 
 ## ¿Qué es?
@@ -61,6 +61,13 @@ WhatsApp — es una limitación conocida, no algo que falte activar.
 **¿Puedo ver cuánto está costando el uso de IA?**
 Sí, en **Agentes IA → Uso** se muestra el consumo por modo (respuesta
 automática, análisis, redacción asistida) y periodo.
+
+**El aviso de IA sigue visible, ¿quiere decir que está escribiendo?**
+No. El aviso indica que la respuesta automática está activa en esa
+conversación; no es un indicador de escritura. Si alcanza el límite de
+respuestas configurado para ese chat, verás el contador y **Reiniciar IA**
+para darle un nuevo límite. Úsalo solo si quieres que el agente vuelva a
+contestar automáticamente.
 
 **¿La IA puede escribir el mensaje pero dejar que yo lo revise antes
 de enviarlo?**

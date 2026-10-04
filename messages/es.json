@@ -297,7 +297,9 @@
     },
     "aiBanner": {
       "pausedTitle": "El asistente de IA está pausado aquí",
-      "activeText": "El asistente de IA está respondiendo automáticamente",
+      "activeText": "El asistente de IA está activo para responder automáticamente",
+      "limitReached": "La IA alcanzó el límite de respuestas de este chat ({count}/{max}).",
+      "reset": "Reiniciar IA",
       "takeOver": "Tomar el control",
       "resume": "Reanudar IA",
       "tookOver": "Has tomado el control de este chat.",

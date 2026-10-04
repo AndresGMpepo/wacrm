@@ -20,6 +20,7 @@ import { useAuth } from "@/hooks/use-auth";
 // ------------------------------------------------------------
 interface AiAccountStatus {
   autoReplyOn: boolean;
+  maxReplies: number;
 }
 const statusCache = new Map<string, AiAccountStatus>();
 
@@ -28,17 +29,20 @@ async function fetchAiAccountStatus(accountId: string): Promise<AiAccountStatus>
   if (cached) return cached;
   try {
     const res = await fetch("/api/ai/config", { cache: "no-store" });
-    if (!res.ok) return { autoReplyOn: false }; // don't cache a transient failure
+    if (!res.ok) return { autoReplyOn: false, maxReplies: 0 }; // don't cache a transient failure
     const j = await res.json();
     const status = {
       // AI auto-reply is "live" only when configured, the master switch
       // is on, and the inbound bot is enabled.
       autoReplyOn: !!(j?.configured && j?.is_active && j?.auto_reply_enabled),
+      maxReplies: Number.isFinite(Number(j?.auto_reply_max_per_conversation))
+        ? Number(j.auto_reply_max_per_conversation)
+        : 0,
     };
     statusCache.set(accountId, status);
     return status;
   } catch {
-    return { autoReplyOn: false }; // don't cache
+    return { autoReplyOn: false, maxReplies: 0 }; // don't cache
   }
 }
 
@@ -48,6 +52,8 @@ interface AiThreadBannerProps {
   disabled: boolean;
   /** `conversations.ai_handoff_summary` — note the bot left on handoff. */
   handoffSummary?: string | null;
+  /** `conversations.ai_reply_count` — number of automatic replies used. */
+  replyCount?: number;
   /** Current assignee; when a human owns the thread the bot won't run,
    *  so the "AI active" banner is suppressed. */
   assignedAgentId?: string | null;
@@ -74,24 +80,27 @@ export function AiThreadBanner({
   conversationId,
   disabled,
   handoffSummary,
+  replyCount = 0,
   assignedAgentId,
   currentUserId,
   onChange,
 }: AiThreadBannerProps) {
   const t = useTranslations("Inbox.aiBanner");
   const { accountId } = useAuth();
-  const [autoReplyOn, setAutoReplyOn] = useState<boolean | null>(null);
+  const [aiStatus, setAiStatus] = useState<AiAccountStatus | null>(null);
   const [busy, setBusy] = useState(false);
+  const [replyCountOverride, setReplyCountOverride] = useState<number | null>(null);
   // Optimistic local mirror of the pause flag so the banner flips
   // instantly on click; re-seeds whenever the thread (or its server
   // state via realtime) changes.
   const [paused, setPaused] = useState(disabled);
   useEffect(() => setPaused(disabled), [conversationId, disabled]);
+  useEffect(() => setReplyCountOverride(null), [conversationId, replyCount]);
 
   useEffect(() => {
     if (!accountId) return;
     let alive = true;
-    fetchAiAccountStatus(accountId).then((s) => alive && setAutoReplyOn(s.autoReplyOn));
+    fetchAiAccountStatus(accountId).then((status) => alive && setAiStatus(status));
     return () => {
       alive = false;
     };
@@ -113,6 +122,7 @@ export function AiThreadBanner({
           return;
         }
         setPaused(paused);
+        if (!paused) setReplyCountOverride(0);
         onChange?.({
           ai_autoreply_disabled: paused,
           // Take over assigns to the acting agent; resume releases only
@@ -135,7 +145,7 @@ export function AiThreadBanner({
   );
 
   // Account has no auto-reply → nothing to show. (Still loading → nothing.)
-  if (!autoReplyOn) return null;
+  if (!aiStatus?.autoReplyOn) return null;
 
   // Paused here (a human took over, or the model handed off).
   if (paused) {
@@ -158,6 +168,25 @@ export function AiThreadBanner({
 
   // Active, but a human already owns it → the bot won't fire; no banner.
   if (assignedAgentId) return null;
+
+  // This is account/thread status, not an in-progress typing signal.
+  // Make the configured safety cap explicit so an agent understands why a
+  // later inbound message did not receive another automatic reply.
+  const visibleReplyCount = replyCountOverride ?? replyCount;
+  if (aiStatus.maxReplies > 0 && visibleReplyCount >= aiStatus.maxReplies) {
+    return (
+      <Banner tone="muted">
+        <div className="min-w-0 flex-1">
+          <p className="font-medium text-foreground">
+            {t("limitReached", { count: visibleReplyCount, max: aiStatus.maxReplies })}
+          </p>
+        </div>
+        <BannerButton onClick={() => toggle(false)} busy={busy} icon={Undo2}>
+          {t("reset")}
+        </BannerButton>
+      </Banner>
+    );
+  }
 
   // Active on this thread.
   return (
