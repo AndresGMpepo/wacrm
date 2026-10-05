@@ -49,6 +49,17 @@ export function normalizeConversations(
   return rows.map(normalizeConversation);
 }
 
+export function resolveThreadContact(
+  conversations: Conversation[],
+  activeConversation: Conversation | null,
+  fallback: Contact | null,
+): Contact | null {
+  if (!activeConversation) return null;
+  return conversations.find((c) => c.id === activeConversation.id)?.contact
+    ?? activeConversation.contact
+    ?? (fallback?.id === activeConversation.contact_id ? fallback : null);
+}
+
 export interface ContactFilters {
   /** Tag ids; a conversation matches if its contact has ANY of them (OR). */
   tagIds: string[];

@@ -1,5 +1,3 @@
-import crypto from 'node:crypto'
-
 import { NextResponse } from 'next/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 
@@ -12,6 +10,8 @@ import {
 } from '@/lib/omnichannel/messaging-window'
 import { checkRateLimit, RATE_LIMITS, rateLimitResponse } from '@/lib/rate-limit'
 import { sendZernioMedia, sendZernioTemplateMessage, sendZernioTemplateToConversation, sendZernioText, zernioAttachmentTypeFrom } from '@/lib/zernio/server'
+import { persistZernioOutbound } from '@/lib/zernio/outbound-message'
+import { attachZernioConversation } from '@/lib/zernio/send-template-to-contact'
 import { renderTemplateBody } from '@/lib/whatsapp/broadcast-message-log'
 import { isValidE164, sanitizePhoneForMeta } from '@/lib/whatsapp/phone-utils'
 
@@ -132,31 +132,23 @@ export async function POST(request: Request) {
           templateName, templateLanguage, templateParams,
         })
         externalId = result.messageId
-        if (existingConv) {
-          targetConversationId = existingConv.id
-          await db.from('conversations').update({ external_session_id: result.conversationId }).eq('id', existingConv.id)
-        } else {
-          const { data: created, error: createError } = await db.from('conversations').insert({
-            account_id: accountId, user_id: userId, contact_id: contactId,
-            channel_type: 'zernio_whatsapp', connector_id: connectorIdInput,
-            external_session_id: result.conversationId,
-          }).select('id').single()
-          if (createError) throw createError
-          targetConversationId = created.id
-        }
+        targetConversationId = await attachZernioConversation(
+          db, { accountId, contactId, ownerUserId: userId }, connectorIdInput,
+          existingConv?.id, result.conversationId,
+        )
       }
 
       const now = new Date().toISOString()
-      const { data: message, error: messageError } = await db.from('messages').insert({
-        conversation_id: targetConversationId,
-        sender_type: 'agent', sender_id: userId, content_type: 'template',
-        content_text: templateRow?.body_text ? renderTemplateBody(templateRow.body_text, templateBodyParams) : null,
-        template_name: templateName,
-        message_id: `zernio:out:${connectorIdInput}:${externalId ?? crypto.randomUUID()}`,
-        platform_message_id: externalId,
-        status: 'sent', created_at: now,
-      }).select().single()
-      if (messageError) throw messageError
+      const message = await persistZernioOutbound(db, {
+        accountId, connectorId: connectorIdInput, conversationId: targetConversationId,
+        internalId: externalId, local: true,
+        message: {
+          sender_type: 'agent', sender_id: userId, content_type: 'template',
+          content_text: templateRow?.body_text ? renderTemplateBody(templateRow.body_text, templateBodyParams) : null,
+          template_name: templateName,
+          created_at: now,
+        },
+      })
       const { error: updateError } = await db.from('conversations').update({
         last_message_text: `Plantilla: ${templateName}`, last_message_at: now, updated_at: now,
       }).eq('id', targetConversationId).eq('account_id', accountId)
@@ -225,15 +217,15 @@ export async function POST(request: Request) {
         : await sendZernioText(conversation.external_session_id, connector.zernio_account_id, text)
     const now = new Date().toISOString()
     const contentType = isTemplateSend ? 'template' : isMediaSend ? messageType === 'image' ? 'image' : messageType === 'video' ? 'video' : messageType === 'audio' ? 'audio' : 'document' : 'text'
-    const { data: message, error: messageError } = await db.from('messages').insert({
-      conversation_id: conversation.id,
-      sender_type: 'agent', sender_id: userId, content_type: contentType, content_text: text || (filename || 'Archivo'), media_url: isMediaSend ? mediaUrl : null,
-      ...(isTemplateSend ? { template_name: templateName } : {}),
-      message_id: `zernio:out:${conversation.connector_id}:${externalId ?? crypto.randomUUID()}`,
-      platform_message_id: externalId,
-      status: 'sent', created_at: now,
-    }).select().single()
-    if (messageError) throw messageError
+    const message = await persistZernioOutbound(db, {
+      accountId, connectorId: conversation.connector_id, conversationId: conversation.id,
+      internalId: externalId, local: true,
+      message: {
+        sender_type: 'agent', sender_id: userId, content_type: contentType, content_text: text || (filename || 'Archivo'), media_url: isMediaSend ? mediaUrl : null,
+        ...(isTemplateSend ? { template_name: templateName } : {}),
+        created_at: now,
+      },
+    })
     const { error: updateError } = await db.from('conversations').update({
       last_message_text: text, last_message_at: now, updated_at: now,
     }).eq('id', conversation.id).eq('account_id', accountId)

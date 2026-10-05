@@ -7,8 +7,9 @@ import { dispatchInboundAutomations } from '@/lib/automations/inbound'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
 import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe'
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
-import { extractZernioMedia, extractZernioReaction, isZernioPlaceholderName, normalizeMetaText, safeZernioContactName } from '@/lib/omnichannel/webhook-normalizer'
+import { extractZernioMedia, extractZernioReaction, firstZernioContactName, isZernioPlaceholderName, normalizeMetaText, safeZernioContactName } from '@/lib/omnichannel/webhook-normalizer'
 import { getZernioParticipantProfile, verifyZernioSignature, type ZernioChannel } from '@/lib/zernio/server'
+import { persistZernioOutbound, zernioOutboundIsHuman } from '@/lib/zernio/outbound-message'
 import { isValidStatusTransition } from '@/lib/whatsapp/recipient-status-ladder'
 import { flagBroadcastReplyIfAny } from '@/lib/whatsapp/broadcast-reply-flag'
 import { handleAgendaProConfirmationReply } from '@/lib/agendapro/confirmation'
@@ -97,6 +98,12 @@ async function resolveContact(
         .eq('external_user_id', externalUserId)
       if (updateError) throw updateError
     }
+    if (avatarUrl) {
+      const { error: avatarError } = await db.from('contacts')
+        .update({ avatar_url: avatarUrl })
+        .eq('id', contactId).eq('account_id', connector.account_id)
+      if (avatarError) throw avatarError
+    }
     // The first event of a conversation (often the Page's own automatic
     // reply, delivered as `message.sent` before Meta/Zernio has resolved
     // the customer's profile) can create the contact with a placeholder
@@ -153,7 +160,8 @@ async function resolveContact(
     contactId = existing.id
     const update: Record<string, string> = {}
     const existingName = typeof existing.name === 'string' ? existing.name.trim() : ''
-    if (name && (!existingName || existingName === fallback)) update.name = name
+    if (!isZernioPlaceholderName(name) && isZernioPlaceholderName(existingName)) update.name = name
+    if (avatarUrl) update.avatar_url = avatarUrl
     if (email && !existing.email && email.trim()) update.email = email.trim()
     if (phone && existing.phone === placeholderPhone) update.phone = phone.trim()
     if (Object.keys(update).length) {
@@ -338,13 +346,20 @@ async function handleOutboundStatusEvent(
   //    outbound Zernio send stores its `platform_message_id` (see
   //    zernio/send/route.ts), so this matches regardless of whether the
   //    message also belongs to a broadcast.
-  const { data: matchedMessage, error: messageFetchError } = await db
+  let { data: matchedMessage, error: messageFetchError } = await db
     .from('messages')
     .select('id, status')
-    .eq('sender_type', 'agent')
+    .neq('sender_type', 'customer')
     .in('platform_message_id', candidateIds)
     .limit(1)
     .maybeSingle()
+  if (!matchedMessage && !messageFetchError) {
+    const byInternalId = await db.from('messages').select('id, status')
+      .neq('sender_type', 'customer').in('zernio_internal_message_id', candidateIds)
+      .limit(1).maybeSingle()
+    matchedMessage = byInternalId.data
+    messageFetchError = byInternalId.error
+  }
   if (messageFetchError) {
     console.error('[zernio] could not look up message for status update:', messageFetchError.message)
   } else if (matchedMessage && isValidStatusTransition(matchedMessage.status, status)) {
@@ -528,33 +543,8 @@ async function processZernioWebhook(payload: Json, eventIdHeader: string | null)
       // work off an incomplete thread.
       if (eventType === 'message.sent') {
         try {
-          // A send initiated by NexoOmni stores the provider id returned by
-          // Zernio in `platform_message_id`. `message.sent` can also carry a
-          // separate Zernio envelope id in `id`; preferring it made the echo
-          // miss our own row and rendered a second local bubble even though
-          // WhatsApp had received only one message.
-          const zernioMessageId = text(
-            incoming.platformMessageId,
-            incoming.platform_message_id,
-            incoming.nativeMessageId,
-            incoming.externalMessageId,
-            incoming.id,
-            incoming._id,
-            event.messageId,
-            event.id,
-          ) || externalMessageId
-          const { data: existingOutbound, error: existingOutboundError } = await db
-            .from('messages')
-            .select('id')
-            .eq('platform_message_id', zernioMessageId)
-            .limit(1)
-            .maybeSingle()
-          if (existingOutboundError) throw existingOutboundError
-          if (existingOutbound) {
-            await db.from('zernio_webhook_receipts').update({ outcome: 'ignored', detail: 'Ya registrado — enviado desde NexoOmni.', processed_at: new Date().toISOString() })
-              .eq('connector_id', typed.id).eq('external_message_id', externalEventId)
-            continue
-          }
+          const internalMessageId = text(incoming.id, incoming._id) || null
+          const platformMessageId = text(incoming.platformMessageId, incoming.platform_message_id) || null
 
           // `message.sender` on this event IS the business account, not the
           // customer — reading it to name/update the contact would relabel
@@ -562,13 +552,16 @@ async function processZernioWebhook(payload: Json, eventIdHeader: string | null)
           // called out in Zernio's docs). The customer is always
           // `conversation.participant*`, populated in both directions.
           const auditUserId = await resolveAuditUserId(db, typed.account_id)
-          let participantName = text(conversation.participantName, participant.name)
+          let participantName = firstZernioContactName(conversation.participantName, participant.name)
           let participantPicture: string | undefined
-          if (!participantName) {
+          if (isZernioPlaceholderName(participantName)) {
             // Usually the Page's automatic greeting, sent before Zernio has
             // resolved the customer's profile — ask Zernio for it instead of
             // naming the contact "Cliente Facebook 123456".
-            const profile = await getZernioParticipantProfile(externalConversationId, zernioAccountId).catch(() => null)
+            const profile = await getZernioParticipantProfile(externalConversationId, zernioAccountId).catch((error) => {
+              console.error('[zernio] participant profile lookup failed:', error)
+              return null
+            })
             participantName = profile?.name ?? ''
             participantPicture = profile?.picture ?? undefined
           }
@@ -586,29 +579,22 @@ async function processZernioWebhook(payload: Json, eventIdHeader: string | null)
           const outContentType = outAttachment && outAttachment.kind !== 'text' ? outAttachment.kind : 'text'
           const sentAt = text(incoming.sentAt) || new Date().toISOString()
 
-          // sender_id is set (to the account's audit user, not literally
-          // whoever clicked send in Meta/Zernio — we have no NexoOmni
-          // identity for them) so this message satisfies the same
-          // "a human already replied" signal the AI's own eligibility gate
-          // checks (sender_type='agent' AND sender_id IS NOT NULL) — a
-          // reply sent outside NexoOmni must stop our own bot from also
-          // answering, exactly like one sent through NexoOmni would.
-          const { error: outInsertError } = await db.from('messages').insert({
-            conversation_id: outConversationId,
-            sender_type: 'agent',
-            sender_id: auditUserId,
-            content_type: outContentType,
-            content_text: outContent,
-            media_url: outAttachment?.url ?? null,
-            message_id: `zernio:out:${typed.id}:${zernioMessageId}`,
-            platform_message_id: zernioMessageId,
-            status: 'sent',
-            created_at: sentAt,
+          const human = zernioOutboundIsHuman(incoming)
+          await persistZernioOutbound(db, {
+            accountId: typed.account_id, connectorId: typed.id, conversationId: outConversationId,
+            internalId: internalMessageId, platformId: platformMessageId, local: false,
+            message: {
+              sender_type: human ? 'agent' : 'bot',
+              sender_id: human ? auditUserId : null,
+              content_type: outContentType,
+              content_text: outContent,
+              media_url: outAttachment?.url ?? null,
+              created_at: sentAt,
+            },
           })
-          if (outInsertError && !isUniqueViolation(outInsertError)) throw outInsertError
 
           await db.from('conversations').update({ last_message_text: outContent || `[${outContentType}]`, last_message_at: sentAt, updated_at: new Date().toISOString() }).eq('id', outConversationId)
-          await db.from('zernio_webhook_receipts').update({ outcome: 'processed', detail: 'Mensaje saliente externo (fuera de NexoOmni) registrado.', processed_at: new Date().toISOString() })
+          await db.from('zernio_webhook_receipts').update({ outcome: 'processed', detail: 'Mensaje saliente del canal conectado conciliado.', processed_at: new Date().toISOString() })
             .eq('connector_id', typed.id).eq('external_message_id', externalEventId)
         } catch (eventError) {
           console.error('[zernio] message.sent handling failed, skipping:', eventError)
@@ -628,7 +614,7 @@ async function processZernioWebhook(payload: Json, eventIdHeader: string | null)
       // generic placeholder, so the bubble shows something useful.
       const content = normalizeMetaText(text(incoming.message, incoming.text, incoming.content, incoming.body, comment.message, comment.text, event.text), attachment?.caption || attachment?.fileName)
       const auditUserId = await resolveAuditUserId(db, typed.account_id)
-      const contactName = text(conversation.participantName, incoming.senderName, sender.name, sender.displayName, sender.fullName, comment.author_name, comment.authorName, participant.name)
+      const contactName = firstZernioContactName(sender.name, incoming.senderName, sender.displayName, sender.fullName, comment.author_name, comment.authorName, participant.name, conversation.participantName)
       const contactEmail = text(sender.email, participant.email, incoming.email, comment.author_email, comment.authorEmail)
       // WhatsApp has no separate "phone" field on the sender/conversation —
       // the platform's own contact identity (senderId/participantId) IS the
@@ -641,11 +627,14 @@ async function processZernioWebhook(payload: Json, eventIdHeader: string | null)
       // One lookup covers both gaps: a missing avatar (pre-existing
       // behavior) and a missing name, which Zernio frequently fills in on
       // its side a moment after the webhook was built.
-      const profile = !webhookAvatarUrl || !contactName
-        ? await getZernioParticipantProfile(externalConversationId, zernioAccountId).catch(() => null)
+      const profile = !webhookAvatarUrl || isZernioPlaceholderName(contactName)
+        ? await getZernioParticipantProfile(externalConversationId, zernioAccountId).catch((error) => {
+          console.error('[zernio] participant profile lookup failed:', error)
+          return null
+        })
         : null
       const contactAvatarUrl = webhookAvatarUrl ?? profile?.picture ?? null
-      const resolvedContactName = contactName || profile?.name || ''
+      const resolvedContactName = isZernioPlaceholderName(contactName) ? profile?.name || contactName : contactName
       const { contactId, created: contactCreated } = await resolveContact(
         db,
         typed,

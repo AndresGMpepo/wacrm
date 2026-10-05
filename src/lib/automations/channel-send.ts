@@ -10,6 +10,7 @@ import {
   resolveConversationChannel as resolveConversationChannelFor,
 } from '@/lib/omnichannel/resolve-channel'
 import { sendZernioTemplateMessage } from '@/lib/zernio/server'
+import { persistZernioOutbound } from '@/lib/zernio/outbound-message'
 
 interface SendArgs {
   accountId: string
@@ -146,15 +147,16 @@ export async function sendAutomationTemplate(
     templateParams: args.params,
   })
   const now = new Date().toISOString()
-  await db.from('messages').insert({
-    conversation_id: args.conversationId,
-    sender_type: 'bot',
-    content_type: 'template',
-    content_text: args.templateName,
-    message_id: `zernio:out:${conversation.connector_id}:${messageId}`,
-    platform_message_id: messageId,
-    status: 'sent',
-    created_at: now,
+  await persistZernioOutbound(db, {
+    accountId: args.accountId, connectorId: conversation.connector_id,
+    conversationId: args.conversationId, internalId: messageId, local: true,
+    message: {
+      sender_type: 'bot',
+      content_type: 'template',
+      content_text: args.templateName,
+      template_name: args.templateName,
+      created_at: now,
+    },
   })
   await db
     .from('conversations')

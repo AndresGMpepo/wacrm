@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import {
   CONVERSATION_SELECT,
   normalizeConversation,
+  resolveThreadContact,
 } from "@/lib/inbox/conversations";
 import type { Conversation, Message, Contact, ConversationStatus } from "@/types";
 import { useRealtime } from "@/hooks/use-realtime";
@@ -187,11 +188,10 @@ function InboxPageInner() {
           // Already in state — keep its fields (a realtime UPDATE may
           // have landed while the fetch was in flight and patched
           // last_message_text / unread_count to fresher values than
-          // the row we just read). Only backfill `contact`, which the
-          // realtime payloads never carry.
+          // the row we just read). Refresh the contact join separately.
           return prev.map((c) =>
             c.id === fetched.id
-              ? { ...c, contact: c.contact ?? fetched.contact }
+              ? { ...c, contact: fetched.contact ?? c.contact }
               : c,
           );
         }
@@ -694,6 +694,7 @@ function InboxPageInner() {
   // it back to the list. On lg+ both panes render side-by-side as
   // before, unchanged.
   const hasActiveConv = !!activeConversation;
+  const threadContact = resolveThreadContact(conversations, activeConversation, activeContact);
 
   return (
     <div className="-m-4 flex h-[calc(100vh-3.5rem)] flex-col overflow-hidden sm:-m-6">
@@ -748,7 +749,7 @@ function InboxPageInner() {
         >
           <MessageThread
             conversation={activeConversation}
-            contact={activeContact}
+            contact={threadContact}
             messages={messages}
             onMessagesLoaded={handleMessagesLoaded}
             onNewMessage={handleNewMessage}
@@ -770,7 +771,7 @@ function InboxPageInner() {
             toggle — which is itself desktop-only — never affects it. */}
         {contactPanelOpen && (
           <div className="hidden lg:block">
-            <ContactSidebar contact={activeContact} conversationId={activeConversation?.id} internalNotesOpenSignal={internalNotesConversationId === activeConversation?.id ? internalNotesOpenSignal : undefined} />
+            <ContactSidebar contact={threadContact} conversationId={activeConversation?.id} internalNotesOpenSignal={internalNotesConversationId === activeConversation?.id ? internalNotesOpenSignal : undefined} />
           </div>
         )}
       </div>

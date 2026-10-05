@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   matchesContactFilters,
   normalizeConversation,
+  resolveThreadContact,
 } from "./conversations";
 import type { Conversation } from "@/types";
 
@@ -101,6 +102,20 @@ describe("matchesContactFilters", () => {
 });
 
 describe("normalizeConversation", () => {
+  it("uses the selected connector's avatar, not another channel's photo", () => {
+    const raw = {
+      ...makeConversation({ avatar_url: "https://cdn.example.com/default.png" }),
+      connector_id: "whatsapp-connector",
+      contact: {
+        ...makeConversation({}).contact!,
+        omnichannel_contact_identities: [
+          { connector_id: "facebook-connector", avatar_url: "https://cdn.example.com/facebook.png" },
+          { connector_id: "whatsapp-connector", avatar_url: "https://cdn.example.com/whatsapp.png" },
+        ],
+      },
+    };
+    expect(normalizeConversation(raw).contact?.avatar_url).toBe("https://cdn.example.com/whatsapp.png");
+  });
   it("flattens embedded contact_tags into contact.tags", () => {
     const raw = {
       id: "c1",
@@ -126,6 +141,21 @@ describe("normalizeConversation", () => {
     expect(
       (normalized.contact as unknown as Record<string, unknown>).contact_tags,
     ).toBeUndefined();
+  });
+
+  describe("resolveThreadContact", () => {
+    it("refreshes the open header and sidebar with the same name and photo as the list", () => {
+      const stale = makeConversation({ name: "525512345678" });
+      const fresh = makeConversation({ name: "Ana", avatar_url: "https://cdn.example.com/ana.png" });
+      expect(resolveThreadContact([fresh], stale, stale.contact ?? null)).toBe(fresh.contact);
+    });
+
+    it("does not show the previous contact after changing conversations", () => {
+      const previous = makeConversation({ name: "Ana" });
+      const active = { ...makeConversation(null), id: "c2", contact_id: "ct2" };
+      expect(resolveThreadContact([previous], active, previous.contact ?? null)).toBeNull();
+      expect(resolveThreadContact([previous], null, previous.contact ?? null)).toBeNull();
+    });
   });
 
   it("passes through a conversation with no contact", () => {

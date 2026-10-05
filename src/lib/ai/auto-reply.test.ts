@@ -8,6 +8,7 @@ const h = vi.hoisted(() => ({
   retrieveKnowledge: vi.fn(),
   generateReply: vi.fn(),
   engineSendText: vi.fn(),
+  sendOmnichannelText: vi.fn(),
   state: {
     conv: null as Record<string, unknown> | null,
     autoResponders: [] as { id: string }[],
@@ -23,6 +24,7 @@ vi.mock('./context', () => ({ buildConversationContext: h.buildConversationConte
 vi.mock('./knowledge', () => ({ retrieveKnowledge: h.retrieveKnowledge }))
 vi.mock('./generate', () => ({ generateReply: h.generateReply }))
 vi.mock('@/lib/flows/meta-send', () => ({ engineSendText: h.engineSendText }))
+vi.mock('@/lib/omnichannel/outbound-text', () => ({ sendOmnichannelText: h.sendOmnichannelText }))
 vi.mock('./admin-client', () => ({
   supabaseAdmin: () => ({
     from: (table: string) => {
@@ -108,6 +110,7 @@ beforeEach(() => {
   h.retrieveKnowledge.mockResolvedValue([])
     h.generateReply.mockResolvedValue({ text: 'Hello!', handoff: false, handoffQueue: null })
   h.engineSendText.mockResolvedValue({ whatsapp_message_id: 'm1' })
+  h.sendOmnichannelText.mockResolvedValue({ external_message_id: 'internal-1', message_id: 'zernio:out:conn:internal-1' })
 })
 
 describe('dispatchInboundToAiReply — eligibility gates', () => {
@@ -122,6 +125,22 @@ describe('dispatchInboundToAiReply — eligibility gates', () => {
     expect(h.engineSendText).toHaveBeenCalledWith(
       expect.objectContaining({ conversationId: 'conv-1', text: 'Hello!' }),
     )
+  })
+
+  it('sends connected WhatsApp AI replies through its connector, not direct Meta', async () => {
+    await dispatchInboundToAiReply({ ...ARGS, channelType: 'zernio_whatsapp' })
+    expect(h.sendOmnichannelText).toHaveBeenCalledWith(expect.anything(), {
+      accountId: ARGS.accountId, conversationId: ARGS.conversationId,
+      text: 'Hello!', senderType: 'bot', aiGenerated: true,
+    })
+    expect(h.engineSendText).not.toHaveBeenCalled()
+  })
+
+  it('remains eligible on the next connected inbound after a bot reply', async () => {
+    await dispatchInboundToAiReply({ ...ARGS, channelType: 'zernio_whatsapp' })
+    h.state.conv = { ...h.state.conv, ai_reply_count: 1 }
+    await dispatchInboundToAiReply({ ...ARGS, channelType: 'zernio_whatsapp' })
+    expect(h.sendOmnichannelText).toHaveBeenCalledTimes(2)
   })
 
   it('grounds the reply in retrieved knowledge', async () => {

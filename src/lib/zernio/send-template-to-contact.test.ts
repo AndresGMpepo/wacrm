@@ -52,7 +52,12 @@ function makeDb(opts: {
     return builder;
   };
 
-  return { db: { from } as unknown as SupabaseClient, inserts, updates };
+  const rpc = (_name: string, args: { p_message: Row; p_conversation_id: string; p_internal_id: string }) => {
+    const row = { ...args.p_message, conversation_id: args.p_conversation_id, platform_message_id: args.p_internal_id };
+    inserts.push({ table: 'messages', row });
+    return Promise.resolve({ data: { id: 'message-1', ...row }, error: null });
+  };
+  return { db: { from, rpc } as unknown as SupabaseClient, inserts, updates };
 }
 
 const base = {

@@ -15,13 +15,13 @@
 //    webhook race fixed in src/app/api/omnichannel/zernio/webhook).
 // ============================================================
 
-import crypto from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { isUniqueViolation } from '@/lib/contacts/dedupe';
 import { renderTemplateBody } from '@/lib/whatsapp/broadcast-message-log';
 import { isValidE164, sanitizePhoneForMeta } from '@/lib/whatsapp/phone-utils';
 import { sendZernioTemplateMessage, sendZernioTemplateToConversation } from '@/lib/zernio/server';
+import { persistZernioOutbound } from './outbound-message';
 
 export type ZernioWhatsAppConnector = { id: string; zernio_account_id: string };
 
@@ -90,7 +90,7 @@ export async function sendZernioTemplateToContact(db: SupabaseClient, args: {
       templateParams: args.bodyParams,
     });
     messageId = result.messageId;
-    conversationId = await attachConversation(db, args, connector.id, existing?.id, result.conversationId);
+    conversationId = await attachZernioConversation(db, args, connector.id, existing?.id, result.conversationId);
   }
 
   const { data: templateRow } = await db
@@ -102,18 +102,17 @@ export async function sendZernioTemplateToContact(db: SupabaseClient, args: {
     .eq('language', args.templateLanguage)
     .maybeSingle();
   const now = new Date().toISOString();
-  const { error: messageError } = await db.from('messages').insert({
-    conversation_id: conversationId,
-    sender_type: 'bot',
-    content_type: 'template',
-    content_text: templateRow?.body_text ? renderTemplateBody(templateRow.body_text as string, args.bodyParams) : args.templateName,
-    template_name: args.templateName,
-    message_id: `zernio:out:${connector.id}:${messageId ?? crypto.randomUUID()}`,
-    platform_message_id: messageId,
-    status: 'sent',
-    created_at: now,
+  await persistZernioOutbound(db, {
+    accountId: args.accountId, connectorId: connector.id, conversationId,
+    internalId: messageId, local: true,
+    message: {
+      sender_type: 'bot',
+      content_type: 'template',
+      content_text: templateRow?.body_text ? renderTemplateBody(templateRow.body_text as string, args.bodyParams) : args.templateName,
+      template_name: args.templateName,
+      created_at: now,
+    },
   });
-  if (messageError) throw messageError;
   await db.from('conversations')
     .update({ last_message_text: `Plantilla: ${args.templateName}`, last_message_at: now, updated_at: now })
     .eq('id', conversationId)
@@ -122,7 +121,7 @@ export async function sendZernioTemplateToContact(db: SupabaseClient, args: {
   return { conversationId, messageId };
 }
 
-async function attachConversation(
+export async function attachZernioConversation(
   db: SupabaseClient,
   args: { accountId: string; contactId: string; ownerUserId: string },
   connectorId: string,
@@ -131,7 +130,9 @@ async function attachConversation(
 ): Promise<string> {
   if (existingId) {
     if (externalSessionId) {
-      await db.from('conversations').update({ external_session_id: externalSessionId }).eq('id', existingId);
+      const { error } = await db.from('conversations').update({ external_session_id: externalSessionId })
+        .eq('id', existingId).eq('account_id', args.accountId).eq('connector_id', connectorId);
+      if (error) throw error;
     }
     return existingId;
   }
@@ -152,10 +153,12 @@ async function attachConversation(
           .eq('account_id', args.accountId).eq('connector_id', connectorId).eq('external_session_id', externalSessionId)
           .limit(1)
       : null;
+    if (byThread?.error) throw byThread.error;
     if (byThread?.data?.[0]) return byThread.data[0].id as string;
-    const { data: byContact } = await db.from('conversations').select('id')
-      .eq('account_id', args.accountId).eq('contact_id', args.contactId).eq('channel_type', 'zernio_whatsapp')
+    const { data: byContact, error: contactError } = await db.from('conversations').select('id')
+      .eq('account_id', args.accountId).eq('contact_id', args.contactId).eq('connector_id', connectorId).eq('channel_type', 'zernio_whatsapp')
       .limit(1);
+    if (contactError) throw contactError;
     if (byContact?.[0]) return byContact[0].id as string;
   }
   throw error ?? new Error('No se pudo registrar la conversación del recordatorio.');

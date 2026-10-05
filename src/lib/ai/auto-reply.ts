@@ -301,6 +301,7 @@ export async function dispatchInboundToAiReply(
         conversationId,
         text,
         senderType: 'bot',
+        aiGenerated: true,
       })
       return
     }

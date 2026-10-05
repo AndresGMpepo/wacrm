@@ -90,6 +90,10 @@ export async function POST(request: Request) {
           .eq('contact_id', conversation.contact_id)
           .eq('account_id', accountId)
         if (updateError) throw updateError
+        const { error: contactAvatarError } = await db.from('contacts')
+          .update({ avatar_url: profile.picture })
+          .eq('id', conversation.contact_id).eq('account_id', accountId)
+        if (contactAvatarError) throw contactAvatarError
         updated += 1
       } else {
         unavailable += 1

@@ -5,6 +5,7 @@ import {
   extractZernioMedia,
   extractZernioReaction,
   isZernioPlaceholderName,
+  firstZernioContactName,
   normalizeMetaText,
   safeMetaContactName,
   safeZernioContactName,
@@ -19,10 +20,27 @@ describe('isZernioPlaceholderName', () => {
     expect(isZernioPlaceholderName('Cliente WhatsApp anon')).toBe(true)
   })
 
+  describe('firstZernioContactName', () => {
+    it('does not let a numeric participant name hide a real sender name', () => {
+      expect(firstZernioContactName('525512345678', ' Ana ', 'Cliente WhatsApp 345678')).toBe('Ana')
+      expect(firstZernioContactName('Ana', '525512345678')).toBe('Ana')
+    })
+    it('keeps a fallback only when there is no real name', () => {
+      expect(firstZernioContactName(null, '', '525512345678')).toBe('525512345678')
+      expect(firstZernioContactName(undefined, {})).toBe('')
+    })
+  })
+
   it('never flags a real name, even one starting with "Cliente"', () => {
     expect(isZernioPlaceholderName('Naya Ramirez-Villalobos')).toBe(false)
     expect(isZernioPlaceholderName('Cliente Facebook VIP Juan')).toBe(false)
     expect(isZernioPlaceholderName('Cliente frecuente')).toBe(false)
+  })
+
+  it('allows upgrading phone numbers to a real profile name', () => {
+    expect(isZernioPlaceholderName('525512345678')).toBe(true)
+    expect(isZernioPlaceholderName('+52 (55) 1234-5678')).toBe(true)
+    expect(isZernioPlaceholderName('Ana 1234567')).toBe(false)
   })
 })
 

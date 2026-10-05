@@ -69,6 +69,20 @@ respuestas configurado para ese chat, verás el contador y **Reiniciar IA**
 para darle un nuevo límite. Úsalo solo si quieres que el agente vuelva a
 contestar automáticamente.
 
+**Uso WhatsApp conectado, ¿las confirmaciones del canal detienen la IA?**
+No. NexoOmni reconoce la confirmación de su propio envío y la conserva
+como la misma respuesta automática, aunque llegue antes que el resultado
+del envío. Una respuesta de un operador identificado en el canal o enviada
+desde la app de WhatsApp Business sí cuenta como intervención humana.
+Un mensaje de origen desconocido no se atribuye automáticamente a un humano.
+
+**Solo veo el teléfono o falta la foto del cliente, ¿cómo actualizo su ficha?**
+El nombre y la foto se completan con los nuevos mensajes cuando el canal
+los proporciona. Para conversaciones existentes, usa **Sincronizar fotos
+y mensajes** en la configuración del canal conectado. Se conserva un nombre
+personalizado; solo se reemplazan nombres genéricos o numéricos. Si el canal
+no proporciona una foto, NexoOmni muestra las iniciales.
+
 **¿La IA puede escribir el mensaje pero dejar que yo lo revise antes
 de enviarlo?**
 Sí — desde el compositor del Inbox, el botón de redacción con IA

@@ -9,6 +9,7 @@ import {
 } from '@/lib/omnichannel/messaging-window'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { sendZernioText } from '@/lib/zernio/server'
+import { persistZernioOutbound } from '@/lib/zernio/outbound-message'
 
 // ------------------------------------------------------------
 // Server-side text sender for the omnichannel connectors.
@@ -35,6 +36,7 @@ export interface SendOmnichannelTextArgs {
   /** Defaults to `bot` — automations/flows are not a human agent. */
   senderType?: 'agent' | 'bot'
   senderId?: string | null
+  aiGenerated?: boolean
 }
 
 export interface SendOmnichannelTextResult {
@@ -252,7 +254,7 @@ async function sendViaYeastar(
 }
 
 /**
- * Send a plain-text message on a non-WhatsApp (omnichannel) conversation and
+ * Send text on a connected conversation (including connected WhatsApp) and
  * persist it the same way the agent-facing routes do.
  */
 export async function sendOmnichannelText(
@@ -289,18 +291,26 @@ export async function sendOmnichannelText(
 
   const now = new Date().toISOString()
   const messageId = `${prefix}:${row.connector_id}:${externalId ?? crypto.randomUUID()}`
-  const { error: messageError } = await db.from('messages').insert({
-    conversation_id: row.id,
+  const message = {
     sender_type: args.senderType ?? 'bot',
     sender_id: args.senderId ?? null,
-    content_type: 'text',
+    content_type: 'text' as const,
     content_text: text,
-    message_id: messageId,
-    ...(row.channel_type.startsWith('zernio_') ? { platform_message_id: externalId } : {}),
-    status: 'sent',
+    ai_generated: args.aiGenerated ?? false,
     created_at: now,
-  })
-  if (messageError) throw messageError
+  }
+  if (row.channel_type.startsWith('zernio_')) {
+    if (!row.connector_id) throw new OmnichannelSendError('La conversación no tiene un canal conectado.')
+    await persistZernioOutbound(db, {
+      accountId: args.accountId, connectorId: row.connector_id, conversationId: row.id,
+      internalId: externalId, local: true, message,
+    })
+  } else {
+    const { error: messageError } = await db.from('messages').insert({
+      ...message, conversation_id: row.id, message_id: messageId, status: 'sent',
+    })
+    if (messageError) throw messageError
+  }
 
   const { error: updateError } = await db
     .from('conversations')
