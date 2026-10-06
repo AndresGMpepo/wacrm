@@ -53,6 +53,7 @@ it. Grant the minimum.
 | `conversation-notes:write` | Create a private team note on a conversation |
 | `contact-memory:read` | Read a contact's Nexo Memory (summary, risk, facts, tasks) |
 | `contact-memory:write` | Create, update, or delete a contact's follow-up tasks |
+| `call-context:write` | Save an AI receptionist's verified live-call handoff |
 | `deals:read`         | List and read pipelines and deals        |
 | `deals:write`        | Create and update deals (including moving stage or status) |
 | `appointments:read`  | List and read appointments               |
@@ -105,6 +106,56 @@ Requests are limited **per key**: **120 requests per minute**. On a
 > instances.
 
 ## Endpoints
+
+### `POST /api/v1/telephony/handoff`
+
+Scope: `call-context:write`. Requires the account's Yeastar telephony
+entitlement. An AI receptionist calls this **before transferring** to a
+NexPhone agent. The account is taken exclusively from the API key.
+
+Body:
+
+```json
+{
+  "ai_extension": "7000",
+  "summary": "Customer needs to reschedule tomorrow's appointment to the afternoon.",
+  "customer_need": "Reschedule tomorrow's therapy.",
+  "next_action": "Check available afternoon appointments."
+}
+```
+
+`summary` is required, nonempty, at most 800 characters. Optional
+`customer_need` and `next_action` allow at most 400 characters each.
+At least one identifier must be supplied: `ai_extension` (at most 20
+characters), `customer_phone` (international number), or `call_id`
+(actual PBX call ID, at most 120 characters).
+
+The server queries Yeastar's documented `call/query` API using the
+account's OpenAPI credentials and requires exactly one active inbound
+call and caller. If several calls use the AI extension simultaneously,
+supply the verified caller phone or actual PBX call ID too. Never
+generate an identifier or guess an undocumented Yeastar variable.
+Ambiguous or unmatched calls return `400 bad_request` without saving.
+
+Success (200):
+
+```json
+{"data":{"saved":true,"call_id":"verified-pbx-call-id"}}
+```
+
+The answering agent sees this handoff separately from historical Nexo
+Memory. This is a summary, not the full CDR transcript; transcription
+ingestion and memory analysis happen asynchronously after call end.
+Configure static bearer/content-type headers in the Yeastar custom
+HTTP tool. See the [setup manual](./manuals/telefonia/contexto-y-transferencias-ia.md).
+
+Deployment prerequisite: apply
+[migration 139](../supabase/migrations/139_yeastar_voice_context.sql)
+before deploying this endpoint. Run the existing minute-level
+`scripts/run-ai-analysis-worker.mjs` cron with `APP_URL` and
+`AI_ANALYSIS_WORKER_SECRET` to process call transcripts and Nexo Memory;
+the former transcription-retry endpoint remains a protected compatibility
+wrapper, but the cron no longer needs to invoke it separately.
 
 ### `GET /api/v1/me`
 

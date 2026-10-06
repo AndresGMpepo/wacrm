@@ -1,4 +1,37 @@
 {
+  "NexPhoneContext": {
+    "open": "Contexto",
+    "title": "Contexto para atender la llamada",
+    "description": "Consulta lo que el cliente ya explicó, sin pedirle que lo repita.",
+    "loading": "Recuperando contexto de tu llamada…",
+    "error": "No se pudo recuperar el contexto. Puedes reintentarlo sin interrumpir la llamada.",
+    "retry": "Reintentar",
+    "current": "Lo que explicó a la IA en esta llamada",
+    "notReceived": "Aún no se recibió el contexto de transferencia de la IA. El historial de abajo corresponde a interacciones anteriores, no a esta llamada.",
+    "need": "Necesita:",
+    "next": "Siguiente paso:",
+    "history": "Historial del cliente · Nexo Memory",
+    "noHistory": "Este cliente todavía no tiene contexto previo registrado.",
+    "followUp": "Seguimiento recomendado:",
+    "pending": "Compromisos pendientes"
+  },
+  "CallTranscriptionSync": {
+    "restrictedTitle": "Acceso restringido",
+    "restrictedDescription": "Solo supervisores, administradores y propietarios pueden consultar transcripciones de llamadas.",
+    "transcriptFailed": "No se pudo recuperar la transcripción. Se reintentará automáticamente; revisa la conexión y los permisos del PBX si el problema continúa.",
+    "transcriptPending": "Yeastar aún no publica esta transcripción. NexoOmni vuelve a intentarlo cada cinco minutos.",
+    "transcriptUnavailable": "La transcripción no estuvo disponible dentro del plazo esperado. Usa Sincronizar desde Yeastar para intentar recuperarla.",
+    "memoryNotLinked": "El análisis está listo, pero la llamada no se vinculó a Nexo Memory porque falta un teléfono externo válido.",
+    "sync": "Sincronizar desde Yeastar",
+    "syncing": "Sincronizando…",
+    "phone": "Opcional: teléfono internacional del cliente",
+    "success": "Se importaron {count} transcripciones. El análisis y Nexo Memory se procesan en segundo plano.",
+    "remaining": "Quedan {count} tramos por importar. Pulsa sincronizar de nuevo.",
+    "error": "No se pudieron sincronizar las transcripciones. Revisa la conexión, la versión y los permisos OpenAPI de Yeastar.",
+    "analysisPending": "El resumen y Nexo Memory están pendientes de procesamiento.",
+    "analysisFailed": "El análisis o la actualización de Nexo Memory falló y se reintentará.",
+    "analysisUnavailable": "Configura la IA de la cuenta y vuelve a sincronizar para generar el resumen y Nexo Memory."
+  },
   "LoginPage": {
     "titleAccept": "Inicia sesión para aceptar",
     "titleWelcome": "Bienvenido de nuevo",
@@ -1700,6 +1733,7 @@
       "description": "Cambia tu contraseña y cierra la sesión en tus dispositivos. Esto mantendrá tu cuenta segura."
     },
     "apiKeys": {
+      "callContextScope": "Guardar el contexto de la recepcionista IA antes de transferir una llamada",
       "title": "Claves API",
       "description": "Las claves autentican la API REST pública (<apiCode>/api/v1</apiCode>) para que puedas construir tus propias automatizaciones. Envíalas en tu cabecera como <headerCode>Authorization: Bearer &lt;key&gt;</headerCode>.",
       "newApiKey": "Nueva clave API",

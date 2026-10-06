@@ -4,7 +4,7 @@ description: "Genera una clave para conectar NexoOmni con tus propios sistemas o
 section: "integraciones"
 role: ["admin", "owner"]
 plan: ["crecimiento", "premium"]
-updated: "2026-09-28"
+updated: "2026-10-05"
 ---
 
 ## ¿Qué es?
@@ -37,6 +37,11 @@ Todo lo que cubre la [API pública](./api-publica.md): leer/crear
 contactos, enviar mensajes y plantillas, leer conversaciones,
 asignarlas, y más — según los permisos que le diste a esa clave
 específica.
+
+Para que el recepcionista de IA de Yeastar entregue contexto antes de
+transferir, utiliza una clave exclusiva con el permiso
+`call-context:write`; no necesita permisos para leer contactos o enviar
+mensajes. Ver [configuración de transferencias](../telefonia/contexto-y-transferencias-ia.md).
 
 **¿Puedo tener varias claves con distintos permisos?**
 Sí, y es lo recomendado — una clave por integración, cada una con

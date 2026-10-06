@@ -110,14 +110,16 @@ async function upsertFacts(
 ) {
   for (const fact of facts) {
     if (fact.confidence < FACT_CONFIDENCE_FLOOR) continue
-    const { data: existing } = await db.from('contact_facts').select('id')
+    const { data: existing, error: lookupError } = await db.from('contact_facts').select('id')
       .eq('contact_id', contactId).eq('category', category).eq('status', 'active')
       .ilike('fact', fact.text).maybeSingle()
+    if (lookupError) throw lookupError
     if (existing) continue
-    await db.from('contact_facts').insert({
+    const { error } = await db.from('contact_facts').insert({
       account_id: accountId, contact_id: contactId, category, fact: fact.text, confidence: fact.confidence,
       source_type: source.type, source_id: source.id,
     })
+    if (error) throw error
   }
 }
 
@@ -126,38 +128,65 @@ async function upsertFacts(
  *  events, records new facts/commitments. Never deletes prior history. */
 export async function applyContactMemory(
   db: Db,
-  args: { accountId: string; contactId: string; source: MemorySource },
+  args: { accountId: string; contactId: string; source: MemorySource; sourceDate?: string },
   analysis: { summary: string; sentiment: string; sentiment_score: number; next_best_action: string },
   memory: MemoryExtraction,
 ) {
-  const { accountId, contactId, source } = args
-  const { data: previous } = await db.from('contact_memory').select('risk_level').eq('contact_id', contactId).maybeSingle()
-  await db.from('contact_memory').upsert({
-    contact_id: contactId,
-    account_id: accountId,
-    current_summary: analysis.summary || null,
-    current_stage: memory.customer_stage,
-    sentiment: analysis.sentiment,
-    sentiment_score: analysis.sentiment_score,
-    risk_level: memory.risk_level,
-    opportunity_score: memory.opportunity_score,
-    next_best_action: analysis.next_best_action || null,
-    last_source_conversation_id: source.type === 'conversation' ? source.id : null,
-    last_source_call_id: source.type === 'call' ? source.id : null,
-    updated_at: new Date().toISOString(),
-  }, { onConflict: 'contact_id' })
-  if (memory.risk_level === 'high' && previous?.risk_level !== 'high') {
+  const { accountId, contactId, source, sourceDate } = args
+  const { data: previous, error: previousError } = await db.from('contact_memory')
+    .select('risk_level, current_stage, opportunity_score, last_source_call_id, last_source_conversation_id')
+    .eq('account_id', accountId).eq('contact_id', contactId).maybeSingle()
+  if (previousError) throw previousError
+  let shouldConsolidate = true
+  if (sourceDate && previous) {
+    const sourceTime = previous.last_source_call_id
+      ? await db.from('yeastar_call_transcriptions').select('started_at, created_at')
+        .eq('account_id', accountId).eq('id', previous.last_source_call_id).maybeSingle()
+      : previous.last_source_conversation_id
+        ? await db.from('conversations').select('last_message_at')
+          .eq('account_id', accountId).eq('id', previous.last_source_conversation_id).maybeSingle()
+        : null
+    if (sourceTime?.error) throw sourceTime.error
+    const date = sourceTime?.data
+    const lastDate = date && ('started_at' in date ? date.started_at ?? date.created_at : date.last_message_at)
+    shouldConsolidate = !lastDate || new Date(sourceDate).getTime() >= new Date(String(lastDate)).getTime()
+  }
+  if (shouldConsolidate) {
+    const { error: memoryError } = await db.from('contact_memory').upsert({
+      contact_id: contactId,
+      account_id: accountId,
+      current_summary: analysis.summary || null,
+      current_stage: memory.customer_stage ?? previous?.current_stage ?? null,
+      sentiment: analysis.sentiment,
+      sentiment_score: analysis.sentiment_score,
+      risk_level: memory.risk_level ?? previous?.risk_level ?? null,
+      opportunity_score: memory.opportunity_score ?? previous?.opportunity_score ?? null,
+      next_best_action: analysis.next_best_action || null,
+      last_source_conversation_id: source.type === 'conversation' ? source.id : null,
+      last_source_call_id: source.type === 'call' ? source.id : null,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'contact_id' })
+    if (memoryError) throw memoryError
+  }
+  if (shouldConsolidate && memory.risk_level === 'high' && previous?.risk_level !== 'high') {
     await alertRiskEscalatedToHigh(db, accountId, contactId).catch((error) => {
       console.error('[nexo-memory] Failed to send high-risk alert:', error)
     })
   }
 
   for (const fact of memory.important_facts) {
-    await db.from('contact_memory_events').insert({
+    const { data: recorded, error: recordedError } = await db.from('contact_memory_events').select('id')
+      .eq('account_id', accountId).eq('contact_id', contactId)
+      .eq('source_type', source.type).eq('source_id', source.id).eq('summary', fact).limit(1).maybeSingle()
+    if (recordedError) throw recordedError
+    if (recorded) continue
+    const { error: eventError } = await db.from('contact_memory_events').insert({
       account_id: accountId, contact_id: contactId, event_type: 'fact', summary: fact,
       importance: memory.risk_level === 'high' ? 'high' : 'normal', confidence: 0.8,
       source_type: source.type, source_id: source.id,
+      ...(sourceDate ? { event_date: sourceDate } : {}),
     })
+    if (eventError) throw eventError
   }
 
   await upsertFacts(db, accountId, contactId, source, 'interest', memory.interests)
@@ -166,14 +195,16 @@ export async function applyContactMemory(
   if (memory.commitments.length > 0) {
     const assignedAgentId = await resolveSourceAgent(db, source)
     for (const commitment of memory.commitments) {
-      const { data: existing } = await db.from('contact_commitments').select('id')
+      const { data: existing, error: lookupError } = await db.from('contact_commitments').select('id')
         .eq('contact_id', contactId).eq('status', 'pending').ilike('description', commitment.description).maybeSingle()
+      if (lookupError) throw lookupError
       if (existing) continue
-      await db.from('contact_commitments').insert({
+      const { error: commitmentError } = await db.from('contact_commitments').insert({
         account_id: accountId, contact_id: contactId, description: commitment.description, owner: commitment.owner,
         due_date: commitment.due_date, due_at: combineDueAt(commitment.due_date, commitment.due_time),
         assigned_agent_id: assignedAgentId, source_type: source.type, source_id: source.id,
       })
+      if (commitmentError) throw commitmentError
     }
   }
 }
@@ -185,9 +216,11 @@ export async function applyContactMemory(
  *  account admins (see alertTaskDueSoon). */
 async function resolveSourceAgent(db: Db, source: MemorySource): Promise<string | null> {
   if (source.type === 'conversation') {
-    const { data } = await db.from('conversations').select('assigned_agent_id').eq('id', source.id).maybeSingle()
+    const { data, error } = await db.from('conversations').select('assigned_agent_id').eq('id', source.id).maybeSingle()
+    if (error) throw error
     return data?.assigned_agent_id ?? null
   }
-  const { data } = await db.from('yeastar_call_transcriptions').select('agent_user_id').eq('id', source.id).maybeSingle()
+  const { data, error } = await db.from('yeastar_call_transcriptions').select('agent_user_id').eq('id', source.id).maybeSingle()
+  if (error) throw error
   return data?.agent_user_id ?? null
 }

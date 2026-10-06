@@ -17,6 +17,7 @@ import {
   X,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { CallContextDialog } from './call-context-dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useTelephony, type CallHistoryItem } from './telephony-provider';
@@ -141,6 +142,10 @@ export function NexPhone() {
         <span className={`absolute right-0.5 top-0.5 size-2 rounded-full ring-2 ring-background ${t.connected ? 'bg-emerald-400' : t.connecting ? 'animate-pulse bg-amber-400' : 'bg-red-500'}`} />
       </Button>
 
+      {t.active?.status?.communicationType === 'inbound' && t.active.status.callId
+        ? <CallContextDialog key={t.active.status.callId} callId={t.active.status.callId} />
+        : null}
+
       {t.incoming ? (
         <div className="fixed bottom-4 right-4 z-50 w-80 rounded-xl border bg-card p-4 shadow-2xl">
           <div className="flex items-center gap-2"><PhoneIncoming className="size-5 animate-pulse text-primary" /><p className="font-semibold">Llamada entrante</p></div>
@@ -172,4 +177,3 @@ export function NexPhone() {
     </div>
   );
 }
-

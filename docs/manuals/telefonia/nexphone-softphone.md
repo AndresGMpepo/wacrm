@@ -4,7 +4,7 @@ description: "Haz y recibe llamadas telefónicas directamente desde el navegador
 section: "telefonia"
 role: ["agent", "supervisor", "admin", "owner"]
 plan: ["premium"]
-updated: "2026-09-28"
+updated: "2026-10-05"
 ---
 
 ## ¿Qué es?
@@ -32,6 +32,27 @@ la integración y asigna las extensiones (ver
 5. Al colgar, NexPhone te pregunta si quieres **agendar un
    seguimiento** con ese número — un clic en "Mañana 9:00 am", "En 1
    hora" o una fecha personalizada.
+
+## Contexto al contestar una llamada
+
+Al contestar una llamada entrante en NexPhone se abre una ventana con:
+
+- **Lo que explicó a la IA en esta llamada:** lo que el cliente acaba de explicar al recepcionista
+  de IA, su necesidad y el siguiente paso, si el PBX envió ese contexto
+  antes de transferir.
+- **Historial:** un resumen breve de Nexo Memory; si todavía no existe,
+  se utiliza el resumen de la última llamada analizada.
+- **Pendientes:** hasta tres compromisos abiertos del contacto.
+
+Puedes cerrar la ventana sin terminar la llamada y volver a abrirla con
+**Contexto**. El historial no se presenta como si fuera lo que
+el cliente acaba de decir. Si falta el contexto actual, la ventana lo
+indica; si falla la consulta, muestra una opción para reintentar.
+
+Para recibir el contexto del recepcionista durante esa misma llamada,
+un administrador debe realizar la
+[configuración de transferencias de IA](./contexto-y-transferencias-ia.md).
+La transcripción completa se recupera después de colgar.
 
 ## Preguntas frecuentes
 

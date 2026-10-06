@@ -26,9 +26,16 @@ function partsAsUtcMs(parts: LocalParts) { return Date.UTC(parts.year, parts.mon
 // "shows 3:34 PM when it's actually 9:39 PM"). Convert using the PBX's real
 // timezone instead.
 export function parsePbxLocalTime(value: string, timezone = 'America/Mexico_City'): Date | null {
-  const match = /^(\d{4})[-/](\d{2})[-/](\d{2})[ T](\d{2}):(\d{2}):(\d{2})/.exec(value.trim())
+  const match = /^(\d{4})[-/](\d{2})[-/](\d{2})[ T](\d{2}):(\d{2}):(\d{2})(?:\s*(AM|PM))?$/i.exec(value.trim())
   if (!match) return null
   const parts: LocalParts = { year: Number(match[1]), month: Number(match[2]), day: Number(match[3]), hour: Number(match[4]), minute: Number(match[5]), second: Number(match[6]) }
+  if (match[7]) {
+    if (parts.hour < 1 || parts.hour > 12) return null
+    parts.hour = parts.hour % 12 + (match[7].toUpperCase() === 'PM' ? 12 : 0)
+  }
+  const check = new Date(partsAsUtcMs(parts))
+  if (check.getUTCFullYear() !== parts.year || check.getUTCMonth() + 1 !== parts.month
+    || check.getUTCDate() !== parts.day || parts.hour > 23 || parts.minute > 59 || parts.second > 59) return null
   let guess = partsAsUtcMs(parts)
   for (let index = 0; index < 3; index += 1) guess += partsAsUtcMs(parts) - partsAsUtcMs(localPartsFromDate(new Date(guess), timezone))
   return new Date(guess)
@@ -96,17 +103,23 @@ export function textFromResponse(value: unknown, keys: string[]): string | null 
 
 // Matches the confirmed getaicontext (v2.0) response shape:
 // { data: { leg_1: { context: [{ content, source_number, name, timestamp }] }, leg_2: {...} } }
-function buildTranscriptFromContext(result: unknown): string | null {
+export function buildTranscriptFromContext(result: unknown): string | null {
   if (!result || typeof result !== 'object') return null
   const data = (result as JsonRecord).data
   if (!data || typeof data !== 'object') return null
   const turns: { label: string | null; content: string; timestamp: number }[] = []
+  const seen = new Set<string>()
   for (const leg of Object.values(data as JsonRecord)) {
     const context = leg && typeof leg === 'object' ? (leg as JsonRecord).context : undefined
     if (!Array.isArray(context)) continue
     for (const turn of context) {
       if (!turn || typeof turn !== 'object') continue
       const record = turn as JsonRecord
+      if (record.type && record.type !== 'speak') continue
+      if (typeof record.id === 'string') {
+        if (seen.has(record.id)) continue
+        seen.add(record.id)
+      }
       const content = typeof record.content === 'string' ? record.content.trim() : ''
       if (!content) continue
       const label = firstText(record, ['name', 'source_number'])
@@ -126,7 +139,25 @@ export type AiResult = {
   raw: { context: unknown }
 }
 
-export async function fetchAiResult(db: SupabaseClient, accountId: string, callId: string, payload: JsonRecord): Promise<AiResult> {
+export function aiCdrIds(payload: JsonRecord): string[] {
+  const ids = new Set<string>()
+  const visit = (value: unknown) => {
+    if (!value || typeof value !== 'object') return
+    if (Array.isArray(value)) { value.forEach(visit); return }
+    const row = value as JsonRecord
+    for (const key of ['call_note_id', 'leg_id', 'cdr_ids']) {
+      const id = row[key]
+      if (typeof id === 'string') {
+        id.split(',').map((part) => part.trim()).filter(Boolean).forEach((part) => ids.add(part))
+      }
+    }
+    Object.values(row).forEach(visit)
+  }
+  visit(payload)
+  return [...ids]
+}
+
+export async function yeastarAiConnection(db: SupabaseClient, accountId: string) {
   const [monitoring, telephony] = await Promise.all([
     db.from('yeastar_monitoring_configs').select('api_client_id, api_client_secret').eq('account_id', accountId).maybeSingle(),
     db.from('telephony_configs').select('pbx_url').eq('account_id', accountId).eq('provider', 'yeastar').maybeSingle(),
@@ -136,28 +167,61 @@ export async function fetchAiResult(db: SupabaseClient, accountId: string, callI
   if (!monitoring.data?.api_client_id || !monitoring.data.api_client_secret || !telephony.data?.pbx_url) throw new Error('Faltan las credenciales OpenAPI de Yeastar para consultar la IA.')
   const pbxUrl = telephony.data.pbx_url
   const token = await accessToken(accountId, pbxUrl, decrypt(monitoring.data.api_client_id), decrypt(monitoring.data.api_client_secret))
-  // Confirmed against Yeastar's official docs (Get AI Call Transcript v2.0):
-  // cdr_ids is the call LEG id, which matches the webhook's `call_note_id`
-  // format (yyyyMMddHHmmss-XXXXX) — NOT `uid` or `call_id`.
-  const cdrId = String(findValue(payload, ['call_note_id', 'leg_id', 'uid', 'cdr_id', 'cdrId', 'id']) ?? callId)
+  return { pbxUrl, token }
+}
+
+export async function fetchAiResult(db: SupabaseClient, accountId: string, callId: string, payload: JsonRecord): Promise<AiResult> {
+  const ids = aiCdrIds(payload)
+  if (!ids.length) throw new Error(`Falta el identificador de tramo CDR de la llamada ${callId}; sincroniza el archivo de transcripciones de Yeastar.`)
+  const cdrId = ids.join(',')
+  const { pbxUrl, token } = await yeastarAiConnection(db, accountId)
+  const deadline = Date.now() + 35_000
   const requestYeastar = async (endpoint: string, params: Record<string, string>) => {
+    const remaining = deadline - Date.now()
+    if (remaining <= 0) throw new Error('La consulta de transcripción excedió el tiempo disponible; se reintentará sin guardar un resultado incompleto.')
     const url = apiUrl(pbxUrl, endpoint, 'v2.0')
     url.searchParams.set('access_token', token)
     for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value)
-    const response = await fetch(url, { headers: { 'User-Agent': 'OpenAPI' }, signal: AbortSignal.timeout(15_000) })
+    const response = await fetch(url, { headers: { 'User-Agent': 'OpenAPI' }, signal: AbortSignal.timeout(Math.min(15_000, remaining)) })
     const result = await response.json().catch(() => ({})) as JsonRecord
     const errcode = typeof result === 'object' && result && 'errcode' in result ? result.errcode : undefined
     const ok = response.ok && (errcode === undefined || errcode === 0)
     const error = ok ? null : (typeof result.errmsg === 'string' && result.errmsg) || `HTTP ${response.status}${errcode !== undefined ? `, errcode ${errcode}` : ''}`
     return { ok, result, error }
   }
-  const context = await requestYeastar('cdr/getaicontext', { cdr_ids: cdrId })
-  const transcript = context.ok ? (buildTranscriptFromContext(context.result) ?? textFromResponse(context.result, ['transcript', 'transcription', 'text', 'content'])) : null
+  const legs: JsonRecord = {}
+  const responses: unknown[] = []
+  let offset = 1
+  const visited = new Set<number>()
+  for (let page = 0; page < 100; page++) {
+    if (visited.has(offset)) throw new Error('Yeastar repitió una página de transcripción.')
+    visited.add(offset)
+    const context = await requestYeastar('cdr/getaicontext', { cdr_ids: cdrId, limit: '100', offset: String(offset) })
+    responses.push(context.result)
+    if (!context.ok) return { cdrId, transcript: null, contextError: context.error, raw: { context: responses } }
+    const data = context.result.data
+    if (data && typeof data === 'object') {
+      for (const [key, value] of Object.entries(data)) {
+        const leg = value && typeof value === 'object' ? value as JsonRecord : {}
+        const previous = legs[key] as JsonRecord | undefined
+        legs[key] = { ...leg, context: [
+          ...(Array.isArray(previous?.context) ? previous.context : []),
+          ...(Array.isArray(leg.context) ? leg.context : []),
+        ] }
+      }
+    }
+    const next = context.result.offset
+    if (next == null || next === -1) break
+    if (typeof next !== 'number' || next < 1) throw new Error('Yeastar devolvió un cursor de transcripción inválido.')
+    if (page === 99) throw new Error('La transcripción excede el límite de páginas; no se guardó un resultado incompleto.')
+    offset = next
+  }
+  const transcript = buildTranscriptFromContext({ data: legs })
   return {
     cdrId,
     transcript,
-    contextError: context.ok ? null : context.error,
-    raw: { context: context.result },
+    contextError: null,
+    raw: { context: responses },
   }
 }
 
@@ -216,4 +280,3 @@ export async function fetchCdrDetail(db: SupabaseClient, accountId: string, uid:
     timeline,
   }
 }
-

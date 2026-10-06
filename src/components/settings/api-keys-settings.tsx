@@ -467,7 +467,7 @@ function CreateKeyDialog({
                           {scope}
                         </span>
                         <span className="text-muted-foreground block text-xs">
-                          {SCOPE_DESCRIPTIONS[scope]}
+                          {scope === 'call-context:write' ? t('callContextScope') : SCOPE_DESCRIPTIONS[scope]}
                         </span>
                       </span>
                     </label>

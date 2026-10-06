@@ -1,4 +1,37 @@
 {
+  "NexPhoneContext": {
+    "open": "Context",
+    "title": "Context for this call",
+    "description": "Review what the customer already explained without asking them to repeat it.",
+    "loading": "Loading context for your call…",
+    "error": "Could not retrieve the context. Retry without interrupting the call.",
+    "retry": "Retry",
+    "current": "What the customer told AI in this call",
+    "notReceived": "The AI handoff context has not arrived yet. The history below is from earlier interactions, not this call.",
+    "need": "Needs:",
+    "next": "Next step:",
+    "history": "Customer history · Nexo Memory",
+    "noHistory": "This customer has no prior recorded context yet.",
+    "followUp": "Recommended follow-up:",
+    "pending": "Pending commitments"
+  },
+  "CallTranscriptionSync": {
+    "restrictedTitle": "Restricted access",
+    "restrictedDescription": "Only supervisors, administrators and owners can view call transcripts.",
+    "transcriptFailed": "Could not retrieve the transcript. It will be retried automatically; check the PBX connection and permissions if the problem persists.",
+    "transcriptPending": "Yeastar has not published this transcript yet. NexoOmni retries every five minutes.",
+    "transcriptUnavailable": "The transcript was not available within the expected period. Use Sync from Yeastar to try recovering it.",
+    "memoryNotLinked": "Analysis is ready, but the call was not linked to Nexo Memory because no valid external phone number was available.",
+    "sync": "Sync from Yeastar",
+    "syncing": "Syncing…",
+    "phone": "Optional: customer's international phone number",
+    "success": "Imported {count} transcripts. Analysis and Nexo Memory run in the background.",
+    "remaining": "{count} call legs remain to import. Click sync again.",
+    "error": "Could not sync transcripts. Check the Yeastar connection, firmware and OpenAPI permissions.",
+    "analysisPending": "Summary and Nexo Memory processing are pending.",
+    "analysisFailed": "Analysis or the Nexo Memory update failed and will be retried.",
+    "analysisUnavailable": "Configure account AI and sync again to generate the summary and Nexo Memory."
+  },
   "LoginPage": {
     "titleAccept": "Sign in to accept",
     "titleWelcome": "Welcome back",
@@ -1712,6 +1745,7 @@
       "description": "Change your password and sign out of your devices. These keep your account safe."
     },
     "apiKeys": {
+      "callContextScope": "Save AI receptionist context before transferring a call",
       "title": "API keys",
       "description": "Keys authenticate the public REST API (<apiCode>/api/v1</apiCode>) so you can build your own automations. Send them as <headerCode>Authorization: Bearer &lt;key&gt;</headerCode>.",
       "newApiKey": "New API key",

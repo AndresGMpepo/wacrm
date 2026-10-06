@@ -41,19 +41,20 @@ function parseCallAnalysis(raw: string): CallAnalysis | null {
 
 /** Analyzes a call transcript (summary + key points + action items + Nexo Memory
  *  extraction) in a single AI call using the account's own AI config. Returns
- *  null if AI isn't configured or the model didn't return valid JSON. */
-export async function analyzeCall(db: SupabaseClient, accountId: string, transcript: string): Promise<CallAnalysis | null> {
+ *  null only if AI isn't configured; malformed model output is an error. */
+export async function analyzeCall(db: SupabaseClient, accountId: string, transcript: string, referenceDate = new Date().toISOString()): Promise<CallAnalysis | null> {
   const config = await loadAiConfig(db, accountId)
   if (!config) return null
   const analysisConfig = { ...config, model: config.analysisModel ?? config.model }
   // The model has no built-in sense of "today" — without this it cannot
   // reliably resolve "mañana"/"el viernes" said during the call into an
   // absolute due_date.
-  const referenceLine = `Fecha y hora de referencia (ahora mismo): ${new Date().toISOString()}.\n\n`
+  const referenceLine = `Fecha y hora de la llamada: ${referenceDate}. Zona horaria del cliente: ${config.timezone ?? 'America/Mexico_City'}.\n\n`
   const { text, usage } = await generateText({
     config: analysisConfig,
     systemPrompt: SYSTEM_PROMPT,
-    messages: [{ role: 'user', content: referenceLine + transcript.slice(0, 12_000) }],
+    messages: [{ role: 'user', content: referenceLine + transcript }],
+    timeoutMs: 20_000,
   })
   await logAiUsage(db, {
     accountId,
@@ -63,5 +64,7 @@ export async function analyzeCall(db: SupabaseClient, accountId: string, transcr
     model: analysisConfig.model,
     usage,
   })
-  return parseCallAnalysis(text)
+  const analysis = parseCallAnalysis(text)
+  if (!analysis?.summary) throw new Error('El modelo no devolvió un resumen de llamada válido.')
+  return analysis
 }

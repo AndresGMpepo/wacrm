@@ -26,11 +26,12 @@ import {
 } from '@/lib/ai/insights-apply'
 import { alertCommitmentOverdue, alertStaleProspect, alertTaskDueSoon, sendDailyNexoMemoryDigest } from '@/lib/notifications/nexo-memory-alerts'
 import { processAgendaProConfirmationReminders, escalateUnconfirmedAgendaProBookings } from '@/lib/agendapro/confirmation'
+import { processCallTranscriptions } from '@/lib/telephony/transcription-sync'
 
 /** How far ahead of a task's due_at the reminder notification fires. */
 const TASK_REMINDER_LEAD_MINUTES = 10
 
-export const maxDuration = 60
+export const maxDuration = 120
 
 type Job = { id: string; account_id: string; conversation_id: string; attempts: number; conversation: { contact_id: string } | { contact_id: string }[] | null }
 type MediaJob = { id: string; account_id: string; conversation_id: string; message_id: string; kind: 'image' | 'voice_note'; conversation: { channel_type: string | null } | { channel_type: string | null }[] | null }
@@ -103,6 +104,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
   const db = supabaseAdmin()
+  let callTranscriptions: Awaited<ReturnType<typeof processCallTranscriptions>> | { error: string }
+  try {
+    callTranscriptions = await processCallTranscriptions(db)
+  } catch (error) {
+    console.error('[yeastar] call context worker failed:', error)
+    callTranscriptions = { error: 'Could not synchronize call context' }
+  }
   // Media (image/voice-note) analysis runs first so any job that completes
   // within this same tick is already reflected in `messages` before the
   // conversation-analysis loop below builds its context — reduces the
@@ -255,7 +263,7 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error('[appointments] Google Calendar inbound sync could not start:', error)
   }
-  return NextResponse.json({ completed, skipped, failed, media: mediaResult, follow_ups: followUps, appointment_reminders: appointmentReminders, agendapro_confirmations: agendaproConfirmations, agendapro_escalations: agendaproEscalations, overdue_commitments: overdueCommitments, task_reminders: taskReminders, stale_prospects: staleProspects, google_calendar: googleCalendar })
+  return NextResponse.json({ completed, skipped, failed, calls: callTranscriptions, media: mediaResult, follow_ups: followUps, appointment_reminders: appointmentReminders, agendapro_confirmations: agendaproConfirmations, agendapro_escalations: agendaproEscalations, overdue_commitments: overdueCommitments, task_reminders: taskReminders, stale_prospects: staleProspects, google_calendar: googleCalendar }, { status: 'error' in callTranscriptions ? 500 : 200 })
 }
 
 async function processAppointmentReminders(db: ReturnType<typeof supabaseAdmin>) {

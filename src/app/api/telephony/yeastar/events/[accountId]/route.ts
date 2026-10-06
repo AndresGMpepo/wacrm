@@ -3,9 +3,8 @@ import { NextResponse } from 'next/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { findExistingContact } from '@/lib/contacts/dedupe'
-import { fetchAiResult, fetchCdrDetail, findValue, parsePbxLocalTime, type JsonRecord } from '@/lib/telephony/yeastar-ai'
-import { analyzeCall } from '@/lib/telephony/call-summary'
-import { applyContactMemory } from '@/lib/ai/memory'
+import { aiCdrIds, findValue, parsePbxLocalTime, type JsonRecord } from '@/lib/telephony/yeastar-ai'
+import { callCustomerPhone } from '@/lib/telephony/call-party'
 
 export const dynamic = 'force-dynamic'
 
@@ -70,9 +69,9 @@ function firstNestedText(value: unknown, keys: string[]): string | null {
 }
 
 function firstNestedNumber(value: unknown, keys: string[]) {
-  const textValue = firstNestedText(value, keys)
-  if (!textValue) return null
-  const number = Number(textValue)
+  const raw = findValue(value, keys)
+  if (raw == null || raw === '') return null
+  const number = Number(raw)
   return Number.isFinite(number) ? number : null
 }
 
@@ -238,23 +237,24 @@ export async function POST(request: Request, context: { params: Promise<{ accoun
       const fromExtension = resolveExtension(callFrom, knownExtensions)
       const toExtension = resolveExtension(callTo, knownExtensions)
       const agentExtension = fromExtension ?? toExtension ?? null
-      const customerPhone = fromExtension ? callTo : toExtension ? callFrom : (callTo ?? callFrom)
+      const customerPhone = callCustomerPhone(event.payload)
       const direction = callType && ['inbound', 'outbound', 'internal'].includes(callType.toLowerCase()) ? callType.toLowerCase() : 'unknown'
-      const ai = await fetchAiResult(db, accountId, event.callId, event.payload)
-      const call = ai.transcript ? await analyzeCall(db, accountId, ai.transcript).catch(() => null) : null
-      const uid = firstNestedText(event.payload, ['uid'])
-      const cdrDetail = uid ? await fetchCdrDetail(db, accountId, uid).catch(() => null) : null
       const recordingUrl = firstNestedText(event.payload, ['recording'])
-      const durationValue = cdrDetail?.callDurationSeconds ?? firstNestedNumber(event.payload, ['call_duration', 'talk_duration'])
+      const durationValue = firstNestedNumber(event.payload, ['call_duration', 'talk_duration'])
       const startTime = firstNestedText(event.payload, ['time_start'])
       const startedAt = startTime ? parsePbxLocalTime(startTime) : null
       const contact = customerPhone ? await findExistingContact(db, accountId, customerPhone) : null
       const contactRow = contact ? (await db.from('contacts').select('id, name, email, phone').eq('id', contact.id).maybeSingle()).data : null
       const agentConfig = agentExtension ? (await db.from('telephony_user_configs').select('user_id').eq('account_id', accountId).eq('provider', 'yeastar').eq('extension', agentExtension).maybeSingle()).data : null
-      const { data: transcriptionRow, error } = await db.from('yeastar_call_transcriptions').upsert({
+      const cdrIds = aiCdrIds(event.payload).join(',')
+      const { data: existing, error: existingError } = await db.from('yeastar_call_transcriptions')
+        .select('call_id, cdr_id').eq('account_id', accountId)
+        .eq('cdr_id', cdrIds || event.callId).maybeSingle()
+      if (existingError) throw existingError
+      const { error } = await db.from('yeastar_call_transcriptions').upsert({
         account_id: accountId,
-        call_id: event.callId,
-        cdr_id: ai?.cdrId ?? null,
+        call_id: existing?.call_id ?? (cdrIds ? `cdr:${firstNestedText(event.payload, ['uid']) ?? event.callId}:${cdrIds}` : event.callId),
+        cdr_id: cdrIds || null,
         customer_phone: customerPhone ?? contactRow?.phone ?? null,
         customer_name: contactRow?.name ?? null,
         customer_email: contactRow?.email ?? null,
@@ -263,38 +263,19 @@ export async function POST(request: Request, context: { params: Promise<{ accoun
         agent_extension: agentExtension,
         direction,
         started_at: startedAt && !Number.isNaN(startedAt.getTime()) ? startedAt.toISOString() : null,
-        duration_seconds: durationValue ? Math.round(durationValue) : null,
-        routing_duration_seconds: cdrDetail?.routingDurationSeconds ?? null,
-        handling_duration_seconds: cdrDetail?.handlingDurationSeconds ?? null,
-        ring_duration_seconds: cdrDetail?.ringDurationSeconds ?? null,
-        hold_duration_seconds: cdrDetail?.holdDurationSeconds ?? null,
-        talk_duration_seconds: cdrDetail?.talkDurationSeconds ?? null,
-        disconnected_by: cdrDetail?.disconnectedBy ?? null,
-        timeline: cdrDetail?.timeline ?? [],
+        duration_seconds: durationValue == null ? null : Math.round(durationValue),
+        ended_at: startedAt && durationValue != null ? new Date(startedAt.getTime() + durationValue * 1000).toISOString() : null,
         recording_url: recordingUrl || null,
-        transcript: ai?.transcript,
-        summary: call?.summary ?? null,
-        key_points: call?.key_points ?? [],
-        action_items: call?.action_items ?? [],
-        transcription_status: ai?.transcript ? 'completed' : 'pending',
-        error_message: ai?.contextError ?? null,
-        yeastar_payload: { event: event.payload, ai: ai?.raw ?? null },
+        yeastar_payload: { event: event.payload },
+        next_sync_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
-      }, { onConflict: 'account_id,call_id' }).select('id').single()
+      }, { onConflict: 'account_id,call_id' })
       if (error) throw error
-      if (call && contactRow?.id) {
-        await applyContactMemory(db, { accountId, contactId: contactRow.id, source: { type: 'call', id: transcriptionRow.id } }, call, call.memory).catch((memoryError) => {
-          console.error('[nexo-memory] Failed to apply call memory extraction:', memoryError)
-        })
-      }
-      const detail = ai?.transcript
-        ? 'CDR 30012 sincronizado con transcripción y resumen generado por NexoOmni.'
-        : `CDR 30012 recibido, pero Yeastar aún no tiene la transcripción lista; se reintentará automáticamente.${ai?.contextError ? ` (${ai.contextError})` : ''}`
-      await receipt(db, accountId, 'processed', detail, event.eventType, event.callId)
+      await receipt(db, accountId, 'processed', 'CDR registrado; transcripción y Nexo Memory encolados para el worker.', event.eventType, event.callId)
       return NextResponse.json({ received: true })
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Error desconocido'
-      await db.from('yeastar_call_transcriptions').upsert({ account_id: accountId, call_id: event.callId, transcription_status: 'failed', error_message: message.slice(0, 500), yeastar_payload: event.payload, updated_at: new Date().toISOString() }, { onConflict: 'account_id,call_id' })
+      console.error('[yeastar] call end persistence failed:', error)
       await receipt(db, accountId, 'invalid', `No se pudo sincronizar la IA: ${message}`, event.eventType, event.callId)
       return NextResponse.json({ error: 'Could not synchronize AI transcription' }, { status: 500 })
     }

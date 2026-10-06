@@ -1,6 +1,8 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useTranslations } from 'next-intl'
+import { hasMinRole } from '@/lib/auth/roles'
 import { Loader2, PhoneCall, RefreshCw } from 'lucide-react'
 import { useAuth } from '@/hooks/use-auth'
 import { Button } from '@/components/ui/button'
@@ -34,6 +36,8 @@ type CallRecord = {
   key_points: string[] | null
   action_items: Array<{ description: string; owner: 'agent' | 'customer'; due_date: string | null }> | null
   transcription_status: string
+  analysis_status: string
+  memory_applied_at: string | null
   error_message: string | null
   contact: { name: string | null; phone: string; email: string | null } | null
   agent: { full_name: string | null; email: string | null } | null
@@ -103,13 +107,17 @@ function Chronology({ timeline }: { timeline: TimelineLeg[] | null }) {
 }
 
 export default function CallTranscriptionsPage() {
+  const t = useTranslations('CallTranscriptionSync')
   const { accountRole } = useAuth()
-  const allowed = accountRole === 'owner' || accountRole === 'admin'
+  const allowed = !!accountRole && hasMinRole(accountRole, 'supervisor')
   const [calls, setCalls] = useState<CallRecord[]>([])
   const [query, setQuery] = useState('')
   const [requestedCallId] = useState(() => typeof window === 'undefined' ? '' : new URLSearchParams(window.location.search).get('call') ?? '')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [syncPhone, setSyncPhone] = useState('')
+  const [syncing, setSyncing] = useState(false)
+  const [syncMessage, setSyncMessage] = useState<string | null>(null)
 
   const load = async () => {
     setLoading(true); setError(null)
@@ -125,8 +133,25 @@ export default function CallTranscriptionsPage() {
     finally { setLoading(false) }
   }
 
+  const sync = async () => {
+    setSyncing(true)
+    setSyncMessage(null)
+    try {
+      const response = await fetch('/api/telephony/yeastar/transcriptions/sync', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: syncPhone }),
+      })
+      if (!response.ok) throw new Error(`Transcript sync HTTP ${response.status}`)
+      const result = await response.json() as { imported: number; remaining: number }
+      setSyncMessage(t('success', { count: result.imported }) + (result.remaining ? ` ${t('remaining', { count: result.remaining })}` : ''))
+      await load()
+    } catch (reason) {
+      console.error('[yeastar] manual transcript sync failed:', reason)
+      setSyncMessage(t('error'))
+    } finally { setSyncing(false) }
+  }
+
   useEffect(() => { if (allowed) void load() }, [allowed])
-  if (!allowed) return <Card><CardHeader><CardTitle>Acceso restringido</CardTitle><CardDescription>Solo propietarios y administradores pueden consultar transcripciones de llamadas.</CardDescription></CardHeader></Card>
+  if (!allowed) return <Card><CardHeader><CardTitle>{t('restrictedTitle')}</CardTitle><CardDescription>{t('restrictedDescription')}</CardDescription></CardHeader></Card>
 
   return <div className="space-y-6">
     <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
@@ -134,6 +159,11 @@ export default function CallTranscriptionsPage() {
         <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight"><PhoneCall className="size-6 text-primary" />Transcripciones y resúmenes</h1>
         <p className="mt-1 text-sm text-muted-foreground">Transcripción sincronizada desde Yeastar; resumen y cronología generados por NexoOmni.</p>
       </div>
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <Input value={syncPhone} onChange={(event) => setSyncPhone(event.target.value)} placeholder={t('phone')} aria-label={t('phone')} />
+        <Button onClick={() => void sync()} disabled={syncing}>{syncing ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}{t(syncing ? 'syncing' : 'sync')}</Button>
+      </div>
+      {syncMessage ? <p role="status" className="text-sm text-muted-foreground">{syncMessage}</p> : null}
       <Button variant="outline" onClick={() => void load()} disabled={loading}><RefreshCw className={loading ? 'size-4 animate-spin' : 'size-4'} />Actualizar</Button>
     </div>
     <form className="flex gap-2" onSubmit={(event) => { event.preventDefault(); void load() }}>
@@ -163,9 +193,15 @@ export default function CallTranscriptionsPage() {
               </CardHeader>
               <CardContent className="space-y-4">
                 {call.recording_url ? <audio controls preload="none" className="w-full" src={call.recording_url} /> : null}
-                {call.transcription_status === 'failed' ? <p className="text-sm text-red-400">{call.error_message || 'La sincronización de IA falló.'}</p> : null}
-                {call.transcription_status === 'pending' ? <p className="text-sm text-amber-400">Yeastar aún no publica la transcripción de esta llamada. Se reintenta automáticamente cada minuto.{call.error_message ? ` Último intento: ${call.error_message}` : ''}</p> : null}
-                {call.transcription_status === 'unavailable' ? <p className="text-sm text-muted-foreground">Yeastar no generó transcripción para esta llamada dentro del tiempo esperado.{call.error_message ? ` (${call.error_message})` : ''}</p> : null}
+                {call.transcription_status === 'failed' ? <p className="text-sm text-red-400">{t('transcriptFailed')}</p> : null}
+                {call.transcription_status === 'pending' ? <p className="text-sm text-amber-400">{t('transcriptPending')}</p> : null}
+                {call.transcription_status === 'unavailable' ? <p className="text-sm text-muted-foreground">{t('transcriptUnavailable')}</p> : null}
+                {call.transcription_status === 'completed' && call.analysis_status !== 'completed'
+                  ? <p className="text-sm text-amber-500">{t(call.analysis_status === 'failed' ? 'analysisFailed' : call.analysis_status === 'unavailable' ? 'analysisUnavailable' : 'analysisPending')}</p>
+                  : null}
+                {call.analysis_status === 'completed' && !call.memory_applied_at
+                  ? <p className="text-sm text-amber-500">{t('memoryNotLinked')}</p>
+                  : null}
                 <TimeBreakdown call={call} />
                 <div>
                   <h2 className="text-sm font-semibold">Resumen</h2>
