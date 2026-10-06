@@ -40,5 +40,8 @@
   "devDependencies": {
     "@types/node": "^20.19.0",
     "typescript": "^5.7.0"
+  },
+  "overrides": {
+    "proxy-addr": "^2.0.8"
   }
 }

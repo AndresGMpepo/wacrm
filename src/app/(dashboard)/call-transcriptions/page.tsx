@@ -162,13 +162,14 @@ function CallTranscriptionsContent() {
       const response = await fetch('/api/telephony/yeastar/transcriptions/sync', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: syncPhone }),
       })
-      const result = await response.json() as { imported?: number; updated?: number; remaining?: number; available?: number; alreadyPresent?: number; undated?: number; code?: string }
+      const result = await response.json() as { imported?: number; updated?: number; dated?: number; remaining?: number; available?: number; alreadyPresent?: number; undated?: number; code?: string }
       if (!response.ok) {
         setSyncError(archiveErrorMessage(result.code))
         return
       }
       setSyncMessage(result.imported || result.updated
         ? t('importSuccess', { count: result.imported ?? 0, updated: result.updated ?? 0 })
+          + (result.dated ? ` ${t('importDated', { count: result.dated })}` : '')
           + (result.undated ? ` ${t('importUndated', { count: result.undated })}` : '')
           + (result.remaining ? ` ${t('remaining', { count: result.remaining })}` : '')
         : result.available === 0

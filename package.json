@@ -84,6 +84,7 @@
     "ip-address": "^10.7.3",
     "fast-uri": "^3.1.8",
     "hono": "^4.13.7",
+    "proxy-addr": "^2.0.8",
     "js-yaml": "^4.2.0",
     "@babel/core": "^7.29.6",
     "sharp": "^0.35.4"

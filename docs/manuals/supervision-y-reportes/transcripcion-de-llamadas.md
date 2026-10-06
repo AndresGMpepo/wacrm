@@ -54,9 +54,11 @@ completo de llamadas de la cuenta.
 4. Si una llamada ya estaba guardada con una transcripción más corta,
    NexoOmni la complementa cuando la exportación final de Yeastar trae
    más texto y vuelve a procesar su resumen y Nexo Memory.
-5. Si Yeastar entrega una fecha que NexoOmni no puede interpretar, la
-   transcripción se conserva sin asignarle una fecha inventada y el
-   resultado de importación lo indica.
+5. Si Yeastar entrega una fecha en el formato configurado en el PBX
+   (mes/día/año de 24 horas o año/mes/día de 12 horas), NexoOmni la
+   convierte a la zona horaria del PBX. Si el formato no se reconoce,
+   conserva la transcripción sin inventarle fecha. Al volver a importar,
+   también completa las fechas que faltaban en llamadas ya guardadas.
 6. Si Yeastar no incluye transcripciones nuevas, NexoOmni lo indica
    por separado: las llamadas anteriores siguen visibles y el PBX
    puede no haber publicado aún la nueva transcripción. Vuelve a

@@ -8,8 +8,9 @@ describe('Yeastar transcript parsing', () => {
   it('resolves PBX local date and 12-hour times without shifting historical calls to the import date', () => {
     expect(parsePbxLocalTime('2026/10/05 01:30:00 PM')?.toISOString()).toBe('2026-10-05T19:30:00.000Z')
     expect(parsePbxLocalTime('2026/10/05 12:30:00 AM')?.toISOString()).toBe('2026-10-05T06:30:00.000Z')
+    expect(parsePbxLocalTime('10/05/2026 13:30:00')?.toISOString()).toBe('2026-10-05T19:30:00.000Z')
     expect(parsePbxLocalTime('2026/02/30 10:00:00')).toBeNull()
-    expect(parsePbxLocalTime('10/05/2026 10:00:00')).toBeNull()
+    expect(parsePbxLocalTime('13/05/2026 10:00:00')).toBeNull()
   })
   it('uses leg identifiers, never uid or call_id', () => {
     expect(aiCdrIds({ uid: 'record-1', call_id: 'call-1', call_note_id: 'leg-1', legs: [{ leg_id: 'leg-2' }, { leg_id: 'leg-1' }] }))

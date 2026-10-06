@@ -110,12 +110,16 @@ export async function syncTranscriptionArchive(db: SupabaseClient, accountId: st
     console.error('[yeastar] transcript export parsing failed:', error)
     throw new TranscriptionArchiveError('yeastar_invalid_export', 'No se pudo interpretar la exportación de Yeastar. Verifica que el PBX entregue el formato de transcripciones de IA.')
   }
-  if (!rows.length) return { imported: 0, remaining: 0, available: 0, alreadyPresent: 0 }
+  if (!rows.length) return { imported: 0, updated: 0, dated: 0, remaining: 0, available: 0, alreadyPresent: 0, undated: 0 }
   if (rows.length > 2000) throw new TranscriptionArchiveError('yeastar_export_too_large', 'La exportación contiene más de 2000 tramos. Filtra por teléfono de cliente para importar un conjunto más pequeño.', 413)
-  const known: { id: string; call_id: string; cdr_id: string; transcript: string | null; analysis_status: string }[] = []
+  const known: {
+    id: string; call_id: string; cdr_id: string; transcript: string | null; started_at: string | null
+    analysis_status: string; analysis_error: string | null; summary: string | null
+    key_points: unknown[] | null; action_items: unknown[] | null; memory_applied_at: string | null
+  }[] = []
   for (let offset = 0; offset < rows.length; offset += 100) {
     const { data, error } = await db.from('yeastar_call_transcriptions')
-      .select('id, call_id, cdr_id, transcript, analysis_status')
+      .select('id, call_id, cdr_id, transcript, started_at, analysis_status, analysis_error, summary, key_points, action_items, memory_applied_at')
       .eq('account_id', accountId).in('cdr_id', rows.slice(offset, offset + 100).map((row) => row.cdrId))
     if (error) {
       console.error('[yeastar] transcript export lookup failed:', error)
@@ -129,6 +133,11 @@ export async function syncTranscriptionArchive(db: SupabaseClient, accountId: st
     const existing = byCdr.get(row.cdrId)
     return Boolean(existing?.transcript && row.transcript.length > existing.transcript.length)
   })
+  const dateRepairs = rows.filter((row) => {
+    const existing = byCdr.get(row.cdrId)
+    return Boolean(existing?.transcript && !existing.started_at && row.startedAt)
+  })
+  const queuedIds = new Set([...pending, ...improved, ...dateRepairs].map((row) => row.cdrId))
   const retryIds = (known ?? []).filter((row) => row.transcript && ['failed', 'unavailable'].includes(row.analysis_status)).map((row) => row.id)
   for (let offset = 0; offset < retryIds.length; offset += 100) {
     const { error: retryError } = await db.from('yeastar_call_transcriptions').update({
@@ -139,18 +148,32 @@ export async function syncTranscriptionArchive(db: SupabaseClient, accountId: st
       throw new TranscriptionArchiveError('transcript_database_error', 'No se pudo programar el reintento de análisis en NexoOmni.', 500)
     }
   }
-  const batch = [...pending, ...improved].slice(0, 100)
+  const batch = [...new Map([...pending, ...improved, ...dateRepairs].map((row) => [row.cdrId, row])).values()].slice(0, 100)
   const improvedIds = new Set(improved.map((row) => row.cdrId))
+  const dateRepairIds = new Set(dateRepairs.map((row) => row.cdrId))
   if (batch.length) {
     const { error: writeError } = await db.from('yeastar_call_transcriptions').upsert(batch.map((row) => ({
       account_id: accountId, call_id: byCdr.get(row.cdrId)?.call_id ?? `cdr:${row.uid}:${row.cdrId}`,
       cdr_id: row.cdrId, customer_phone: row.phone, direction: row.direction,
-      started_at: row.startedAt, duration_seconds: row.duration, transcript: row.transcript,
-      ...(improvedIds.has(row.cdrId)
-        ? { summary: null, key_points: [], action_items: [], memory_applied_at: null }
-        : row.summary ? { summary: row.summary } : {}),
-      transcription_status: 'completed', analysis_status: 'pending', analysis_error: null,
+      started_at: row.startedAt ?? byCdr.get(row.cdrId)?.started_at ?? null,
+      duration_seconds: row.duration, transcript: row.transcript,
+      summary: improvedIds.has(row.cdrId) ? null
+        : dateRepairIds.has(row.cdrId) ? byCdr.get(row.cdrId)?.summary ?? null
+          : row.summary ?? null,
+      key_points: improvedIds.has(row.cdrId) ? []
+        : dateRepairIds.has(row.cdrId) ? byCdr.get(row.cdrId)?.key_points ?? []
+          : [],
+      action_items: improvedIds.has(row.cdrId) ? []
+        : dateRepairIds.has(row.cdrId) ? byCdr.get(row.cdrId)?.action_items ?? []
+          : [],
+      transcription_status: 'completed',
+      analysis_status: dateRepairIds.has(row.cdrId) && !improvedIds.has(row.cdrId)
+        ? byCdr.get(row.cdrId)?.analysis_status ?? 'pending' : 'pending',
+      analysis_error: dateRepairIds.has(row.cdrId) && !improvedIds.has(row.cdrId)
+        ? byCdr.get(row.cdrId)?.analysis_error ?? null : null,
       error_message: null, yeastar_payload: { event: row.event, transcript_source: 'ai_receptionist' },
+      memory_applied_at: dateRepairIds.has(row.cdrId) && !improvedIds.has(row.cdrId)
+        ? byCdr.get(row.cdrId)?.memory_applied_at ?? null : null,
       next_sync_at: new Date().toISOString(), updated_at: new Date().toISOString(),
     })), { onConflict: 'account_id,call_id' })
     if (writeError) {
@@ -159,9 +182,11 @@ export async function syncTranscriptionArchive(db: SupabaseClient, accountId: st
     }
   }
   return {
-    imported: Math.min(batch.length, pending.length), updated: batch.filter((row) => improvedIds.has(row.cdrId)).length,
-    remaining: Math.max(0, pending.length + improved.length - batch.length),
-    available: rows.length, alreadyPresent: rows.length - pending.length - improved.length,
+    imported: batch.filter((row) => pending.some((candidate) => candidate.cdrId === row.cdrId)).length,
+    updated: batch.filter((row) => improvedIds.has(row.cdrId)).length,
+    dated: batch.filter((row) => dateRepairIds.has(row.cdrId)).length,
+    remaining: Math.max(0, queuedIds.size - batch.length),
+    available: rows.length, alreadyPresent: rows.length - queuedIds.size,
     undated: batch.filter((row) => row.dateUnavailable).length,
   }
 }

@@ -26,12 +26,18 @@ function partsAsUtcMs(parts: LocalParts) { return Date.UTC(parts.year, parts.mon
 // "shows 3:34 PM when it's actually 9:39 PM"). Convert using the PBX's real
 // timezone instead.
 export function parsePbxLocalTime(value: string, timezone = 'America/Mexico_City'): Date | null {
-  const match = /^(\d{4})[-/](\d{2})[-/](\d{2})[ T](\d{2}):(\d{2}):(\d{2})(?:\s*(AM|PM))?$/i.exec(value.trim())
-  if (!match) return null
-  const parts: LocalParts = { year: Number(match[1]), month: Number(match[2]), day: Number(match[3]), hour: Number(match[4]), minute: Number(match[5]), second: Number(match[6]) }
-  if (match[7]) {
+  const text = value.trim()
+  const yearFirst = /^(\d{4})[-/](\d{2})[-/](\d{2})[ T](\d{2}):(\d{2}):(\d{2})(?:\s*(AM|PM))?$/i.exec(text)
+  const monthFirst = /^(\d{2})\/(\d{2})\/(\d{4})[ T](\d{2}):(\d{2}):(\d{2})$/.exec(text)
+  if (!yearFirst && !monthFirst) return null
+  const match = yearFirst ?? monthFirst!
+  const parts: LocalParts = yearFirst
+    ? { year: Number(match[1]), month: Number(match[2]), day: Number(match[3]), hour: Number(match[4]), minute: Number(match[5]), second: Number(match[6]) }
+    : { year: Number(match[3]), month: Number(match[1]), day: Number(match[2]), hour: Number(match[4]), minute: Number(match[5]), second: Number(match[6]) }
+  const meridiem = yearFirst ? match[7] : undefined
+  if (meridiem) {
     if (parts.hour < 1 || parts.hour > 12) return null
-    parts.hour = parts.hour % 12 + (match[7].toUpperCase() === 'PM' ? 12 : 0)
+    parts.hour = parts.hour % 12 + (meridiem.toUpperCase() === 'PM' ? 12 : 0)
   }
   const check = new Date(partsAsUtcMs(parts))
   if (check.getUTCFullYear() !== parts.year || check.getUTCMonth() + 1 !== parts.month
