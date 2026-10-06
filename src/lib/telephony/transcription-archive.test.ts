@@ -37,10 +37,10 @@ describe('Yeastar archive synchronization', () => {
       expect(ids.length).toBeLessThanOrEqual(100)
       return Response.json(ids.flatMap((id) => stored.has(id) ? [stored.get(id)] : []))
     } } })
-    expect(await syncTranscriptionArchive(db, 'account-a')).toEqual({ imported: 100, updated: 0, remaining: 101, available: 201, alreadyPresent: 0 })
-    expect(await syncTranscriptionArchive(db, 'account-a')).toEqual({ imported: 100, updated: 0, remaining: 1, available: 201, alreadyPresent: 100 })
-    expect(await syncTranscriptionArchive(db, 'account-a')).toEqual({ imported: 1, updated: 0, remaining: 0, available: 201, alreadyPresent: 200 })
-    expect(await syncTranscriptionArchive(db, 'account-a')).toEqual({ imported: 0, updated: 0, remaining: 0, available: 201, alreadyPresent: 201 })
+    expect(await syncTranscriptionArchive(db, 'account-a')).toEqual({ imported: 100, updated: 0, remaining: 101, available: 201, alreadyPresent: 0, undated: 0 })
+    expect(await syncTranscriptionArchive(db, 'account-a')).toEqual({ imported: 100, updated: 0, remaining: 1, available: 201, alreadyPresent: 100, undated: 0 })
+    expect(await syncTranscriptionArchive(db, 'account-a')).toEqual({ imported: 1, updated: 0, remaining: 0, available: 201, alreadyPresent: 200, undated: 0 })
+    expect(await syncTranscriptionArchive(db, 'account-a')).toEqual({ imported: 0, updated: 0, remaining: 0, available: 201, alreadyPresent: 201, undated: 0 })
     expect(stored.size).toBe(201)
     expect([...stored.values()].every((row) => row.analysis_status === 'pending')).toBe(true)
     expect([...stored.values()].every((row) =>
@@ -102,7 +102,28 @@ describe('Yeastar archive synchronization', () => {
     expect(await syncTranscriptionArchive(db, 'account-a')).toMatchObject({ imported: 0, updated: 0, remaining: 0, alreadyPresent: 1 })
     expect(databaseFetch.mock.calls.every(([, init]) => init?.method !== 'POST')).toBe(true)
   })
-  it('rejects an unrecognized historical call date instead of treating it as today', () => {
-    expect(() => parseTranscriptionArchive([{ ...record(1), time: '05/10/2026 10:00:00' }])).toThrow('fecha')
+  it('keeps a transcript when Yeastar provides an unrecognized date without inventing a timestamp', () => {
+    const [row] = parseTranscriptionArchive([{ ...record(1), time: '05/10/2026 10:00:00' }])
+    expect(row).toMatchObject({
+      transcript: '+525512345678: Necesito seguimiento 1',
+      startedAt: null,
+      dateUnavailable: true,
+      event: { time_start: null },
+    })
+  })
+  it('imports transcript rows with unrecognized dates and reports them', async () => {
+    upstream([{ ...record(1), time: '05/10/2026 10:00:00' }])
+    const saved: { value?: Record<string, unknown> } = {}
+    const db = createClient('https://db.example.test', 'test-key', { global: { fetch: async (_input, init) => {
+      if (init?.method === 'POST') {
+        saved.value = JSON.parse(String(init.body))[0]
+        return Response.json([])
+      }
+      return Response.json([])
+    } } })
+    expect(await syncTranscriptionArchive(db, 'account-a')).toMatchObject({
+      imported: 1, remaining: 0, undated: 1,
+    })
+    expect(saved.value).toMatchObject({ started_at: null, transcription_status: 'completed' })
   })
 })

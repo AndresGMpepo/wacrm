@@ -30,20 +30,19 @@ export function parseTranscriptionArchive(value: unknown) {
       .map((turn) => `${typeof turn.source_number === 'string' ? `${turn.source_number}: ` : ''}${String(turn.content).trim()}`)
       .join('\n')
     const direction = String(row.call_type ?? '').toLowerCase()
-    const event = { ...row, type: direction, time_start: row.time }
     const startedAt = typeof row.time === 'string' ? parsePbxLocalTime(row.time)?.toISOString() : undefined
-    if (transcript && !startedAt) throw new Error('No se pudo interpretar la fecha de una llamada del archivo de Yeastar.')
     return {
       cdrId: row.leg_id, uid: row.uid,
       transcript, summary: typeof row.ai_summary === 'string' ? row.ai_summary.trim() : null,
-      phone: callCustomerPhone(event),
+      phone: callCustomerPhone({ ...row, type: direction }),
       direction: ['inbound', 'outbound', 'internal'].includes(direction) ? direction : 'unknown',
       startedAt: startedAt ?? null,
+      dateUnavailable: Boolean(transcript && !startedAt),
       duration: typeof row.call_duration === 'number' ? row.call_duration : null,
       event: {
         uid: row.uid, leg_id: row.leg_id, call_note_id: row.leg_id,
         call_from: row.call_from, call_to: row.call_to, type: direction,
-        time_start: row.time, call_duration: row.call_duration,
+        time_start: startedAt ? row.time : null, call_duration: row.call_duration,
       },
     }
   }).filter((row) => row.transcript)
@@ -163,5 +162,6 @@ export async function syncTranscriptionArchive(db: SupabaseClient, accountId: st
     imported: Math.min(batch.length, pending.length), updated: batch.filter((row) => improvedIds.has(row.cdrId)).length,
     remaining: Math.max(0, pending.length + improved.length - batch.length),
     available: rows.length, alreadyPresent: rows.length - pending.length - improved.length,
+    undated: batch.filter((row) => row.dateUnavailable).length,
   }
 }

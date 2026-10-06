@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { Suspense, useCallback, useEffect, useState } from 'react'
 import { useTranslations } from 'next-intl'
+import { useSearchParams } from 'next/navigation'
 import { hasMinRole } from '@/lib/auth/roles'
 import { Loader2, PhoneCall, RefreshCw } from 'lucide-react'
 import { useAuth } from '@/hooks/use-auth'
@@ -106,13 +107,14 @@ function Chronology({ timeline }: { timeline: TimelineLeg[] | null }) {
   </div>
 }
 
-export default function CallTranscriptionsPage() {
+function CallTranscriptionsContent() {
   const t = useTranslations('CallTranscriptionSync')
+  const searchParams = useSearchParams()
   const { accountRole } = useAuth()
   const allowed = !!accountRole && hasMinRole(accountRole, 'supervisor')
   const [calls, setCalls] = useState<CallRecord[]>([])
   const [query, setQuery] = useState('')
-  const [requestedCallId] = useState(() => typeof window === 'undefined' ? '' : new URLSearchParams(window.location.search).get('call') ?? '')
+  const requestedCallId = searchParams.get('call')?.trim() ?? ''
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [syncPhone, setSyncPhone] = useState('')
@@ -120,19 +122,19 @@ export default function CallTranscriptionsPage() {
   const [syncMessage, setSyncMessage] = useState<string | null>(null)
   const [syncError, setSyncError] = useState<string | null>(null)
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true); setError(null)
     try {
       const params = new URLSearchParams()
-      if (query) params.set('q', query)
       if (requestedCallId) params.set('call', requestedCallId)
+      else if (query) params.set('q', query)
       const response = await fetch(`/api/telephony/yeastar/transcriptions${params.size ? `?${params.toString()}` : ''}`, { cache: 'no-store' })
       const payload = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(payload.error || 'No se pudieron cargar las transcripciones.')
       setCalls(payload.calls ?? [])
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'No se pudieron cargar las transcripciones.') }
     finally { setLoading(false) }
-  }
+  }, [query, requestedCallId])
 
   const archiveErrorMessage = (code?: string) => {
     switch (code) {
@@ -160,13 +162,15 @@ export default function CallTranscriptionsPage() {
       const response = await fetch('/api/telephony/yeastar/transcriptions/sync', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: syncPhone }),
       })
-      const result = await response.json() as { imported?: number; updated?: number; remaining?: number; available?: number; alreadyPresent?: number; code?: string }
+      const result = await response.json() as { imported?: number; updated?: number; remaining?: number; available?: number; alreadyPresent?: number; undated?: number; code?: string }
       if (!response.ok) {
         setSyncError(archiveErrorMessage(result.code))
         return
       }
       setSyncMessage(result.imported || result.updated
-        ? t('importSuccess', { count: result.imported ?? 0, updated: result.updated ?? 0 }) + (result.remaining ? ` ${t('remaining', { count: result.remaining })}` : '')
+        ? t('importSuccess', { count: result.imported ?? 0, updated: result.updated ?? 0 })
+          + (result.undated ? ` ${t('importUndated', { count: result.undated })}` : '')
+          + (result.remaining ? ` ${t('remaining', { count: result.remaining })}` : '')
         : result.available === 0
           ? t('noPublishedTranscripts')
           : t('nothingToImport', { count: result.alreadyPresent ?? 0 }))
@@ -177,7 +181,7 @@ export default function CallTranscriptionsPage() {
     } finally { setSyncing(false) }
   }
 
-  useEffect(() => { if (allowed) void load() }, [allowed])
+  useEffect(() => { if (allowed) void load() }, [allowed, load])
   if (!allowed) return <Card><CardHeader><CardTitle>{t('restrictedTitle')}</CardTitle><CardDescription>{t('restrictedDescription')}</CardDescription></CardHeader></Card>
 
   return <div className="space-y-6">
@@ -197,16 +201,16 @@ export default function CallTranscriptionsPage() {
       </div>
       <Button variant="outline" onClick={() => void load()} disabled={loading}><RefreshCw className={loading ? 'size-4 animate-spin' : 'size-4'} />Actualizar</Button>
     </div>
-    <form className="flex gap-2" onSubmit={(event) => { event.preventDefault(); void load() }}>
+    {!requestedCallId ? <form className="flex gap-2" onSubmit={(event) => { event.preventDefault(); void load() }}>
       <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar por cliente, número o texto" />
       <Button type="submit">Buscar</Button>
-    </form>
+    </form> : null}
     {loading
       ? <div className="flex justify-center py-12 text-muted-foreground"><Loader2 className="mr-2 size-5 animate-spin" />Cargando</div>
       : error
         ? <Card><CardContent className="pt-6 text-sm text-red-400">{error}</CardContent></Card>
         : calls.length === 0
-          ? <Card><CardContent className="pt-6 text-sm text-muted-foreground">Aún no hay llamadas sincronizadas. Confirma que Yeastar envía el evento 30012 después de finalizar una llamada.</CardContent></Card>
+          ? <Card><CardContent className="pt-6 text-sm text-muted-foreground">{requestedCallId ? t('selectedCallNotFound') : 'Aún no hay llamadas sincronizadas. Confirma que Yeastar envía el evento 30012 después de finalizar una llamada.'}</CardContent></Card>
           : <div className="space-y-4">
             {calls.map((call) => <Card key={call.id}>
               <CardHeader>
@@ -258,4 +262,10 @@ export default function CallTranscriptionsPage() {
             </Card>)}
           </div>}
   </div>
+}
+
+export default function CallTranscriptionsPage() {
+  return <Suspense fallback={<div className="flex justify-center py-12 text-muted-foreground"><Loader2 className="size-5 animate-spin" /></div>}>
+    <CallTranscriptionsContent />
+  </Suspense>
 }

@@ -54,11 +54,14 @@ completo de llamadas de la cuenta.
 4. Si una llamada ya estaba guardada con una transcripción más corta,
    NexoOmni la complementa cuando la exportación final de Yeastar trae
    más texto y vuelve a procesar su resumen y Nexo Memory.
-5. Si Yeastar no incluye transcripciones nuevas, NexoOmni lo indica
+5. Si Yeastar entrega una fecha que NexoOmni no puede interpretar, la
+   transcripción se conserva sin asignarle una fecha inventada y el
+   resultado de importación lo indica.
+6. Si Yeastar no incluye transcripciones nuevas, NexoOmni lo indica
    por separado: las llamadas anteriores siguen visibles y el PBX
    puede no haber publicado aún la nueva transcripción. Vuelve a
    intentarlo unos minutos después.
-6. El análisis y la actualización de Nexo Memory se hacen en segundo
+7. El análisis y la actualización de Nexo Memory se hacen en segundo
    plano. Recarga el listado después de unos minutos.
 
 Si la exportación es demasiado grande, filtra por teléfono. Si la
