@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createClient } from '@supabase/supabase-js'
 import { compactCallSummary, findLiveCallerCall, loadOwnCallContext, uniqueCallId } from './call-context'
-import { callCustomerPhone } from './call-party'
+import { callCustomerPhone, isAiReceptionistTranscript } from './call-party'
 import { parseTranscriptionArchive } from './transcription-archive'
 import { yeastarAiConnection } from './yeastar-ai'
 
@@ -17,6 +17,11 @@ describe('call party and archive identity', () => {
     expect(callCustomerPhone({ type: 'outbound', call_from: '1001', call_to: '+525512345678' })).toBe('+525512345678')
     expect(callCustomerPhone({ type: 'internal', call_from: '1001', call_to: '7000' })).toBeNull()
   })
+  it('labels calls as AI receptionist only when the transcript came from Yeastar AI context', () => {
+    expect(isAiReceptionistTranscript({ transcript_source: 'ai_receptionist' })).toBe(true)
+    expect(isAiReceptionistTranscript({ ai: { context: [{ data: {} }] } })).toBe(true)
+    expect(isAiReceptionistTranscript({ event: { type: 'inbound', call_to: '7000' } })).toBe(false)
+  })
   it('imports official AI receptionist export records chronologically', () => {
     const [record] = parseTranscriptionArchive([{
       uid: 'cdr-root', leg_id: 'leg-1', call_type: 'Inbound', call_from: '+525512345678', call_to: '7000',
@@ -29,6 +34,12 @@ describe('call party and archive identity', () => {
     expect(record).toMatchObject({ cdrId: 'leg-1', uid: 'cdr-root', direction: 'inbound', phone: '+525512345678' })
     expect(record.transcript).toBe('7000: ¿Qué necesita?\n525512345678: Una cita')
     expect(record.startedAt).toBe('2026-10-05T16:00:00.000Z')
+    expect(record.event).toEqual({
+      uid: 'cdr-root', leg_id: 'leg-1', call_note_id: 'leg-1',
+      call_from: '+525512345678', call_to: '7000', type: 'inbound',
+      time_start: '2026/10/05 10:00:00',
+    })
+    expect(JSON.stringify(record.event)).not.toContain('ai_transcription')
   })
   it('rejects an archive without leg identity and keeps brief histories brief', () => {
     expect(() => parseTranscriptionArchive([{ uid: 'cdr-root', ai_transcription: [] }])).toThrow()

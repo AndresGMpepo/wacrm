@@ -30,7 +30,6 @@ type CallRecord = {
   talk_duration_seconds: number | null
   disconnected_by: string | null
   timeline: TimelineLeg[] | null
-  recording_url: string | null
   transcript: string | null
   summary: string | null
   key_points: string[] | null
@@ -38,6 +37,7 @@ type CallRecord = {
   transcription_status: string
   analysis_status: string
   memory_applied_at: string | null
+  receptionist_ai: boolean
   error_message: string | null
   contact: { name: string | null; phone: string; email: string | null } | null
   agent: { full_name: string | null; email: string | null } | null
@@ -118,6 +118,7 @@ export default function CallTranscriptionsPage() {
   const [syncPhone, setSyncPhone] = useState('')
   const [syncing, setSyncing] = useState(false)
   const [syncMessage, setSyncMessage] = useState<string | null>(null)
+  const [syncError, setSyncError] = useState<string | null>(null)
 
   const load = async () => {
     setLoading(true); setError(null)
@@ -133,20 +134,46 @@ export default function CallTranscriptionsPage() {
     finally { setLoading(false) }
   }
 
+  const archiveErrorMessage = (code?: string) => {
+    switch (code) {
+      case 'yeastar_connection_unavailable': return t('importErrorConnection')
+      case 'yeastar_export_unreachable': return t('importErrorQuery')
+      case 'yeastar_export_rejected': return t('importErrorRejected')
+      case 'yeastar_invalid_download': return t('importErrorInvalidDownload')
+      case 'yeastar_download_unreachable':
+      case 'yeastar_download_failed': return t('importErrorDownload')
+      case 'yeastar_empty_export':
+      case 'yeastar_invalid_export': return t('importErrorInvalidExport')
+      case 'yeastar_export_too_large': return t('importErrorTooLarge')
+      case 'transcript_database_error': return t('importErrorDatabase')
+      case 'invalid_phone':
+      case 'invalid_request': return t('importErrorInput')
+      default: return t('importError')
+    }
+  }
+
   const sync = async () => {
     setSyncing(true)
     setSyncMessage(null)
+    setSyncError(null)
     try {
       const response = await fetch('/api/telephony/yeastar/transcriptions/sync', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: syncPhone }),
       })
-      if (!response.ok) throw new Error(`Transcript sync HTTP ${response.status}`)
-      const result = await response.json() as { imported: number; remaining: number }
-      setSyncMessage(t('success', { count: result.imported }) + (result.remaining ? ` ${t('remaining', { count: result.remaining })}` : ''))
+      const result = await response.json() as { imported?: number; updated?: number; remaining?: number; available?: number; alreadyPresent?: number; code?: string }
+      if (!response.ok) {
+        setSyncError(archiveErrorMessage(result.code))
+        return
+      }
+      setSyncMessage(result.imported || result.updated
+        ? t('importSuccess', { count: result.imported ?? 0, updated: result.updated ?? 0 }) + (result.remaining ? ` ${t('remaining', { count: result.remaining })}` : '')
+        : result.available === 0
+          ? t('noPublishedTranscripts')
+          : t('nothingToImport', { count: result.alreadyPresent ?? 0 }))
       await load()
     } catch (reason) {
       console.error('[yeastar] manual transcript sync failed:', reason)
-      setSyncMessage(t('error'))
+      setSyncError(t('importError'))
     } finally { setSyncing(false) }
   }
 
@@ -154,16 +181,20 @@ export default function CallTranscriptionsPage() {
   if (!allowed) return <Card><CardHeader><CardTitle>{t('restrictedTitle')}</CardTitle><CardDescription>{t('restrictedDescription')}</CardDescription></CardHeader></Card>
 
   return <div className="space-y-6">
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
       <div>
-        <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight"><PhoneCall className="size-6 text-primary" />Transcripciones y resúmenes</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Transcripción sincronizada desde Yeastar; resumen y cronología generados por NexoOmni.</p>
+        <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight"><PhoneCall className="size-6 text-primary" />{t('title')}</h1>
+        <p className="mt-1 text-sm text-muted-foreground">{t('description')}</p>
       </div>
-      <div className="flex flex-col gap-2 sm:flex-row">
-        <Input value={syncPhone} onChange={(event) => setSyncPhone(event.target.value)} placeholder={t('phone')} aria-label={t('phone')} />
-        <Button onClick={() => void sync()} disabled={syncing}>{syncing ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}{t(syncing ? 'syncing' : 'sync')}</Button>
+      <div className="w-full space-y-2 lg:max-w-2xl">
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Input value={syncPhone} onChange={(event) => setSyncPhone(event.target.value)} placeholder={t('phone')} aria-label={t('phone')} />
+          <Button className="shrink-0" onClick={() => void sync()} disabled={syncing}>{syncing ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}{t(syncing ? 'syncing' : 'sync')}</Button>
+        </div>
+        <p className="text-xs text-muted-foreground">{t('importHelp')}</p>
+        {syncMessage ? <p role="status" className="text-sm text-muted-foreground">{syncMessage}</p> : null}
+        {syncError ? <p role="alert" className="text-sm text-destructive">{syncError}</p> : null}
       </div>
-      {syncMessage ? <p role="status" className="text-sm text-muted-foreground">{syncMessage}</p> : null}
       <Button variant="outline" onClick={() => void load()} disabled={loading}><RefreshCw className={loading ? 'size-4 animate-spin' : 'size-4'} />Actualizar</Button>
     </div>
     <form className="flex gap-2" onSubmit={(event) => { event.preventDefault(); void load() }}>
@@ -185,14 +216,14 @@ export default function CallTranscriptionsPage() {
                     <CardDescription>
                       {call.contact?.phone || call.customer_phone || 'Sin número'}
                       {call.contact?.email || call.customer_email ? ` · ${call.contact?.email || call.customer_email}` : ''}
-                      {' · '}{call.agent?.full_name || 'Agente no identificado'}{call.agent_extension ? ` · Ext. ${call.agent_extension}` : ''}
+                      {' · '}{call.receptionist_ai ? t('aiReceptionist') : call.agent?.full_name || (call.agent_extension ? t('extensionAgent', { extension: call.agent_extension }) : t('agentUnidentified'))}
+                      {call.agent_extension ? ` · ${t('extensionShort')} ${call.agent_extension}` : ''}
                     </CardDescription>
                   </div>
                   <span className="text-xs text-muted-foreground">{date(call.ended_at || call.started_at)} · {duration(call.duration_seconds)} · {call.direction || 'unknown'}</span>
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
-                {call.recording_url ? <audio controls preload="none" className="w-full" src={call.recording_url} /> : null}
                 {call.transcription_status === 'failed' ? <p className="text-sm text-red-400">{t('transcriptFailed')}</p> : null}
                 {call.transcription_status === 'pending' ? <p className="text-sm text-amber-400">{t('transcriptPending')}</p> : null}
                 {call.transcription_status === 'unavailable' ? <p className="text-sm text-muted-foreground">{t('transcriptUnavailable')}</p> : null}

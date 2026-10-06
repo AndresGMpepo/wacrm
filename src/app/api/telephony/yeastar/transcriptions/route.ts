@@ -3,6 +3,7 @@ import { createClient as createAdminClient } from '@supabase/supabase-js'
 
 import { requireEntitlement } from '@/lib/account/entitlements'
 import { toErrorResponse } from '@/lib/auth/account'
+import { isAiReceptionistTranscript } from '@/lib/telephony/call-party'
 
 function admin() {
   return createAdminClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false } })
@@ -17,7 +18,7 @@ export async function GET(request: Request) {
     const callRecordId = url.searchParams.get('call')?.trim()
     const db = admin()
     let requestQuery = db.from('yeastar_call_transcriptions')
-      .select('id, call_id, cdr_id, contact_id, customer_phone, customer_name, customer_email, agent_user_id, agent_extension, direction, started_at, answered_at, ended_at, duration_seconds, routing_duration_seconds, handling_duration_seconds, ring_duration_seconds, hold_duration_seconds, talk_duration_seconds, disconnected_by, timeline, recording_url, transcript, summary, key_points, action_items, language, transcription_status, analysis_status, memory_applied_at, error_message, created_at, updated_at')
+      .select('id, call_id, cdr_id, contact_id, customer_phone, customer_name, customer_email, agent_user_id, agent_extension, direction, started_at, answered_at, ended_at, duration_seconds, routing_duration_seconds, handling_duration_seconds, ring_duration_seconds, hold_duration_seconds, talk_duration_seconds, disconnected_by, timeline, transcript, summary, key_points, action_items, language, transcription_status, analysis_status, memory_applied_at, error_message, yeastar_payload, created_at, updated_at')
       .eq('account_id', accountId)
       .order('created_at', { ascending: false })
       .limit(limit)
@@ -38,6 +39,8 @@ export async function GET(request: Request) {
     const agentsById = new Map((agents.data ?? []).map((agent) => [agent.user_id, agent]))
     return NextResponse.json({ calls: rows.map((row) => ({
       ...row,
+      receptionist_ai: isAiReceptionistTranscript(row.yeastar_payload),
+      yeastar_payload: undefined,
       contact: row.contact_id ? contactsById.get(row.contact_id) ?? null : null,
       agent: row.agent_user_id ? agentsById.get(row.agent_user_id) ?? null : null,
     })) })

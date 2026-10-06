@@ -37,12 +37,14 @@ describe('Yeastar archive synchronization', () => {
       expect(ids.length).toBeLessThanOrEqual(100)
       return Response.json(ids.flatMap((id) => stored.has(id) ? [stored.get(id)] : []))
     } } })
-    expect(await syncTranscriptionArchive(db, 'account-a')).toEqual({ imported: 100, remaining: 101 })
-    expect(await syncTranscriptionArchive(db, 'account-a')).toEqual({ imported: 100, remaining: 1 })
-    expect(await syncTranscriptionArchive(db, 'account-a')).toEqual({ imported: 1, remaining: 0 })
-    expect(await syncTranscriptionArchive(db, 'account-a')).toEqual({ imported: 0, remaining: 0 })
+    expect(await syncTranscriptionArchive(db, 'account-a')).toEqual({ imported: 100, updated: 0, remaining: 101, available: 201, alreadyPresent: 0 })
+    expect(await syncTranscriptionArchive(db, 'account-a')).toEqual({ imported: 100, updated: 0, remaining: 1, available: 201, alreadyPresent: 100 })
+    expect(await syncTranscriptionArchive(db, 'account-a')).toEqual({ imported: 1, updated: 0, remaining: 0, available: 201, alreadyPresent: 200 })
+    expect(await syncTranscriptionArchive(db, 'account-a')).toEqual({ imported: 0, updated: 0, remaining: 0, available: 201, alreadyPresent: 201 })
     expect(stored.size).toBe(201)
     expect([...stored.values()].every((row) => row.analysis_status === 'pending')).toBe(true)
+    expect([...stored.values()].every((row) =>
+      (row.yeastar_payload as { transcript_source: string }).transcript_source === 'ai_receptionist')).toBe(true)
   })
   it('rejects a download on another origin before forwarding credentials', async () => {
     const fetcher = upstream([], 'https://other.example.test/api/download/file')
@@ -63,7 +65,42 @@ describe('Yeastar archive synchronization', () => {
     const db = createClient('https://db.example.test', 'test-key', { global: { fetch: async (_input, init) =>
       init?.method === 'POST' ? Response.json({ message: 'write failed' }, { status: 500 }) : Response.json([]),
     } })
-    await expect(syncTranscriptionArchive(db, 'account-a')).rejects.toMatchObject({ message: 'write failed' })
+    await expect(syncTranscriptionArchive(db, 'account-a')).rejects.toMatchObject({
+      name: 'TranscriptionArchiveError', code: 'transcript_database_error', status: 500,
+    })
+  })
+  it('replaces a short partial transcript when the completed Yeastar archive has more turns', async () => {
+    upstream([record(1)])
+    const saved: { value?: Record<string, unknown> } = {}
+    const db = createClient('https://db.example.test', 'test-key', { global: { fetch: async (_input, init) => {
+      if (init?.method === 'POST') {
+        saved.value = JSON.parse(String(init.body))[0]
+        return Response.json([])
+      }
+      return Response.json([{
+        id: 'call-1', call_id: 'existing-call', cdr_id: 'leg-1',
+        transcript: 'De acuerdo.',
+        analysis_status: 'completed', memory_applied_at: '2026-10-05T18:00:00Z',
+      }])
+    } } })
+    expect(await syncTranscriptionArchive(db, 'account-a')).toMatchObject({ imported: 0, updated: 1, remaining: 0 })
+    expect(saved.value).toMatchObject({
+      call_id: 'existing-call', analysis_status: 'pending', summary: null,
+      memory_applied_at: null, transcription_status: 'completed',
+    })
+    expect(saved.value?.transcript).toBe('+525512345678: Necesito seguimiento 1')
+  })
+  it('does not replace a transcript with a shorter archive version', async () => {
+    upstream([record(1)])
+    const databaseFetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) =>
+      init?.method === 'POST' ? Response.json([]) : Response.json([{
+        id: 'call-1', call_id: 'existing-call', cdr_id: 'leg-1',
+        transcript: 'Esta es una transcripción completa y más larga que el archivo.',
+        analysis_status: 'completed',
+      }]))
+    const db = createClient('https://db.example.test', 'test-key', { global: { fetch: databaseFetch } })
+    expect(await syncTranscriptionArchive(db, 'account-a')).toMatchObject({ imported: 0, updated: 0, remaining: 0, alreadyPresent: 1 })
+    expect(databaseFetch.mock.calls.every(([, init]) => init?.method !== 'POST')).toBe(true)
   })
   it('rejects an unrecognized historical call date instead of treating it as today', () => {
     expect(() => parseTranscriptionArchive([{ ...record(1), time: '05/10/2026 10:00:00' }])).toThrow('fecha')

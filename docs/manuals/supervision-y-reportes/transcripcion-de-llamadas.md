@@ -17,7 +17,10 @@ cliente identificado por su teléfono.
 
 NexoOmni no activa por sí solo la grabación o transcripción de todas
 las llamadas: su disponibilidad depende de la configuración, versión
-y permisos del PBX. El audio aparece solamente cuando está disponible.
+y permisos del PBX. En este momento esta pantalla **no reproduce ni
+importa grabaciones**; el audio permanece en el PBX y no se copia al
+almacenamiento de NexoOmni. Para escuchar una grabación, consúltala
+directamente en Yeastar.
 
 ## ¿Para quién es?
 
@@ -29,24 +32,39 @@ completo de llamadas de la cuenta.
 1. Ve a **Transcripciones de llamadas**.
 2. Busca por contacto, o filtra por fecha.
 3. Abre una llamada para ver: resumen, puntos clave, pendientes,
-   transcripción completa y, cuando esté disponible, el audio original.
-4. Revisa el estado del análisis. Una transcripción puede estar lista
+   transcripción completa.
+4. Revisa quién atendió: NexoOmni identifica al **Recepcionista de IA**
+   cuando la transcripción proviene del contexto de IA de Yeastar. Para
+   las demás extensiones, muestra al agente asignado o el número de
+   extensión si aún no está vinculado a un usuario.
+5. Revisa el estado del análisis. Una transcripción puede estar lista
    mientras todavía se genera su resumen o se actualiza Nexo Memory.
 
 ### Recuperar llamadas que ya aparecen en Yeastar
 
-1. Pulsa **Sincronizar desde Yeastar**.
+1. Pulsa **Importar desde Yeastar**. Esto solicita la exportación de
+   transcripciones de IA de Yeastar; no es una prueba de estado en vivo
+   de la conexión y tampoco elimina las llamadas ya guardadas.
 2. Opcionalmente escribe el teléfono internacional del cliente, incluido
    el código de país. Este filtro recupera llamadas **entrantes desde
    ese número**.
 3. Se importan hasta 100 tramos por operación. Si quedan pendientes,
    vuelve a pulsar el botón para importar el siguiente lote, sin
    volver a importar los que ya tienen transcripción.
-4. El análisis y la actualización de Nexo Memory se hacen en segundo
+4. Si una llamada ya estaba guardada con una transcripción más corta,
+   NexoOmni la complementa cuando la exportación final de Yeastar trae
+   más texto y vuelve a procesar su resumen y Nexo Memory.
+5. Si Yeastar no incluye transcripciones nuevas, NexoOmni lo indica
+   por separado: las llamadas anteriores siguen visibles y el PBX
+   puede no haber publicado aún la nueva transcripción. Vuelve a
+   intentarlo unos minutos después.
+6. El análisis y la actualización de Nexo Memory se hacen en segundo
    plano. Recarga el listado después de unos minutos.
 
-Si la exportación es demasiado grande, filtra por teléfono. Si una
-operación falla, no se informa como una importación exitosa.
+Si la exportación es demasiado grande, filtra por teléfono. Si la
+exportación falla, el mensaje identifica si Yeastar rechazó la consulta,
+si no estuvo accesible la descarga o si NexoOmni no pudo guardar los
+datos; las transcripciones anteriores se conservan.
 
 ### Requisitos de configuración
 
@@ -73,7 +91,7 @@ concreta, se crea una tarea con recordatorio automáticamente (ver
 Normalmente unos minutos — depende de la duración de la llamada.
 El proceso consulta las transcripciones publicadas por el PBX y
 reintenta las que aún no están disponibles. Si faltan llamadas antiguas,
-utiliza **Sincronizar desde Yeastar**.
+utiliza **Importar desde Yeastar**.
 
 **¿Una llamada antigua reemplaza el contexto más reciente del cliente?**
 No: conserva sus hechos y pendientes en la memoria, usando la fecha
@@ -85,6 +103,14 @@ el texto completo antes de colgar. El resumen de la misma llamada en
 NexPhone se envía mediante una
 [herramienta del recepcionista de IA](../telefonia/contexto-y-transferencias-ia.md)
 antes de transferir.
+
+**¿Por qué la transcripción de una llamada de IA aparece corta?**
+Yeastar puede publicar primero una transcripción parcial y completar
+la exportación después. Pulsa **Importar desde Yeastar** de nuevo cuando
+haya terminado; NexoOmni reemplaza una transcripción con una versión
+más larga del mismo tramo y regenera el análisis. Si el PBX aún entrega
+el mismo texto corto, NexoOmni no puede recuperar palabras que no estén
+en la exportación.
 
 ## Ver también
 

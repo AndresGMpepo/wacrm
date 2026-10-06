@@ -56,6 +56,8 @@ describe('call transcription and Nexo Memory pipeline', () => {
     }, expect.anything(), expect.anything())
     expect(writes.at(-1)).toMatchObject({ analysis_status: 'completed', sync_claimed_at: null })
     expect(writes.at(-1)?.memory_applied_at).toBeTruthy()
+    expect(writes.find((patch) => patch.transcript)?.yeastar_payload).toMatchObject({ transcript_source: 'ai_receptionist' })
+    expect(writes.find((patch) => patch.agent_extension)?.agent_extension).toBe('7000')
   })
 
   it('keeps the transcript and schedules a retry if memory fails', async () => {

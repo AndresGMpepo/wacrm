@@ -54,7 +54,7 @@ export async function processCallTranscriptions(db: SupabaseClient) {
         transcript = ai.transcript
         const { error: transcriptError } = await db.from('yeastar_call_transcriptions').update({
           cdr_id: ai.cdrId, transcript, transcription_status: 'completed', error_message: null,
-          yeastar_payload: { event, ai: ai.raw },
+          yeastar_payload: { event, ai: ai.raw, transcript_source: 'ai_receptionist' },
         }).eq('id', row.id).eq('account_id', row.account_id)
         if (transcriptError) throw transcriptError
       }
@@ -78,12 +78,10 @@ export async function processCallTranscriptions(db: SupabaseClient) {
         const { data: agent, error: agentError } = await db.from('telephony_user_configs').select('user_id, extension')
           .eq('account_id', row.account_id).eq('provider', 'yeastar').eq('extension', extensionNumber).maybeSingle()
         if (agentError) throw agentError
-        if (agent) {
-          const { error: agentWriteError } = await db.from('yeastar_call_transcriptions')
-            .update({ agent_user_id: agent.user_id, agent_extension: agent.extension })
-            .eq('id', row.id).eq('account_id', row.account_id)
-          if (agentWriteError) throw agentWriteError
-        }
+        const { error: agentWriteError } = await db.from('yeastar_call_transcriptions')
+          .update({ agent_user_id: agent?.user_id ?? null, agent_extension: agent?.extension ?? extensionNumber })
+          .eq('id', row.id).eq('account_id', row.account_id)
+        if (agentWriteError) throw agentWriteError
       }
       const phone = sanitizePhoneForMeta(callCustomerPhone(event) ?? row.customer_phone ?? '')
       if (!contactId && isValidE164(phone)) {

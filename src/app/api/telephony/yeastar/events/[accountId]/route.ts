@@ -48,13 +48,6 @@ function parseEvent(raw: unknown): { eventType: string | null; callId: string; m
     : null
 }
 
-function firstText(value: unknown, keys: string[]): string | null {
-  if (!value || typeof value !== 'object') return null
-  const record = value as JsonRecord
-  for (const key of keys) if (typeof record[key] === 'string' && record[key].trim()) return record[key].trim()
-  return null
-}
-
 function scalarText(value: unknown) { return typeof value === 'string' && value.trim() ? value.trim() : null }
 function firstNestedText(value: unknown, keys: string[]): string | null {
   if (!value || typeof value !== 'object') return null
@@ -239,7 +232,6 @@ export async function POST(request: Request, context: { params: Promise<{ accoun
       const agentExtension = fromExtension ?? toExtension ?? null
       const customerPhone = callCustomerPhone(event.payload)
       const direction = callType && ['inbound', 'outbound', 'internal'].includes(callType.toLowerCase()) ? callType.toLowerCase() : 'unknown'
-      const recordingUrl = firstNestedText(event.payload, ['recording'])
       const durationValue = firstNestedNumber(event.payload, ['call_duration', 'talk_duration'])
       const startTime = firstNestedText(event.payload, ['time_start'])
       const startedAt = startTime ? parsePbxLocalTime(startTime) : null
@@ -248,9 +240,12 @@ export async function POST(request: Request, context: { params: Promise<{ accoun
       const agentConfig = agentExtension ? (await db.from('telephony_user_configs').select('user_id').eq('account_id', accountId).eq('provider', 'yeastar').eq('extension', agentExtension).maybeSingle()).data : null
       const cdrIds = aiCdrIds(event.payload).join(',')
       const { data: existing, error: existingError } = await db.from('yeastar_call_transcriptions')
-        .select('call_id, cdr_id').eq('account_id', accountId)
+        .select('call_id, cdr_id, yeastar_payload').eq('account_id', accountId)
         .eq('cdr_id', cdrIds || event.callId).maybeSingle()
       if (existingError) throw existingError
+      const storedEvent = { ...event.payload }
+      delete storedEvent.recording
+      delete storedEvent.recording_url
       const { error } = await db.from('yeastar_call_transcriptions').upsert({
         account_id: accountId,
         call_id: existing?.call_id ?? (cdrIds ? `cdr:${firstNestedText(event.payload, ['uid']) ?? event.callId}:${cdrIds}` : event.callId),
@@ -265,8 +260,8 @@ export async function POST(request: Request, context: { params: Promise<{ accoun
         started_at: startedAt && !Number.isNaN(startedAt.getTime()) ? startedAt.toISOString() : null,
         duration_seconds: durationValue == null ? null : Math.round(durationValue),
         ended_at: startedAt && durationValue != null ? new Date(startedAt.getTime() + durationValue * 1000).toISOString() : null,
-        recording_url: recordingUrl || null,
-        yeastar_payload: { event: event.payload },
+        recording_url: null,
+        yeastar_payload: { ...(existing?.yeastar_payload ?? {}), event: storedEvent },
         next_sync_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       }, { onConflict: 'account_id,call_id' })
