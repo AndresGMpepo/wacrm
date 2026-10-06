@@ -22,6 +22,30 @@ export type CallAnalysis = {
   memory: MemoryExtraction
 }
 
+export function normalizeCallSummary(value: string | null | undefined): string | null {
+  if (!value) return null
+  let text = value
+  for (let pass = 0; pass < 2; pass += 1) {
+    text = text.replace(/&(#x[0-9a-f]+|#\d+|lt|gt|amp|quot|apos|nbsp);/gi, (entity, code: string) => {
+      if (code[0] === '#') {
+        const hex = code[1]?.toLowerCase() === 'x'
+        const point = Number.parseInt(code.slice(hex ? 2 : 1), hex ? 16 : 10)
+        return Number.isFinite(point) && point <= 0x10ffff ? String.fromCodePoint(point) : entity
+      }
+      return ({ lt: '<', gt: '>', amp: '&', quot: '"', apos: "'", nbsp: ' ' } as Record<string, string>)[code.toLowerCase()] ?? entity
+    })
+  }
+  const lines = text
+    .replace(/<\s*br\s*\/?>/gi, '\n')
+    .replace(/<\s*li(?:\s[^>]*)?>/gi, '\n- ')
+    .replace(/<\/\s*(?:p|div|ul|ol|h[1-6])\s*>/gi, '\n')
+    .replace(/<[^>]*>/g, '')
+    .split('\n')
+    .map((line) => line.replace(/[ \t]+/g, ' ').trim())
+    .filter((line) => line && !/^(?:resumen|puntos clave|tareas pendientes|pendientes):?$/i.test(line))
+  return lines.length ? lines.join('\n').slice(0, 2000) : null
+}
+
 function parseCallAnalysis(raw: string): CallAnalysis | null {
   const match = raw.match(/\{[\s\S]*\}/)
   if (!match) return null

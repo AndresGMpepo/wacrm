@@ -11,3 +11,12 @@ export function isAiReceptionistTranscript(payload: JsonRecord | null | undefine
   const ai = payload?.ai
   return Boolean(ai && typeof ai === 'object' && 'context' in ai)
 }
+
+export function isUsefulCallTranscript(row: {
+  transcript: string | null
+  summary: string | null
+  agent_user_id: string | null
+  yeastar_payload: JsonRecord | null
+}): boolean {
+  return Boolean(row.transcript?.trim() || row.summary?.trim() || row.agent_user_id || isAiReceptionistTranscript(row.yeastar_payload))
+}

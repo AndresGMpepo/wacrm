@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { apiUrl, parsePbxLocalTime, yeastarAiConnection, type JsonRecord } from './yeastar-ai'
 import { callCustomerPhone } from './call-party'
+import { normalizeCallSummary } from './call-summary'
 
 export class TranscriptionArchiveError extends Error {
   constructor(
@@ -33,7 +34,7 @@ export function parseTranscriptionArchive(value: unknown) {
     const startedAt = typeof row.time === 'string' ? parsePbxLocalTime(row.time)?.toISOString() : undefined
     return {
       cdrId: row.leg_id, uid: row.uid,
-      transcript, summary: typeof row.ai_summary === 'string' ? row.ai_summary.trim() : null,
+      transcript, summary: typeof row.ai_summary === 'string' ? normalizeCallSummary(row.ai_summary) : null,
       phone: callCustomerPhone({ ...row, type: direction }),
       direction: ['inbound', 'outbound', 'internal'].includes(direction) ? direction : 'unknown',
       startedAt: startedAt ?? null,

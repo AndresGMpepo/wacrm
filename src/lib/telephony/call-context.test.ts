@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createClient } from '@supabase/supabase-js'
 import { compactCallSummary, findLiveCallerCall, loadOwnCallContext, uniqueCallId } from './call-context'
-import { callCustomerPhone, isAiReceptionistTranscript } from './call-party'
+import { callCustomerPhone, isAiReceptionistTranscript, isUsefulCallTranscript } from './call-party'
 import { parseTranscriptionArchive } from './transcription-archive'
 import { yeastarAiConnection } from './yeastar-ai'
 
@@ -21,6 +21,19 @@ describe('call party and archive identity', () => {
     expect(isAiReceptionistTranscript({ transcript_source: 'ai_receptionist' })).toBe(true)
     expect(isAiReceptionistTranscript({ ai: { context: [{ data: {} }] } })).toBe(true)
     expect(isAiReceptionistTranscript({ event: { type: 'inbound', call_to: '7000' } })).toBe(false)
+  })
+  it('hides empty unidentified CDR legs while retaining calls with useful transcript context', () => {
+    expect(isUsefulCallTranscript({
+      transcript: null, summary: null, agent_user_id: null,
+      yeastar_payload: { event: { type: 'inbound' } },
+    })).toBe(false)
+    expect(isUsefulCallTranscript({
+      transcript: null, summary: null, agent_user_id: null,
+      yeastar_payload: { transcript_source: 'ai_receptionist' },
+    })).toBe(true)
+    expect(isUsefulCallTranscript({
+      transcript: 'Hola', summary: null, agent_user_id: null, yeastar_payload: {},
+    })).toBe(true)
   })
   it('imports official AI receptionist export records chronologically', () => {
     const [record] = parseTranscriptionArchive([{
@@ -132,11 +145,24 @@ describe('live handoff association', () => {
       yeastar_call_handoffs: [{ summary: 'Necesita reagendar mañana', customer_need: 'Reagendar', next_action: 'Buscar horario' }],
       contact_memory: [{ current_summary: 'Ya tuvo una consulta', next_best_action: 'Revisar evolución' }],
       contact_commitments: [{ description: 'Enviar indicaciones' }],
+      yeastar_call_transcriptions: [{
+        summary: 'Llamó para pedir informes.', started_at: new Date(Date.now() - 120_000).toISOString(),
+        created_at: new Date(Date.now() - 120_000).toISOString(), direction: 'inbound',
+      }],
+      conversations: [{
+        id: 'conversation-1', channel_type: 'whatsapp', last_message_text: 'Hola, necesito cambiar mi cita.',
+        last_message_at: new Date(Date.now() - 60_000).toISOString(),
+      }],
+      ai_conversation_analyses: [{ summary: 'La clienta pidió cambiar su cita y espera opciones por la tarde.', status: 'completed' }],
     })
     const context = await loadOwnCallContext(db, 'account-a', 'agent-a', 'session-1')
     expect(context).toMatchObject({
       current: { summary: 'Necesita reagendar mañana' }, history: 'Ya tuvo una consulta',
-      commitments: ['Enviar indicaciones'], contact: { id: 'contact-1', name: 'Ana' },
+      commitments: ['Enviar indicaciones'], contact: { id: 'contact-1', name: 'Ana', phone: '+525512345678' },
+      latestInteraction: {
+        channel: 'whatsapp', summary: 'La clienta pidió cambiar su cita y espera opciones por la tarde.',
+      },
+      callerNumber: '+525512345678',
     })
     expect(urls.find((url) => url.pathname.endsWith('yeastar_call_handoffs'))?.searchParams.get('call_id')).toBe('eq.pbx-1')
   })

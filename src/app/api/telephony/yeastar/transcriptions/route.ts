@@ -3,7 +3,8 @@ import { createClient as createAdminClient } from '@supabase/supabase-js'
 
 import { requireEntitlement } from '@/lib/account/entitlements'
 import { toErrorResponse } from '@/lib/auth/account'
-import { isAiReceptionistTranscript } from '@/lib/telephony/call-party'
+import { isAiReceptionistTranscript, isUsefulCallTranscript } from '@/lib/telephony/call-party'
+import { normalizeCallSummary } from '@/lib/telephony/call-summary'
 
 function admin() {
   return createAdminClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false } })
@@ -26,7 +27,7 @@ export async function GET(request: Request) {
     else if (query) requestQuery = requestQuery.or(`customer_phone.ilike.%${query}%,customer_name.ilike.%${query}%,customer_email.ilike.%${query}%,transcript.ilike.%${query}%,summary.ilike.%${query}%`)
     const { data, error } = await requestQuery
     if (error) throw error
-    const rows = data ?? []
+    const rows = (data ?? []).filter(isUsefulCallTranscript)
     const contactIds = [...new Set(rows.map((row) => row.contact_id).filter(Boolean))]
     const agentIds = [...new Set(rows.map((row) => row.agent_user_id).filter(Boolean))]
     const [contacts, agents] = await Promise.all([
@@ -39,6 +40,7 @@ export async function GET(request: Request) {
     const agentsById = new Map((agents.data ?? []).map((agent) => [agent.user_id, agent]))
     return NextResponse.json({ calls: rows.map((row) => ({
       ...row,
+      summary: normalizeCallSummary(row.summary),
       receptionist_ai: isAiReceptionistTranscript(row.yeastar_payload),
       yeastar_payload: undefined,
       contact: row.contact_id ? contactsById.get(row.contact_id) ?? null : null,

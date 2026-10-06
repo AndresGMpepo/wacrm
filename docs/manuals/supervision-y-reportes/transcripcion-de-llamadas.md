@@ -22,6 +22,12 @@ importa grabaciones**; el audio permanece en el PBX y no se copia al
 almacenamiento de NexoOmni. Para escuchar una grabación, consúltala
 directamente en Yeastar.
 
+Los tramos CDR vacíos que no tienen transcripción, resumen ni agente
+identificado se omiten para evitar mostrar filas intermedias confusas.
+Mientras el análisis aparece en cola, el listado actualiza su estado
+automáticamente; si no cambia después de 15 minutos, avisa que se revise
+el proceso de análisis.
+
 ## ¿Para quién es?
 
 Supervisores, administradores y el propietario ven el listado

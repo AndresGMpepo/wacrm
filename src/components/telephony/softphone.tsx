@@ -142,8 +142,10 @@ export function NexPhone() {
         <span className={`absolute right-0.5 top-0.5 size-2 rounded-full ring-2 ring-background ${t.connected ? 'bg-emerald-400' : t.connecting ? 'animate-pulse bg-amber-400' : 'bg-red-500'}`} />
       </Button>
 
-      {t.active?.status?.communicationType === 'inbound' && t.active.status.callId
-        ? <CallContextDialog key={t.active.status.callId} callId={t.active.status.callId} />
+      {t.incoming?.status?.communicationType === 'inbound' && t.incoming.status.callId
+        ? <CallContextDialog key={t.incoming.status.callId} callId={t.incoming.status.callId} />
+        : t.active?.status?.communicationType === 'inbound' && t.active.status.callId
+          ? <CallContextDialog key={t.active.status.callId} callId={t.active.status.callId} />
         : null}
 
       {t.incoming ? (

@@ -9,11 +9,11 @@ updated: "2026-10-05"
 
 ## ¿Qué es?
 
-El recepcionista de IA guarda en NexoOmni un resumen de lo que el cliente
-acaba de explicar. Cuando un agente contesta la transferencia en
-NexPhone, aparece ese contexto junto al historial de Nexo Memory y los
-pendientes. Así puede continuar la atención sin pedirle al cliente que
-repita todo.
+Cuando un agente contesta una llamada entrante en NexPhone, aparece la
+ficha del contacto y su interacción más reciente registrada en cualquier
+canal, junto al historial de Nexo Memory y los pendientes. Si el
+recepcionista de IA guardó un resumen antes de transferir, también se
+muestra separado del historial.
 
 La herramienta envía un resumen, no una transcripción inventada. La
 transcripción completa se recupera después de que Yeastar la publique.
@@ -116,8 +116,10 @@ de la acción de transferencia**.
 3. Verifica en Yeastar que la herramienta devolvió
    `{"data":{"saved":true,"call_id":"..."}}`.
 4. Contesta dentro de NexPhone en NexoOmni.
-5. Comprueba que **Lo que explicó a la IA en esta llamada** muestre la necesidad que acabas de
-   explicar, separada del **Historial**.
+5. Comprueba que la ventana de contexto aparezca al entrar la llamada y
+   muestre el contacto y su última interacción registrada. El resumen de
+   transferencia aparece separado si la herramienta se ejecutó
+   correctamente.
 6. Cuelga y verifica después la transcripción y la actualización de
    Nexo Memory.
 
@@ -131,9 +133,10 @@ La integración no supone que el CDR completo esté disponible en vivo.
 No. Esta ventana está integrada en NexPhone dentro de NexoOmni.
 
 **¿Qué pasa si el cliente no existe todavía en Contactos?**
-Puede mostrarse el contexto actual de su llamada. Después, la
-sincronización de la transcripción vincula o crea el contacto cuando
-hay un teléfono externo internacional válido.
+La ventana avisa que el número aún no está registrado y recomienda
+solicitar el nombre y datos del cliente para darlo de alta en Contactos.
+No muestra historial de otra persona ni espera a que finalice la llamada
+para mostrar contexto de interacciones anteriores.
 
 ## Ver también
 

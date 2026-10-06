@@ -2,9 +2,12 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { normalizeKey, findExistingContact } from '@/lib/contacts/dedupe'
 import { apiUrl, yeastarAiConnection } from './yeastar-ai'
 import { isValidE164 } from '@/lib/whatsapp/phone-utils'
+import { normalizeCallSummary } from './call-summary'
 
 export type CallContext = {
-  contact: { id: string; name: string | null } | null
+  contact: { id: string; name: string | null; phone: string } | null
+  callerNumber: string
+  latestInteraction: { channel: string; sourceLabel: string | null; summary: string; occurredAt: string | null } | null
   current: { summary: string; customer_need: string | null; next_action: string | null } | null
   history: string | null
   nextAction: string | null
@@ -88,18 +91,48 @@ export async function loadOwnCallContext(
       .gte('created_at', new Date(Date.now() - 30 * 60_000).toISOString()).maybeSingle() : Promise.resolve({ data: null, error: null }),
     contact ? db.from('contact_memory').select('current_summary, next_best_action')
       .eq('account_id', accountId).eq('contact_id', contact.id).maybeSingle() : Promise.resolve({ data: null, error: null }),
-    contact ? db.from('yeastar_call_transcriptions').select('summary')
+    contact ? db.from('yeastar_call_transcriptions').select('summary, started_at, created_at, direction')
       .eq('account_id', accountId).eq('contact_id', contact.id).not('summary', 'is', null)
       .order('started_at', { ascending: false, nullsFirst: false }).limit(1).maybeSingle() : Promise.resolve({ data: null, error: null }),
     contact ? db.from('contact_commitments').select('description').eq('account_id', accountId)
       .eq('contact_id', contact.id).eq('status', 'pending')
       .order('due_date', { ascending: true, nullsFirst: false }).limit(3) : Promise.resolve({ data: [], error: null }),
   ])
-  for (const result of [handoff, memory, previousCall, commitments]) if (result.error) throw result.error
+  const conversations = contact
+    ? await db.from('conversations').select('id, channel_type, channel_source_label, last_message_text, last_message_at')
+      .eq('account_id', accountId).eq('contact_id', contact.id).not('last_message_text', 'is', null)
+      .order('last_message_at', { ascending: false, nullsFirst: false }).limit(1).maybeSingle()
+    : { data: null, error: null }
+  const conversationAnalysis = conversations.data
+    ? await db.from('ai_conversation_analyses').select('summary')
+      .eq('conversation_id', conversations.data.id).eq('status', 'completed').maybeSingle()
+    : { data: null, error: null }
+  for (const result of [handoff, memory, previousCall, commitments, conversations, conversationAnalysis]) if (result.error) throw result.error
+  const previousCallRow = previousCall.data
+  const callSummary = normalizeCallSummary(previousCallRow?.summary)
+  const callInteraction = callSummary && previousCallRow ? {
+    channel: `call_${previousCallRow.direction ?? 'unknown'}`,
+    sourceLabel: null,
+    summary: compactCallSummary(callSummary) ?? callSummary,
+    occurredAt: previousCallRow.started_at ?? previousCallRow.created_at,
+  } : null
+  const conversationInteraction = conversations.data?.last_message_text ? {
+    channel: conversations.data.channel_type ?? 'other',
+    sourceLabel: conversations.data.channel_source_label ?? null,
+    summary: compactCallSummary(conversationAnalysis.data?.summary ?? conversations.data.last_message_text)
+      ?? conversationAnalysis.data?.summary ?? conversations.data.last_message_text,
+    occurredAt: conversations.data.last_message_at ?? null,
+  } : null
+  const latestInteraction = callInteraction && conversationInteraction
+    ? new Date(callInteraction.occurredAt ?? 0).getTime() >= new Date(conversationInteraction.occurredAt ?? 0).getTime()
+      ? callInteraction : conversationInteraction
+    : callInteraction ?? conversationInteraction
   return {
-    contact: contact ? { id: contact.id, name: contact.name ?? null } : null,
+    contact: contact ? { id: contact.id, name: contact.name ?? null, phone: contact.phone } : null,
+    callerNumber: own.peer_number,
+    latestInteraction,
     current: handoff.data,
-    history: compactCallSummary(memory.data?.current_summary ?? previousCall.data?.summary),
+    history: compactCallSummary(memory.data?.current_summary ?? callSummary),
     nextAction: compactCallSummary(memory.data?.next_best_action),
     commitments: (commitments.data ?? []).map((row) => row.description),
   }

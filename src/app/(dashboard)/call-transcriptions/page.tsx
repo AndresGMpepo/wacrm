@@ -22,6 +22,7 @@ type CallRecord = {
   agent_extension: string | null
   direction: string | null
   started_at: string | null
+  updated_at: string
   ended_at: string | null
   duration_seconds: number | null
   routing_duration_seconds: number | null
@@ -136,6 +137,17 @@ function CallTranscriptionsContent() {
     finally { setLoading(false) }
   }, [query, requestedCallId])
 
+  const hasPendingWork = calls.some((call) =>
+    call.transcription_status === 'pending'
+    || (call.transcription_status === 'completed' && call.analysis_status === 'pending'))
+  useEffect(() => {
+    if (!allowed || !hasPendingWork) return
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void load()
+    }, 15_000)
+    return () => window.clearInterval(timer)
+  }, [allowed, hasPendingWork, load])
+
   const archiveErrorMessage = (code?: string) => {
     switch (code) {
       case 'yeastar_connection_unavailable': return t('importErrorConnection')
@@ -233,7 +245,7 @@ function CallTranscriptionsContent() {
                 {call.transcription_status === 'pending' ? <p className="text-sm text-amber-400">{t('transcriptPending')}</p> : null}
                 {call.transcription_status === 'unavailable' ? <p className="text-sm text-muted-foreground">{t('transcriptUnavailable')}</p> : null}
                 {call.transcription_status === 'completed' && call.analysis_status !== 'completed'
-                  ? <p className="text-sm text-amber-500">{t(call.analysis_status === 'failed' ? 'analysisFailed' : call.analysis_status === 'unavailable' ? 'analysisUnavailable' : 'analysisPending')}</p>
+                  ? <p className="text-sm text-amber-500">{t(call.analysis_status === 'failed' ? 'analysisFailed' : call.analysis_status === 'unavailable' ? 'analysisUnavailable' : Date.now() - new Date(call.updated_at).getTime() >= 15 * 60_000 ? 'analysisStalled' : 'analysisPending')}</p>
                   : null}
                 {call.analysis_status === 'completed' && !call.memory_applied_at
                   ? <p className="text-sm text-amber-500">{t('memoryNotLinked')}</p>

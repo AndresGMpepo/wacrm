@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { analyzeCall } from './call-summary'
+import { analyzeCall, normalizeCallSummary } from './call-summary'
 import { createClient } from '@supabase/supabase-js'
 
 const mocks = vi.hoisted(() => ({ config: vi.fn(), generate: vi.fn(), usage: vi.fn() }))
@@ -14,6 +14,13 @@ beforeEach(() => {
 })
 
 describe('call analysis input', () => {
+  it('converts escaped HTML summary output into readable plain text', () => {
+    expect(normalizeCallSummary(
+      '&lt;p&gt;Resumen&lt;/p&gt;&lt;ul&gt;&lt;li&gt;Cliente necesita seguimiento.&lt;/li&gt;&lt;li&gt;Sin tareas pendientes.&lt;/li&gt;&lt;/ul&gt;',
+    )).toBe('- Cliente necesita seguimiento.\n- Sin tareas pendientes.')
+    expect(normalizeCallSummary('<p>Resumen</p><ul><li>Cliente pide una llamada.</li></ul>'))
+      .toBe('- Cliente pide una llamada.')
+  })
   it('includes the closing commitments of a long call and its actual date, not the import date', async () => {
     const transcript = 'Conversación previa. '.repeat(1000) + 'Llámeme mañana a las 3 pm.'
     const db = createClient('https://db.example.test', 'test-key')
