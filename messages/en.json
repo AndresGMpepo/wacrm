@@ -63,8 +63,7 @@
     "importErrorTooLarge": "The export is too large. Filter by customer phone and try again.",
     "importErrorDatabase": "Yeastar returned data, but NexoOmni could not save or query it. Saved transcripts are preserved.",
     "importErrorInput": "Check the phone filter format and try again.",
-    "analysisPending": "The summary and customer context are being processed. This information will update automatically.",
-    "analysisStalled": "This analysis has not updated for more than 15 minutes. Check that the analysis worker is running, then refresh.",
+    "analysisPending": "Analysis is in progress. Click Refresh to check its status.",
     "analysisFailed": "Analysis or the Nexo Memory update failed and will be retried.",
     "analysisUnavailable": "Configure account AI and sync again to generate the summary and Nexo Memory."
   },

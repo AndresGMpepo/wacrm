@@ -22,7 +22,6 @@ type CallRecord = {
   agent_extension: string | null
   direction: string | null
   started_at: string | null
-  updated_at: string
   ended_at: string | null
   duration_seconds: number | null
   routing_duration_seconds: number | null
@@ -117,14 +116,16 @@ function CallTranscriptionsContent() {
   const [query, setQuery] = useState('')
   const requestedCallId = searchParams.get('call')?.trim() ?? ''
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [syncPhone, setSyncPhone] = useState('')
   const [syncing, setSyncing] = useState(false)
   const [syncMessage, setSyncMessage] = useState<string | null>(null)
   const [syncError, setSyncError] = useState<string | null>(null)
 
-  const load = useCallback(async () => {
-    setLoading(true); setError(null)
+  const load = useCallback(async (quiet = false) => {
+    if (!quiet) setLoading(true)
+    setError(null)
     try {
       const params = new URLSearchParams()
       if (requestedCallId) params.set('call', requestedCallId)
@@ -134,19 +135,8 @@ function CallTranscriptionsContent() {
       if (!response.ok) throw new Error(payload.error || 'No se pudieron cargar las transcripciones.')
       setCalls(payload.calls ?? [])
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'No se pudieron cargar las transcripciones.') }
-    finally { setLoading(false) }
+    finally { if (!quiet) setLoading(false) }
   }, [query, requestedCallId])
-
-  const hasPendingWork = calls.some((call) =>
-    call.transcription_status === 'pending'
-    || (call.transcription_status === 'completed' && call.analysis_status === 'pending'))
-  useEffect(() => {
-    if (!allowed || !hasPendingWork) return
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === 'visible') void load()
-    }, 15_000)
-    return () => window.clearInterval(timer)
-  }, [allowed, hasPendingWork, load])
 
   const archiveErrorMessage = (code?: string) => {
     switch (code) {
@@ -187,7 +177,7 @@ function CallTranscriptionsContent() {
         : result.available === 0
           ? t('noPublishedTranscripts')
           : t('nothingToImport', { count: result.alreadyPresent ?? 0 }))
-      await load()
+      await load(true)
     } catch (reason) {
       console.error('[yeastar] manual transcript sync failed:', reason)
       setSyncError(t('importError'))
@@ -212,7 +202,7 @@ function CallTranscriptionsContent() {
         {syncMessage ? <p role="status" className="text-sm text-muted-foreground">{syncMessage}</p> : null}
         {syncError ? <p role="alert" className="text-sm text-destructive">{syncError}</p> : null}
       </div>
-      <Button variant="outline" onClick={() => void load()} disabled={loading}><RefreshCw className={loading ? 'size-4 animate-spin' : 'size-4'} />Actualizar</Button>
+      <Button variant="outline" onClick={async () => { setRefreshing(true); try { await load(true) } finally { setRefreshing(false) } }} disabled={loading || refreshing}><RefreshCw className={refreshing ? 'size-4 animate-spin' : 'size-4'} />Actualizar</Button>
     </div>
     {!requestedCallId ? <form className="flex gap-2" onSubmit={(event) => { event.preventDefault(); void load() }}>
       <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar por cliente, número o texto" />
@@ -244,8 +234,11 @@ function CallTranscriptionsContent() {
                 {call.transcription_status === 'failed' ? <p className="text-sm text-red-400">{t('transcriptFailed')}</p> : null}
                 {call.transcription_status === 'pending' ? <p className="text-sm text-amber-400">{t('transcriptPending')}</p> : null}
                 {call.transcription_status === 'unavailable' ? <p className="text-sm text-muted-foreground">{t('transcriptUnavailable')}</p> : null}
-                {call.transcription_status === 'completed' && call.analysis_status !== 'completed'
-                  ? <p className="text-sm text-amber-500">{t(call.analysis_status === 'failed' ? 'analysisFailed' : call.analysis_status === 'unavailable' ? 'analysisUnavailable' : Date.now() - new Date(call.updated_at).getTime() >= 15 * 60_000 ? 'analysisStalled' : 'analysisPending')}</p>
+                {call.transcription_status === 'completed'
+                  && call.analysis_status !== 'completed'
+                  && !call.memory_applied_at
+                  && !call.summary
+                  ? <p className="text-sm text-amber-500">{t(call.analysis_status === 'failed' ? 'analysisFailed' : call.analysis_status === 'unavailable' ? 'analysisUnavailable' : 'analysisPending')}</p>
                   : null}
                 {call.analysis_status === 'completed' && !call.memory_applied_at
                   ? <p className="text-sm text-amber-500">{t('memoryNotLinked')}</p>

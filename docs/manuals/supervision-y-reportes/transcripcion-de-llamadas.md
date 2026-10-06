@@ -24,9 +24,10 @@ directamente en Yeastar.
 
 Los tramos CDR vacíos que no tienen transcripción, resumen ni agente
 identificado se omiten para evitar mostrar filas intermedias confusas.
-Mientras el análisis aparece en cola, el listado actualiza su estado
-automáticamente; si no cambia después de 15 minutos, avisa que se revise
-el proceso de análisis.
+El estado del análisis no provoca recargas automáticas. Pulsa
+**Actualizar** cuando quieras consultar los cambios. Si ya hay un resumen
+o Nexo Memory actualizado, no se muestra un aviso de análisis pendiente
+aunque el estado interno de la llamada todavía no se haya sincronizado.
 
 ## ¿Para quién es?
 
