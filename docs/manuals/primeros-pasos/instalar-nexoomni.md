@@ -4,7 +4,7 @@ description: "Instala NexoOmni como aplicación y activa alertas push para mensa
 section: "primeros-pasos"
 role: ["agent", "supervisor", "admin", "owner"]
 plan: ["basico"]
-updated: "2026-10-06"
+updated: "2026-10-07"
 ---
 
 ## ¿Qué es?
@@ -48,8 +48,10 @@ Cada dispositivo se activa por separado: hazlo una vez en la
 computadora y otra en el celular.
 
 La solicitud de permiso ocurre únicamente al pulsar el botón. Se envían
-alertas por mensajes entrantes asignados a tu usuario; las conversaciones
-sin asignar no generan una alerta push. Puedes desactivarlas desde el mismo
+alertas por mensajes entrantes de conversaciones asignadas a tu usuario;
+si una conversación todavía no tiene agente asignado, la alerta push
+llega a todo el equipo hasta que alguien la tome — así nadie se queda sin
+enterarse de un chat nuevo. Puedes desactivarlas desde el mismo
 control en cualquier momento. En iPhone o iPad, primero agrega la aplicación
 a la pantalla de inicio y luego activa las notificaciones desde ella.
 
