@@ -17,6 +17,7 @@ import {
 import { Card, CardContent } from '@/components/ui/card';
 import { useTranslations } from 'next-intl';
 import { SettingsPanelHead } from './settings-panel-head';
+import { WebPushSettings } from '@/components/pwa/web-push-settings';
 
 const MAX_AVATAR_BYTES = 2 * 1024 * 1024;
 const ALLOWED_MIME = new Set([
@@ -352,6 +353,9 @@ export function ProfileForm() {
           </Button>
         </div>
       </form>
+      <div className="mt-6">
+        <WebPushSettings />
+      </div>
     </section>
   );
 }

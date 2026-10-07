@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 export type PushErrorCode = 'unsupported' | 'permissionDenied' | 'installFirst'
   | 'notConfigured' | 'requestFailed' | 'subscriptionMissing' | 'pushTestFailed'
-  | 'subscriptionKeyChanged';
+  | 'subscriptionKeyChanged' | 'localTestFailed';
 
 export class PushSettingsError extends Error {
   constructor(public readonly code: PushErrorCode) {

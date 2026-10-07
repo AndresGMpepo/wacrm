@@ -37,9 +37,10 @@ recargar la aplicación en un momento conveniente.
 
 ## Activar las notificaciones push
 
-1. Ve a **Configuración**.
-2. En el resumen, busca **Notificaciones en segundo plano** y selecciona
-   **Activar notificaciones**.
+1. Ve a **Configuración**. La tarjeta **Notificaciones en segundo plano**
+   aparece arriba del resumen (debajo de tu nombre) y también en
+   **Configuración → Perfil**.
+2. Selecciona **Activar notificaciones**.
 3. Acepta el permiso del navegador cuando lo solicite.
 
 La solicitud de permiso ocurre únicamente al pulsar el botón. Se envían
@@ -67,6 +68,17 @@ sistema incluso con la aplicación abierta.
 - Si se rechaza, revisa las claves VAPID y los registros del servidor.
 - Si el proveedor la acepta pero no aparece, revisa los banners del
   sistema, la suscripción y el navegador utilizado por la PWA.
+
+### Probar el aviso solo en este dispositivo
+
+**Probar aviso en este dispositivo** muestra un aviso generado por el
+propio teléfono o computadora, sin pasar por el servidor:
+
+- Si este aviso **no aparece**, el bloqueo está en el sistema o en el
+  navegador del dispositivo (por ejemplo, permisos del sitio en Chrome o
+  ahorro de batería), no en NexoOmni.
+- Si este aviso **sí aparece** pero **Probar notificación** no, revisa el
+  registro del dispositivo, las claves VAPID y los registros del servidor.
 
 ## Avisos en escritorio y móvil
 

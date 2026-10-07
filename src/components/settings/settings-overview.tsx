@@ -250,6 +250,11 @@ export function SettingsOverview({
         ) : null}
       </Card>
 
+      {/* Device notifications sit above the tiles so they are reachable on mobile without scrolling. */}
+      <div className="mt-4">
+        <WebPushSettings />
+      </div>
+
       {/* Status tiles */}
       <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {tiles.map(({ section, loading, subtitle }) => {
@@ -286,9 +291,6 @@ export function SettingsOverview({
             </button>
           );
         })}
-      </div>
-      <div className="mt-6">
-        <WebPushSettings />
       </div>
     </section>
   );

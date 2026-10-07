@@ -21,6 +21,7 @@ export function WebPushSettings() {
   const [error, setError] = useState<PushErrorCode | null>(null);
   const [testAccepted, setTestAccepted] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [localShown, setLocalShown] = useState(false);
 
   useEffect(() => {
     const available = process.env.NODE_ENV === 'production'
@@ -195,6 +196,38 @@ export function WebPushSettings() {
     }
   };
 
+  // Shows a notification from this device's service worker without any server
+  // round-trip, separating "Android hides notifications" from "push never arrives".
+  const localTest = async () => {
+    setBusy(true);
+    setError(null);
+    setTestAccepted(false);
+    setLocalShown(false);
+    try {
+      if (Notification.permission !== 'granted') {
+        const permission = await Notification.requestPermission();
+        if (permission !== 'granted') throw new PushSettingsError('permissionDenied');
+      }
+      const registration = await navigator.serviceWorker.getRegistration('/')
+        ?? await navigator.serviceWorker.register('/sw.js', { scope: '/', updateViaCache: 'none' });
+      const readyRegistration = registration.active ? registration : await navigator.serviceWorker.ready;
+      await readyRegistration.showNotification(t('localTestTitle'), {
+        body: t('localTestBody'),
+        tag: 'nexoomni-local-test',
+        icon: '/icon-192.png',
+        badge: '/icon-192.png',
+        silent: false,
+        vibrate: [200, 100, 200],
+      } as NotificationOptions);
+      setLocalShown(true);
+    } catch (cause) {
+      console.error('[pwa] Local notification test failed:', cause);
+      setError(cause instanceof PushSettingsError ? cause.code : 'localTestFailed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const actionLabel = loading
     ? t('loading')
     : busy
@@ -218,6 +251,7 @@ export function WebPushSettings() {
             <p role="alert" className="mt-2 text-sm text-destructive">{t(error)}</p>
           ) : null}
           {testAccepted ? <p role="status" className="mt-2 text-sm text-muted-foreground">{t('pushTestAccepted')}</p> : null}
+          {localShown ? <p role="status" className="mt-2 text-sm text-muted-foreground">{t('localTestShown')}</p> : null}
         </div>
       </div>
       <button
@@ -233,6 +267,12 @@ export function WebPushSettings() {
         <button type="button" disabled={loading || busy} onClick={() => void testPush()}
           className="inline-flex min-h-10 items-center justify-center rounded-md border border-border px-4 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50">
           {t('testPush')}
+        </button>
+      ) : null}
+      {supported ? (
+        <button type="button" disabled={loading || busy} onClick={() => void localTest()}
+          className="inline-flex min-h-10 items-center justify-center rounded-md border border-border px-4 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50">
+          {t('localTest')}
         </button>
       ) : null}
       {!supported && !loading ? (
