@@ -67,6 +67,8 @@ export async function sendDeviceTestPush(subscription: PushSubscriptionRow) {
   });
 }
 
+const PUSH_MAX_AGE_MS = 15 * 60_000;
+
 export async function processWebPushOutbox(db: SupabaseClient) {
   const now = new Date();
   const staleLock = new Date(now.getTime() - 5 * 60_000).toISOString();
@@ -78,6 +80,17 @@ export async function processWebPushOutbox(db: SupabaseClient) {
   if (recoveryError) {
     console.error('[web-push] Could not recover stale outbox items:', recoveryError);
     return { sent: 0, skipped: 0, failed: 1 };
+  }
+
+  // A message alert is only useful while it is current. Without this, a backlog built while
+  // delivery was blocked (e.g. missing VAPID keys) would replay old alerts and delay new ones.
+  const { error: expiryError } = await db
+    .from('web_push_outbox')
+    .update({ status: 'failed', locked_at: null, last_error: 'expired' })
+    .eq('status', 'queued')
+    .lt('created_at', new Date(now.getTime() - PUSH_MAX_AGE_MS).toISOString());
+  if (expiryError) {
+    console.error('[web-push] Could not expire old outbox items:', expiryError);
   }
 
   const { data: pending, error: loadError } = await db

@@ -114,4 +114,22 @@ describe('background Web Push delivery', () => {
       log.mockRestore();
     }
   });
+
+  it('expires queued alerts older than 15 minutes so a blocked backlog is never replayed', async () => {
+    vi.stubEnv('NEXT_PUBLIC_WEB_PUSH_VAPID_PUBLIC_KEY', 'test-public-key');
+    vi.stubEnv('WEB_PUSH_VAPID_PRIVATE_KEY', 'test-private-key');
+    vi.stubEnv('WEB_PUSH_VAPID_SUBJECT', 'mailto:test@example.com');
+    const { db, fetch } = deliveryDatabase();
+    const before = Date.now();
+    await processWebPushOutbox(db);
+    const expiry = fetch.mock.calls.find(([, init]) => {
+      return typeof init?.body === 'string' && init.body.includes('"last_error":"expired"');
+    });
+    expect(expiry).toBeDefined();
+    const url = new URL(String(expiry![0]));
+    expect(url.searchParams.get('status')).toBe('eq.queued');
+    const cutoff = Date.parse(url.searchParams.get('created_at')!.replace(/^lt\./, ''));
+    expect(before - cutoff).toBeGreaterThanOrEqual(15 * 60_000 - 1_000);
+    expect(before - cutoff).toBeLessThanOrEqual(15 * 60_000 + 1_000);
+  });
 });

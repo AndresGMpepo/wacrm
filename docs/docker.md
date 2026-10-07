@@ -49,6 +49,13 @@ authenticated subscription API at runtime. Configure it together with
 environment, never as private build arguments. Re-enable device
 subscriptions after rotating the VAPID key pair.
 
+Generate the pair once with `npx web-push generate-vapid-keys` and set
+`WEB_PUSH_VAPID_SUBJECT` to a contact such as `mailto:soporte@tu-dominio.com`.
+If the logs show `[web-push] Delivery is blocked by missing or invalid VAPID
+configuration`, these variables are absent from the running container.
+Queued alerts older than 15 minutes are discarded (`last_error = 'expired'`),
+so fixing the keys does not replay an old backlog.
+
 ## Easypanel: avoid secrets in Nixpacks images
 
 If the build log contains `SecretsUsedInArgOrEnv` for server keys and
