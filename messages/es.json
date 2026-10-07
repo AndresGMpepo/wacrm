@@ -142,6 +142,28 @@
   "ModeToggle": {
     "switchMode": "Cambiar al modo {mode}"
   },
+  "Pwa": {
+    "installApp": "Instalar app",
+    "iosInstallHelp": "En Safari, toca Compartir → Agregar a pantalla de inicio.",
+    "installFailed": "No se pudo iniciar la instalación. Inténtalo desde el menú del navegador.",
+    "updateReady": "Hay una nueva versión de Nexoomni lista.",
+    "updateNow": "Actualizar",
+    "pushTitle": "Notificaciones en segundo plano",
+    "pushDescription": "Recibe una alerta cuando llegue un mensaje nuevo asignado a ti, incluso si Nexoomni no está abierto.",
+    "pushEnabledDescription": "Las alertas de mensajes asignados están activas en este navegador.",
+    "pushNotificationTitle": "Nuevo mensaje en Nexoomni",
+    "pushNotificationBody": "Tienes un mensaje nuevo asignado.",
+    "enablePush": "Activar notificaciones",
+    "disablePush": "Desactivar notificaciones",
+    "loading": "Comprobando…",
+    "enabling": "Activando…",
+    "disabling": "Desactivando…",
+    "unsupported": "Este navegador no admite notificaciones web push.",
+    "installFirst": "En iPhone o iPad, agrega Nexoomni a la pantalla de inicio antes de activar las notificaciones.",
+    "permissionDenied": "El permiso está bloqueado. Cámbialo en la configuración del navegador.",
+    "notConfigured": "Las notificaciones aún no están configuradas en este servidor. Contacta al administrador.",
+    "requestFailed": "No se pudo actualizar la suscripción. Inténtalo de nuevo."
+  },
   "Dashboard": {
     "page": {
       "title": "Panel de control",

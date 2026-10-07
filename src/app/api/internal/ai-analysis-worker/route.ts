@@ -27,6 +27,7 @@ import {
 import { alertCommitmentOverdue, alertStaleProspect, alertTaskDueSoon, sendDailyNexoMemoryDigest } from '@/lib/notifications/nexo-memory-alerts'
 import { processAgendaProConfirmationReminders, escalateUnconfirmedAgendaProBookings } from '@/lib/agendapro/confirmation'
 import { processCallTranscriptions } from '@/lib/telephony/transcription-sync'
+import { processWebPushOutbox } from '@/lib/notifications/web-push'
 
 /** How far ahead of a task's due_at the reminder notification fires. */
 const TASK_REMINDER_LEAD_MINUTES = 10
@@ -104,6 +105,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
   const db = supabaseAdmin()
+  const webPush = await processWebPushOutbox(db)
   let callTranscriptions: Awaited<ReturnType<typeof processCallTranscriptions>> | { error: string }
   try {
     callTranscriptions = await processCallTranscriptions(db)
@@ -263,7 +265,7 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error('[appointments] Google Calendar inbound sync could not start:', error)
   }
-  return NextResponse.json({ completed, skipped, failed, calls: callTranscriptions, media: mediaResult, follow_ups: followUps, appointment_reminders: appointmentReminders, agendapro_confirmations: agendaproConfirmations, agendapro_escalations: agendaproEscalations, overdue_commitments: overdueCommitments, task_reminders: taskReminders, stale_prospects: staleProspects, google_calendar: googleCalendar }, { status: 'error' in callTranscriptions ? 500 : 200 })
+  return NextResponse.json({ completed, skipped, failed, web_push: webPush, calls: callTranscriptions, media: mediaResult, follow_ups: followUps, appointment_reminders: appointmentReminders, agendapro_confirmations: agendaproConfirmations, agendapro_escalations: agendaproEscalations, overdue_commitments: overdueCommitments, task_reminders: taskReminders, stale_prospects: staleProspects, google_calendar: googleCalendar }, { status: 'error' in callTranscriptions ? 500 : 200 })
 }
 
 async function processAppointmentReminders(db: ReturnType<typeof supabaseAdmin>) {

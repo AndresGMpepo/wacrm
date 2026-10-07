@@ -16,6 +16,7 @@ docs/manuals/
     conexion-whatsapp.md
     conexion-facebook-instagram.md
     invitar-miembros.md
+    instalar-nexoomni.md
   inbox/
     bandeja-compartida.md
     plantillas-y-botones.md
@@ -112,6 +113,7 @@ al día.
 | API pública v1 | [integraciones/api-publica.md](./integraciones/api-publica.md) | ✅ (enlaza a [../public-api.md](../public-api.md) para la referencia técnica completa) |
 | AgendaPro (reservas + confirmación automática por WhatsApp) | [integraciones/agendapro.md](./integraciones/agendapro.md) | ✅ |
 | Notificaciones | [notificaciones/notificaciones.md](./notificaciones/notificaciones.md) | ✅ |
+| Aplicación instalable, modo sin conexión y notificaciones web push | [primeros-pasos/instalar-nexoomni.md](./primeros-pasos/instalar-nexoomni.md) | ✅ |
 | Panel de plataforma (solo operador NexoOmni, no clientes) | — | Fuera de alcance de este catálogo — es interno, no se documenta como manual de cliente |
 
 Sin pendientes conocidos a la fecha (2026-10-02) — si agregas una

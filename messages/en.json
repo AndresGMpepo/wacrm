@@ -142,6 +142,28 @@
   "ModeToggle": {
     "switchMode": "Switch to {mode} mode"
   },
+  "Pwa": {
+    "installApp": "Install app",
+    "iosInstallHelp": "In Safari, tap Share → Add to Home Screen.",
+    "installFailed": "Could not start installation. Try using the browser menu.",
+    "updateReady": "A new version of Nexoomni is ready.",
+    "updateNow": "Update",
+    "pushTitle": "Background notifications",
+    "pushDescription": "Get an alert when a new message assigned to you arrives, even when Nexoomni is closed.",
+    "pushEnabledDescription": "Alerts for assigned messages are active in this browser.",
+    "pushNotificationTitle": "New message in Nexoomni",
+    "pushNotificationBody": "You have a new assigned message.",
+    "enablePush": "Enable notifications",
+    "disablePush": "Disable notifications",
+    "loading": "Checking…",
+    "enabling": "Enabling…",
+    "disabling": "Disabling…",
+    "unsupported": "This browser does not support Web Push notifications.",
+    "installFirst": "On iPhone or iPad, add Nexoomni to your Home Screen before enabling notifications.",
+    "permissionDenied": "Permission is blocked. Change it in your browser settings.",
+    "notConfigured": "Notifications are not configured on this server yet. Contact your administrator.",
+    "requestFailed": "Could not update the subscription. Please try again."
+  },
   "Dashboard": {
     "page": {
       "title": "Dashboard",

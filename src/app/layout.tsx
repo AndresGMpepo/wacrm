@@ -5,6 +5,7 @@ import Script from "next/script";
 import "./globals.css";
 import { ThemeProvider } from "@/hooks/use-theme";
 import { ThemedToaster } from "@/components/themed-toaster";
+import { PwaServiceWorkerRegistration, PwaUpdatePrompt } from "@/components/pwa/pwa-controls";
 import {
   DEFAULT_MODE,
   DEFAULT_THEME,
@@ -24,8 +25,15 @@ export const metadata: Metadata = {
     index: false,
     follow: false,
   },
+  manifest: "/manifest.json",
   icons: {
     icon: [{ url: "/icon" }],
+    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180" }],
+  },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "Nexoomni",
   },
   formatDetection: {
     email: false,
@@ -37,6 +45,8 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   themeColor: "#020617",
   colorScheme: "dark light",
+  width: "device-width",
+  initialScale: 1,
 };
 
 // Inline boot script — runs before React hydrates so the user's
@@ -102,6 +112,7 @@ export default async function RootLayout({
       suppressHydrationWarning
     >
       <head>
+        <meta name="apple-mobile-web-app-capable" content="yes" />
         <Script
           id="theme-boot"
           strategy="beforeInteractive"
@@ -111,6 +122,8 @@ export default async function RootLayout({
       <body className="min-h-full bg-background text-foreground font-sans">
         <NextIntlClientProvider messages={messages} locale={locale}>
           <ThemeProvider>
+            <PwaServiceWorkerRegistration />
+            <PwaUpdatePrompt />
             {children}
             <ThemedToaster />
           </ThemeProvider>

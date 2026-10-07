@@ -481,9 +481,6 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
       const context = audioContext.current ?? new AudioContextClass();
       audioContext.current = context;
       if (context.state === 'suspended') void context.resume();
-      if ('Notification' in window && Notification.permission === 'default') {
-        void Notification.requestPermission();
-      }
     };
     const close = () => {
       const session = activeSession.current ?? incomingSession.current;

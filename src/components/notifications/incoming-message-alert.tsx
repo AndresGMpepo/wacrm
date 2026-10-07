@@ -156,23 +156,6 @@ export function IncomingMessageAlert() {
                 : undefined,
       });
 
-      if (
-        document.visibilityState !== 'visible' &&
-        'Notification' in window &&
-        Notification.permission === 'granted'
-      ) {
-        const browserNotification = new Notification(notification.title, {
-          body: notification.body,
-          icon: '/icon',
-        });
-        browserNotification.onclick = () => {
-          window.focus();
-          if (notification.conversation_id) {
-            router.push(`/inbox?c=${notification.conversation_id}`);
-          }
-          browserNotification.close();
-        };
-      }
     };
 
     const refreshMissedNotifications = async () => {
