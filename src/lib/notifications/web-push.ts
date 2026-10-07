@@ -35,16 +35,36 @@ function getStatusCode(error: unknown): number | null {
   return typeof statusCode === 'number' ? statusCode : null;
 }
 
-function vapidConfiguration() {
-  const publicKey = process.env.NEXT_PUBLIC_WEB_PUSH_VAPID_PUBLIC_KEY;
-  const privateKey = process.env.WEB_PUSH_VAPID_PRIVATE_KEY;
-  const subject = process.env.WEB_PUSH_VAPID_SUBJECT;
+export function vapidConfiguration() {
+  // Read at runtime: Docker does not bake VAPID values into the client bundle.
+  const {
+    NEXT_PUBLIC_WEB_PUSH_VAPID_PUBLIC_KEY: publicKey,
+    WEB_PUSH_VAPID_PRIVATE_KEY: privateKey,
+    WEB_PUSH_VAPID_SUBJECT: subject,
+  } = process.env;
 
   if (!publicKey || !privateKey || !subject) {
     throw new Error('NEXT_PUBLIC_WEB_PUSH_VAPID_PUBLIC_KEY, WEB_PUSH_VAPID_PRIVATE_KEY, and WEB_PUSH_VAPID_SUBJECT are required.');
   }
 
   return { publicKey, privateKey, subject };
+}
+
+export async function sendDeviceTestPush(subscription: PushSubscriptionRow) {
+  const configuration = vapidConfiguration();
+  const copy = pushCopy[subscription.locale];
+  await webpush.sendNotification({
+    endpoint: subscription.endpoint,
+    keys: { p256dh: subscription.p256dh, auth: subscription.auth },
+  }, JSON.stringify({
+    title: copy.pushNotificationTitle,
+    body: copy.pushTestBody,
+    url: '/settings',
+    tag: `nexoomni-test-${Date.now()}`,
+  }), {
+    TTL: 300, timeout: 8_000, urgency: 'high',
+    vapidDetails: configuration,
+  });
 }
 
 export async function processWebPushOutbox(db: SupabaseClient) {

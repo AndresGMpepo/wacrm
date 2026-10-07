@@ -4,7 +4,7 @@ description: "Atiende WhatsApp, Facebook, Instagram y Chat web desde una sola vi
 section: "inbox"
 role: ["agent", "supervisor", "admin", "owner"]
 plan: ["basico", "crecimiento", "premium"]
-updated: "2026-09-28"
+updated: "2026-10-06"
 ---
 
 ## ¿Qué es?
@@ -30,6 +30,14 @@ Cualquier persona con acceso al día a día de atención al cliente.
    contacto, memoria de Nexo Memory, etiquetas, tratos abiertos,
    tareas pendientes, notas internas del equipo y notas del contacto.
 5. "Tomar conversación" se usa para autoasignarte un chat sin dueño.
+
+## Nexo Memory y datos del cliente en móvil
+
+Abre una conversación y pulsa **Nexo Memory y cliente**, debajo del
+encabezado. Se abre un panel desplazable con la misma información de
+escritorio: memoria, historial, compromisos, teléfonos, etiquetas,
+tratos, tareas y notas. Cierra el panel para volver a escribir en el chat.
+El aviso de notas internas también abre este panel en móvil.
 
 ## Preguntas frecuentes
 

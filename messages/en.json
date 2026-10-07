@@ -153,6 +153,13 @@
     "pushEnabledDescription": "System alerts for assigned messages, even in the background. On supported mobile devices, the app icon shows unread messages. Sound and vibration depend on your device settings.",
     "pushNotificationTitle": "New message in Nexoomni",
     "pushNotificationBody": "You have a new assigned message.",
+    "testPush": "Test notification",
+    "testingPush": "Sending test…",
+    "pushTestBody": "This is a server notification test for this device.",
+    "pushTestAccepted": "The provider accepted the test. Check for the system alert; this does not guarantee the device displayed it. If the test arrives but messages do not, ask your administrator to check the delivery worker.",
+    "pushTestFailed": "The provider rejected the test. Ask your administrator to check the VAPID keys and delivery logs.",
+    "subscriptionMissing": "Permission is granted, but this device is not registered on the server. Select Enable notifications to repair it.",
+    "subscriptionKeyChanged": "The notification key changed. Select Enable notifications to register this device again.",
     "enablePush": "Enable notifications",
     "disablePush": "Disable notifications",
     "loading": "Checking…",
@@ -233,6 +240,8 @@
     "page": {
       "whatsappNotConnected": "WhatsApp® is not connected. Go to Settings to connect your account.",
       "accessDeniedTitle": "Access denied",
+      "mobileContactTitle": "Nexo Memory and customer details",
+      "closeMobileContact": "Close customer details",
       "accessDeniedDescription": "Your role doesn't have permission to view that section."
     },
     "conversationList": {
@@ -260,6 +269,7 @@
     },
     "messageThread": {
       "backToConversations": "Back to conversations",
+      "mobileContactPanel": "Nexo Memory and customer",
       "hideContactPanel": "Hide contact panel",
       "showContactPanel": "Show contact panel",
       "hideContact": "Hide contact",

@@ -42,6 +42,13 @@ is included.
   `env_file` and is never baked into the image — safe to change with
   just a container restart.
 
+Web Push is an exception to the usual `NEXT_PUBLIC_*` build-time rule:
+`NEXT_PUBLIC_WEB_PUSH_VAPID_PUBLIC_KEY` is retrieved through the
+authenticated subscription API at runtime. Configure it together with
+`WEB_PUSH_VAPID_PRIVATE_KEY` and `WEB_PUSH_VAPID_SUBJECT` in the runtime
+environment, never as private build arguments. Re-enable device
+subscriptions after rotating the VAPID key pair.
+
 ## Easypanel: avoid secrets in Nixpacks images
 
 If the build log contains `SecretsUsedInArgOrEnv` for server keys and
@@ -134,18 +141,21 @@ installed alongside it.
 - Database migrations under `supabase/` are **not** run by the
   container — apply them with the Supabase CLI as described in the
   README.
-- Nothing inside the container is scheduled. If you use automation
-  Wait steps, flows, or outbound API/n8n webhooks, point an external scheduler at
-  `GET /api/automations/cron` and `GET /api/flows/cron` on this
-  deployment, sending the shared secret in the `x-cron-secret` header
-  (`AUTOMATION_CRON_SECRET`, see `.env.local.example`). Both return
-  503 until that variable is set. For webhook deliveries, POST once per minute
-  to `/api/internal/webhook-delivery-worker` with header
-  `x-webhook-delivery-worker-secret` set to
-  `WEBHOOK_DELIVERY_WORKER_SECRET`. For the platform operator's optional
-  message-retention purge, POST once a day to
-  `/api/internal/message-retention` with header
-  `x-retention-cron-secret` set to `MESSAGE_RETENTION_CRON_SECRET` (or run
-  `scripts/run-message-retention-cron.mjs`, which needs `APP_URL` too) —
-  it's a no-op until an operator sets a retention window on the Platform
-  page.
+- The Docker entrypoint uses `scripts/start-standalone.mjs`, the same
+  launcher as the Nixpacks deployment. With `APP_URL` and
+  `AI_ANALYSIS_WORKER_SECRET`, it runs the existing analysis/report
+  worker every minute, including the Web Push queue. The launcher also
+  runs flow cleanup, webhook delivery and retention when their respective
+  secrets are configured. A missing secret is logged explicitly and
+  leaves that worker disabled. Rebuild older Docker images to obtain
+  this entrypoint; do not run an additional external scheduler for the
+  same jobs.
+- Automation **Wait** steps still need an external scheduler targeting
+  `GET /api/automations/cron` with `x-cron-secret` set to
+  `AUTOMATION_CRON_SECRET`; the launcher only schedules flow cleanup,
+  not this automation endpoint.
+- If you override the entrypoint to run `server.js` directly, arrange
+  your own scheduler for the required workers. The existing scripts
+  under `scripts/` provide the authenticated requests. The optional
+  retention job remains a no-op until an operator sets a retention
+  window on the Platform page.

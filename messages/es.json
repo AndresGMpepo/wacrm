@@ -153,6 +153,13 @@
     "pushEnabledDescription": "Avisos del sistema para mensajes asignados, incluso en segundo plano. En móviles compatibles, el ícono muestra los mensajes sin leer. El sonido y la vibración dependen de los ajustes del dispositivo.",
     "pushNotificationTitle": "Nuevo mensaje en Nexoomni",
     "pushNotificationBody": "Tienes un mensaje nuevo asignado.",
+    "testPush": "Probar notificación",
+    "testingPush": "Enviando prueba…",
+    "pushTestBody": "Esta es una prueba de notificación del servidor para este dispositivo.",
+    "pushTestAccepted": "El proveedor aceptó la prueba. Comprueba el aviso del sistema; esto no garantiza que el dispositivo lo haya mostrado. Si la prueba llega pero los mensajes no, pide revisar el worker de envío.",
+    "pushTestFailed": "El proveedor rechazó la prueba. Pide al administrador revisar las claves VAPID y los registros de envío.",
+    "subscriptionMissing": "El permiso está concedido, pero este dispositivo no está registrado en el servidor. Pulsa Activar notificaciones para repararlo.",
+    "subscriptionKeyChanged": "La clave de notificaciones cambió. Pulsa Activar notificaciones para volver a registrar este dispositivo.",
     "enablePush": "Activar notificaciones",
     "disablePush": "Desactivar notificaciones",
     "loading": "Comprobando…",
@@ -232,6 +239,8 @@
   "Inbox": {
     "page": {
       "whatsappNotConnected": "WhatsApp® no está conectado. Ve a Configuración para conectar tu cuenta.",
+      "mobileContactTitle": "Nexo Memory y datos del cliente",
+      "closeMobileContact": "Cerrar datos del cliente",
       "accessDeniedTitle": "Acceso denegado",
       "accessDeniedDescription": "Tu rol no tiene permiso para ver esa sección."
     },
@@ -260,6 +269,7 @@
     },
     "messageThread": {
       "backToConversations": "Volver a conversaciones",
+      "mobileContactPanel": "Nexo Memory y cliente",
       "hideContactPanel": "Ocultar panel de contacto",
       "showContactPanel": "Mostrar panel de contacto",
       "hideContact": "Ocultar contacto",

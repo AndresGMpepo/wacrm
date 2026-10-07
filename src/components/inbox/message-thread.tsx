@@ -28,6 +28,7 @@ import {
   RefreshCw,
   PanelRightOpen,
   PanelRightClose,
+  Brain,
 } from "lucide-react";
 import { format, isToday, isYesterday } from "date-fns";
 import { useTranslations } from "next-intl";
@@ -118,6 +119,8 @@ interface MessageThreadProps {
    */
   contactPanelOpen?: boolean;
   onToggleContactPanel?: () => void;
+  onOpenMobileContactPanel?: () => void;
+  readEnabled?: boolean;
   onShowInternalNotes?: (conversationId: string) => void;
 }
 
@@ -177,6 +180,8 @@ export function MessageThread({
   onRefresh,
   contactPanelOpen,
   onToggleContactPanel,
+  onOpenMobileContactPanel,
+  readEnabled = true,
   onShowInternalNotes,
 }: MessageThreadProps) {
   const t = useTranslations("Inbox.messageThread");
@@ -472,7 +477,7 @@ export function MessageThread({
   // A mounted thread in a background tab is not being read. Keep its
   // unread messages (and mobile badge) until the user returns to it.
   useEffect(() => {
-    if (!conversationId || !hasUnread) return;
+    if (!conversationId || !hasUnread || !readEnabled) return;
     const supabase = createClient();
     const markRead = () => {
       if (document.visibilityState !== "visible" || !document.hasFocus()) return;
@@ -491,7 +496,7 @@ export function MessageThread({
       document.removeEventListener("visibilitychange", markRead);
       window.removeEventListener("focus", markRead);
     };
-  }, [conversationId, hasUnread]);
+  }, [conversationId, hasUnread, readEnabled]);
 
   // Auto-scroll to bottom on new messages. Keyed off the last message's id
   // (not the array reference) so a resync/poll replacing the array with
@@ -1153,6 +1158,17 @@ export function MessageThread({
           </DropdownMenu>
         </div>
       </div>
+
+      {onOpenMobileContactPanel ? (
+        <button
+          type="button"
+          onClick={onOpenMobileContactPanel}
+          className="flex shrink-0 items-center justify-center gap-2 border-b border-border bg-card px-3 py-2 text-sm font-medium text-primary hover:bg-muted lg:hidden"
+        >
+          <Brain className="size-4" />
+          {t("mobileContactPanel")}
+        </button>
+      ) : null}
 
       {/* Messages Area */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4">

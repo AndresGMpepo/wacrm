@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import webpush from 'web-push';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { processWebPushOutbox } from './web-push';
+import { processWebPushOutbox, sendDeviceTestPush } from './web-push';
 
 vi.mock('web-push', () => ({
   default: { setVapidDetails: vi.fn(), sendNotification: vi.fn().mockResolvedValue({ statusCode: 201 }) },
@@ -55,6 +55,27 @@ function deliveryDatabase(unreadQueryFails = false) {
 }
 
 describe('background Web Push delivery', () => {
+  it('sends a localized device test directly without a queued message or badge mutation', async () => {
+    vi.stubEnv('NEXT_PUBLIC_WEB_PUSH_VAPID_PUBLIC_KEY', 'runtime-public-key');
+    vi.stubEnv('WEB_PUSH_VAPID_PRIVATE_KEY', 'runtime-private-key');
+    vi.stubEnv('WEB_PUSH_VAPID_SUBJECT', 'mailto:test@example.com');
+    await sendDeviceTestPush({
+      id: 'device-id', endpoint: 'https://fcm.googleapis.com/device',
+      p256dh: 'key', auth: 'auth', locale: 'es',
+    });
+    const [subscription, payload, options] = vi.mocked(webpush.sendNotification).mock.calls[0];
+    expect(subscription.endpoint).toBe('https://fcm.googleapis.com/device');
+    const parsed = JSON.parse(String(payload));
+    expect(parsed.body).toContain('prueba');
+    expect(parsed).not.toHaveProperty('unreadCount');
+    expect(options).toMatchObject({
+      urgency: 'high',
+      vapidDetails: {
+        publicKey: 'runtime-public-key', privateKey: 'runtime-private-key', subject: 'mailto:test@example.com',
+      },
+    });
+  });
+
   it('sends high-urgency push with a server-computed unread count without any app window', async () => {
     vi.stubEnv('NEXT_PUBLIC_WEB_PUSH_VAPID_PUBLIC_KEY', 'test-public-key');
     vi.stubEnv('WEB_PUSH_VAPID_PRIVATE_KEY', 'test-private-key');

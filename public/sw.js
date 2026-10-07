@@ -95,13 +95,14 @@ self.addEventListener('push', (event) => {
     const payload = event.data.json();
     // A visible browser window can be behind another app. Push must always
     // display a system notification, independently of page visibility.
-    await self.registration.showNotification(payload.title, {
+    const existing = await self.registration.getNotifications({ tag: payload.tag });
+    if (!existing.length) await self.registration.showNotification(payload.title, {
       body: payload.body,
       icon: '/icon-192.png',
       badge: '/icon-192.png',
       tag: payload.tag,
       silent: false,
-      renotify: true,
+      renotify: false,
       requireInteraction: !isMobileDevice(),
       vibrate: [200, 100, 200],
       data: { url: payload.url },

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Clock3,
   Mic,
@@ -148,16 +149,16 @@ export function NexPhone() {
           ? <CallContextDialog key={t.active.status.callId} callId={t.active.status.callId} />
         : null}
 
-      {t.incoming ? (
-        <div className="fixed bottom-4 right-4 z-50 w-80 rounded-xl border bg-card p-4 shadow-2xl">
+      {t.incoming && typeof document !== 'undefined' ? createPortal(
+        <div className="fixed inset-x-4 bottom-4 z-[60] max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-xl border bg-card p-4 shadow-2xl sm:left-auto sm:w-80">
           <div className="flex items-center gap-2"><PhoneIncoming className="size-5 animate-pulse text-primary" /><p className="font-semibold">Llamada entrante</p></div>
           <p className="mb-3 mt-1 text-sm text-muted-foreground">{t.incoming.status?.number ?? 'Número desconocido'}</p>
           <div className="flex gap-2"><Button onClick={() => void t.answer(false)}><PhoneCall />Contestar</Button><Button variant="destructive" onClick={t.reject}><PhoneOff />Rechazar</Button></div>
-        </div>
+        </div>, document.body,
       ) : null}
 
-      {t.open ? (
-        <div className="absolute right-0 top-12 z-50 w-80 rounded-xl border bg-card p-4 shadow-2xl">
+      {t.open && typeof document !== 'undefined' ? createPortal(
+        <div className="fixed inset-x-4 top-20 z-50 max-h-[calc(100dvh-6rem)] overflow-y-auto overscroll-contain rounded-xl border bg-card p-4 shadow-2xl sm:left-auto sm:w-80">
           <div className="mb-3 flex items-center justify-between">
             <div><b>NexPhone</b><p className="text-xs text-muted-foreground">{t.status || (t.connected ? 'Conectado' : t.connecting ? 'Conectando…' : 'Desconectado')}</p></div>
             <div className="flex items-center gap-1"><Button size="icon" variant="ghost" title="Historial" onClick={() => setShowHistory((value) => !value)}><Clock3 /></Button><Button size="icon" variant="ghost" onClick={() => t.setOpen(false)} aria-label="Cerrar"><X /></Button></div>
@@ -174,7 +175,7 @@ export function NexPhone() {
             {inCall ? <div className="mt-3 flex flex-wrap gap-2"><Button size="icon" variant="secondary" onClick={() => { t.mute(!muted); setMuted(!muted); }}>{muted ? <MicOff /> : <Mic />}</Button><Button size="sm" variant="secondary" onClick={() => setTransfer('blind')}><PhoneForwarded /> Ciega</Button><Button size="sm" variant="secondary" onClick={() => setTransfer('attended')}>Atendida</Button><Button size="icon" variant="secondary" onClick={() => void t.video()} title="Activar vídeo"><Video /></Button><Button size="icon" variant="destructive" onClick={t.hangup}><PhoneOff /></Button></div> : <div className="mt-3 grid grid-cols-2 gap-2"><Button disabled={!t.connected || !number.trim()} onClick={() => void t.call(number)}><PhoneCall />Llamar</Button><Button variant="secondary" disabled={!t.connected || !number.trim()} onClick={() => void t.call(number, true)}><Video />Video</Button></div>}
             {!inCall && t.lastEndedCall ? <PostCallFollowUp number={t.lastEndedCall.number} onDone={t.dismissLastEndedCall} /> : null}
           </>}
-        </div>
+        </div>, document.body,
       ) : null}
     </div>
   );

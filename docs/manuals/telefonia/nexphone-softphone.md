@@ -4,7 +4,7 @@ description: "Haz y recibe llamadas telefónicas directamente desde el navegador
 section: "telefonia"
 role: ["agent", "supervisor", "admin", "owner"]
 plan: ["premium"]
-updated: "2026-10-05"
+updated: "2026-10-06"
 ---
 
 ## ¿Qué es?
@@ -32,6 +32,12 @@ la integración y asigna las extensiones (ver
 5. Al colgar, NexPhone te pregunta si quieres **agendar un
    seguimiento** con ese número — un clic en "Mañana 9:00 am", "En 1
    hora" o una fecha personalizada.
+
+En móvil, NexPhone se ajusta al ancho de la pantalla y puedes desplazar
+su contenido verticalmente para acceder a todo el teclado, historial,
+transferencias y seguimientos. La tarjeta de llamada entrante también
+queda dentro de la pantalla. Esto no cambia las restricciones del
+navegador sobre llamadas WebRTC en segundo plano.
 
 ## Contexto al contestar una llamada
 

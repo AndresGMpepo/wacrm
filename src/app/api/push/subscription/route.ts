@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { requireRole, toErrorResponse } from '@/lib/auth/account';
 import { isAllowedWebPushEndpoint } from '@/lib/notifications/push-subscription';
+import { vapidConfiguration } from '@/lib/notifications/web-push';
 
 const endpointSchema = z.string().url().max(4096).refine(isAllowedWebPushEndpoint);
 const subscriptionSchema = z.object({
@@ -13,6 +14,39 @@ const subscriptionSchema = z.object({
   }),
   locale: z.enum(['es', 'en', 'ko']).optional(),
 });
+
+export async function GET(request: Request) {
+  try {
+    const ctx = await requireRole('agent');
+    let configuration: ReturnType<typeof vapidConfiguration>;
+    try {
+      configuration = vapidConfiguration();
+    } catch (error) {
+      console.error('[web-push] Push configuration is unavailable:', error);
+      return NextResponse.json({ code: 'notConfigured' }, { status: 503 });
+    }
+    const endpoint = new URL(request.url).searchParams.get('endpoint');
+    let registered = false;
+    if (endpoint) {
+      if (!endpointSchema.safeParse(endpoint).success) {
+        return NextResponse.json({ code: 'requestFailed' }, { status: 400 });
+      }
+      const { data, error } = await ctx.supabase.from('web_push_subscriptions')
+        .select('id').eq('endpoint', endpoint)
+        .eq('account_id', ctx.accountId).eq('user_id', ctx.userId).maybeSingle();
+      if (error) {
+        console.error('[web-push] Could not verify saved subscription:', error);
+        return NextResponse.json({ code: 'requestFailed' }, { status: 500 });
+      }
+      registered = Boolean(data);
+    }
+    return NextResponse.json({ publicKey: configuration.publicKey, registered }, {
+      headers: { 'Cache-Control': 'no-store' },
+    });
+  } catch (error) {
+    return toErrorResponse(error);
+  }
+}
 
 async function readJson(request: Request): Promise<unknown> {
   try {

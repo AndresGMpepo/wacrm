@@ -153,6 +153,13 @@
     "pushEnabledDescription": "백그라운드에서도 배정된 메시지의 시스템 알림을 받습니다. 지원되는 모바일 기기에서는 앱 아이콘에 읽지 않은 메시지 수가 표시됩니다. 소리와 진동은 기기 설정에 따라 달라집니다.",
     "pushNotificationTitle": "Nexoomni 새 메시지",
     "pushNotificationBody": "새 메시지가 배정되었습니다.",
+    "testPush": "알림 테스트",
+    "testingPush": "테스트 전송 중…",
+    "pushTestBody": "이 기기의 서버 알림 테스트입니다.",
+    "pushTestAccepted": "제공업체가 테스트를 수락했습니다. 시스템 알림을 확인하세요. 기기에 표시되었다는 보장은 아닙니다. 테스트는 도착하지만 메시지 알림은 도착하지 않으면 관리자에게 전송 워커를 확인해 달라고 요청하세요.",
+    "pushTestFailed": "제공업체가 테스트를 거부했습니다. 관리자에게 VAPID 키와 전송 로그를 확인해 달라고 요청하세요.",
+    "subscriptionMissing": "권한은 허용되었지만 이 기기가 서버에 등록되지 않았습니다. 알림 켜기를 눌러 복구하세요.",
+    "subscriptionKeyChanged": "알림 키가 변경되었습니다. 알림 켜기를 눌러 이 기기를 다시 등록하세요.",
     "enablePush": "알림 켜기",
     "disablePush": "알림 끄기",
     "loading": "확인 중…",
@@ -233,6 +240,8 @@
     "page": {
       "whatsappNotConnected": "WhatsApp®이 연결되어 있지 않습니다. 설정으로 이동해 계정을 연결하세요.",
       "accessDeniedTitle": "접근 거부됨",
+      "mobileContactTitle": "Nexo Memory 및 고객 정보",
+      "closeMobileContact": "고객 정보 닫기",
       "accessDeniedDescription": "현재 역할은 해당 섹션을 볼 권한이 없습니다."
     },
     "conversationList": {
@@ -260,6 +269,7 @@
     },
     "messageThread": {
       "backToConversations": "대화 목록으로 돌아가기",
+      "mobileContactPanel": "Nexo Memory 및 고객",
       "hideContactPanel": "연락처 패널 숨기기",
       "showContactPanel": "연락처 패널 표시",
       "hideContact": "연락처 숨기기",

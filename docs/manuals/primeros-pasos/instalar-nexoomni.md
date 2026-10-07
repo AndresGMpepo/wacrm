@@ -48,7 +48,32 @@ sin asignar no generan una alerta push. Puedes desactivarlas desde el mismo
 control en cualquier momento. En iPhone o iPad, primero agrega la aplicación
 a la pantalla de inicio y luego activa las notificaciones desde ella.
 
+El permiso del sistema por sí solo no registra este dispositivo.
+Configuración comprueba también que la suscripción esté guardada en el
+servidor y que use la clave actual. Si informa que falta el registro o
+que la clave cambió, pulsa **Activar notificaciones** para repararlo.
+
+### Probar el envío al dispositivo
+
+Con las notificaciones activas, pulsa **Probar notificación** en
+Configuración. La prueba se envía desde el servidor directamente al
+dispositivo actual, sin esperar al worker. Debe aparecer un aviso del
+sistema incluso con la aplicación abierta.
+
+- **El proveedor aceptó la prueba** significa que el proveedor push
+  aceptó el envío, no que el sistema operativo haya mostrado el aviso.
+- Si la prueba llega pero los mensajes no, revisa la asignación de la
+  conversación y el worker que procesa la cola cada minuto.
+- Si se rechaza, revisa las claves VAPID y los registros del servidor.
+- Si el proveedor la acepta pero no aparece, revisa los banners del
+  sistema, la suscripción y el navegador utilizado por la PWA.
+
 ## Avisos en escritorio y móvil
+
+En escritorio, los mensajes asignados recibidos por la conexión de la
+página generan un aviso inmediato del sistema; no necesitan esperar al
+worker. El push posterior usa la misma identificación para no repetir un
+aviso que todavía esté visible.
 
 Los mensajes asignados generan un aviso del sistema, aunque NexoOmni esté
 en segundo plano o una ventana quede detrás de otra aplicación. En
@@ -104,11 +129,16 @@ puedan activar la función:
    `WEB_PUSH_VAPID_PRIVATE_KEY` y `WEB_PUSH_VAPID_SUBJECT` en el entorno
    del servidor. El asunto debe ser un correo `mailto:` o una URL de
    contacto. No publicar la clave privada.
-4. Reconstruir y desplegar la aplicación después de cambiar la clave
-   pública. En Easypanel/standalone, configura `APP_URL` y
-   `AI_ANALYSIS_WORKER_SECRET` para que el worker existente procese la cola
-   cada minuto; en Docker, programa una llamada autenticada a
-   `/api/internal/ai-analysis-worker` cada minuto.
+4. En Docker y Easypanel/standalone, configura `APP_URL` y
+   `AI_ANALYSIS_WORKER_SECRET` para que el arranque de la aplicación
+   ejecute el worker existente cada minuto. La imagen Docker debe
+   reconstruirse para incorporar el nuevo arranque. No hace falta un
+   build arg para VAPID: la clave pública se consulta en el servidor al
+   activar las notificaciones. Si cambias las claves, vuelve a activar
+   las notificaciones en cada dispositivo. Si utilizas otro comando de
+   arranque, programa una llamada autenticada a
+   `/api/internal/ai-analysis-worker` cada minuto; no dupliques el
+   scheduler si ya utilizas el incluido.
 
 Las suscripciones se guardan por usuario y dispositivo; una suscripción
 caducada se elimina al recibir el rechazo del proveedor push. La cola

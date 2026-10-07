@@ -34,6 +34,7 @@ import {
 import { addContactTag, deleteContactTag } from "@/lib/contacts/tag-api";
 import { format } from "date-fns";
 import { useTranslations } from "next-intl";
+import { cn } from "@/lib/utils";
 
 type ContactConversation = {
   id: string;
@@ -99,9 +100,10 @@ interface ContactSidebarProps {
   contact: Contact | null;
   conversationId?: string | null;
   internalNotesOpenSignal?: number;
+  className?: string;
 }
 
-export function ContactSidebar({ contact, conversationId, internalNotesOpenSignal }: ContactSidebarProps) {
+export function ContactSidebar({ contact, conversationId, internalNotesOpenSignal, className }: ContactSidebarProps) {
   const tSidebar = useTranslations("Inbox.sidebar");
   const tThread = useTranslations("Inbox.messageThread");
 
@@ -375,7 +377,7 @@ export function ContactSidebar({ contact, conversationId, internalNotesOpenSigna
 
   if (!contact) {
     return (
-      <div className="flex h-full w-80 items-center justify-center border-l border-border bg-card">
+      <div className={cn("flex h-full w-80 items-center justify-center border-l border-border bg-card", className)}>
         <p className="text-sm text-muted-foreground">{tThread("selectConversation")}</p>
       </div>
     );
@@ -386,7 +388,7 @@ export function ContactSidebar({ contact, conversationId, internalNotesOpenSigna
   const initials = displayName.charAt(0).toUpperCase();
 
   return (
-    <div className="flex h-full w-80 flex-col border-l border-border bg-card">
+    <div className={cn("flex h-full w-80 flex-col border-l border-border bg-card", className)}>
       <ScrollArea className="min-h-0 flex-1">
         <div className="p-4">
           {/* Contact Info */}

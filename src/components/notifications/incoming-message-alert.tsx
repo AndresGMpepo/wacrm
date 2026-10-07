@@ -6,12 +6,15 @@ import { toast } from 'sonner';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
 import { emitNotificationsChanged } from '@/lib/notifications/events';
+import { showDesktopMessageAlert } from '@/lib/notifications/desktop-alert';
+import { useTranslations } from 'next-intl';
 import type { Notification } from '@/types';
 
 /** Global listener for notification rows addressed to the signed-in user. */
 export function IncomingMessageAlert() {
   const router = useRouter();
   const { user } = useAuth();
+  const pushCopy = useTranslations('Pwa');
   const audioContextRef = useRef<AudioContext | null>(null);
 
   useEffect(() => {
@@ -128,6 +131,22 @@ export function IncomingMessageAlert() {
             detail: { conversationId: notification.conversation_id ?? null },
           }),
         );
+        if (notification.conversation_id) {
+          const conversationId = notification.conversation_id;
+          void (async () => {
+            const { data, error } = await supabase.from('conversations')
+              .select('id').eq('id', conversationId).eq('assigned_agent_id', user.id).maybeSingle();
+            if (error) throw error;
+            if (!data) return;
+            await showDesktopMessageAlert({
+              id: notification.id, conversationId,
+              title: pushCopy('pushNotificationTitle'),
+              body: pushCopy('pushNotificationBody'),
+            });
+          })().catch((error: unknown) => {
+            console.error('[pwa] Could not show desktop system notification:', error);
+          });
+        }
       }
 
       playAlert(notification.type);
@@ -214,7 +233,7 @@ export function IncomingMessageAlert() {
       audioContextRef.current?.close().catch(() => undefined);
       audioContextRef.current = null;
     };
-  }, [router, user]);
+  }, [router, user, pushCopy]);
 
   return null;
 }

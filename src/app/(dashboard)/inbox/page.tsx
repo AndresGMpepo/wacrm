@@ -14,9 +14,10 @@ import { useRealtime } from "@/hooks/use-realtime";
 import { ConversationList, type InboxChannelFilter } from "@/components/inbox/conversation-list";
 import { MessageThread } from "@/components/inbox/message-thread";
 import { ContactSidebar } from "@/components/inbox/contact-sidebar";
-import { WifiOff } from "lucide-react";
+import { WifiOff, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { Sheet, SheetClose, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 
 // Remembers the agent's show/hide choice for the desktop contact panel
 // across reloads and sessions (device-scoped, like the theme prefs).
@@ -74,6 +75,9 @@ function InboxPageInner() {
    * below reconciles to the stored value right after mount instead.
    */
   const [contactPanelOpen, setContactPanelOpen] = useState(true);
+  const [mobileContactPanelOpen, setMobileContactPanelOpen] = useState(false);
+  const [desktopContactPanel, setDesktopContactPanel] = useState(false);
+  const openMobileContactPanel = useCallback(() => setMobileContactPanelOpen(true), []);
   const [internalNotesOpenSignal, setInternalNotesOpenSignal] = useState(0);
   const [internalNotesConversationId, setInternalNotesConversationId] = useState<string | null>(null);
 
@@ -106,10 +110,22 @@ function InboxPageInner() {
   }, []);
 
   const handleShowInternalNotes = useCallback((conversationId: string) => {
+    if (!window.matchMedia("(min-width: 1024px)").matches) setMobileContactPanelOpen(true);
     setContactPanelOpen(true);
     try { localStorage.setItem(CONTACT_PANEL_STORAGE_KEY, "true"); } catch {}
     setInternalNotesConversationId(conversationId);
     setInternalNotesOpenSignal((value) => value + 1);
+  }, []);
+
+  useEffect(() => {
+    const desktop = window.matchMedia("(min-width: 1024px)");
+    const closeOnDesktop = () => {
+      setDesktopContactPanel(desktop.matches);
+      if (desktop.matches) setMobileContactPanelOpen(false);
+    };
+    closeOnDesktop();
+    desktop.addEventListener("change", closeOnDesktop);
+    return () => desktop.removeEventListener("change", closeOnDesktop);
   }, []);
 
   // Fire the deep-link auto-select exactly once per URL — subsequent
@@ -535,6 +551,7 @@ function InboxPageInner() {
         if (activeConversation?.id === deepLinkConvId) return;
         const match = loaded.find((c) => c.id === deepLinkConvId);
         if (match) {
+          setMobileContactPanelOpen(false);
           setActiveConversation(match);
           setActiveContact(match.contact ?? null);
           setMessages([]);
@@ -559,6 +576,7 @@ function InboxPageInner() {
               .maybeSingle();
             if (error || !data) return;
             const conversation = normalizeConversation(data);
+            setMobileContactPanelOpen(false);
             setConversations((previous) => previous.some((item) => item.id === conversation.id) ? previous : [conversation, ...previous]);
             setActiveConversation(conversation);
             setActiveContact(conversation.contact ?? null);
@@ -577,6 +595,7 @@ function InboxPageInner() {
       // when conversationId changes — so messages would stay empty until
       // the user navigated away and back. Bail out early instead.
       if (activeConversation?.id === conv.id) return;
+      setMobileContactPanelOpen(false);
       setActiveConversation(conv);
       setActiveContact(conv.contact ?? null);
       setMessages([]);
@@ -626,6 +645,7 @@ function InboxPageInner() {
   // back. Also clears the ?c= param so a refresh lands on the list
   // instead of re-opening the thread the user just backed out of.
   const handleCloseConversation = useCallback(() => {
+    setMobileContactPanelOpen(false);
     setActiveConversation(null);
     setActiveContact(null);
     setMessages([]);
@@ -761,19 +781,36 @@ function InboxPageInner() {
             onRefresh={handleManualRefresh}
             contactPanelOpen={contactPanelOpen}
             onToggleContactPanel={handleToggleContactPanel}
+            onOpenMobileContactPanel={openMobileContactPanel}
+            readEnabled={!mobileContactPanelOpen}
             onShowInternalNotes={handleShowInternalNotes}
           />
         </div>
 
-        {/* Right panel: Contact sidebar — desktop only, and only when the
-            agent hasn't collapsed it via the thread-header toggle (#258).
-            On mobile it's always hidden (the `lg:block` below), so the
-            toggle — which is itself desktop-only — never affects it. */}
-        {contactPanelOpen && (
+        {/* Desktop sidebar and mobile sheet share the complete contact panel. */}
+        {contactPanelOpen && desktopContactPanel && (
           <div className="hidden lg:block">
             <ContactSidebar contact={threadContact} conversationId={activeConversation?.id} internalNotesOpenSignal={internalNotesConversationId === activeConversation?.id ? internalNotesOpenSignal : undefined} />
           </div>
         )}
+        <Sheet open={mobileContactPanelOpen && hasActiveConv && !desktopContactPanel} onOpenChange={setMobileContactPanelOpen}>
+          <SheetContent showCloseButton={false} className="gap-0 data-[side=right]:w-full sm:max-w-md">
+            <SheetHeader className="shrink-0 border-b border-border pr-12">
+              <SheetTitle>{t("mobileContactTitle")}</SheetTitle>
+            </SheetHeader>
+            <SheetClose aria-label={t("closeMobileContact")} className="absolute right-3 top-3 flex size-8 items-center justify-center rounded-md hover:bg-muted">
+              <X className="size-4" />
+            </SheetClose>
+            <div className="min-h-0 flex-1">
+              <ContactSidebar
+                className="w-full border-l-0"
+                contact={threadContact}
+                conversationId={activeConversation?.id}
+                internalNotesOpenSignal={internalNotesConversationId === activeConversation?.id ? internalNotesOpenSignal : undefined}
+              />
+            </div>
+          </SheetContent>
+        </Sheet>
       </div>
     </div>
   );
