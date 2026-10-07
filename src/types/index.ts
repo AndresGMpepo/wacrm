@@ -309,6 +309,21 @@ export interface Message {
    * in the conversation); null otherwise. Migration 141.
    */
   ad_referral?: MetaAdReferral | null;
+  /**
+   * True when this agent message was synced from Meta's `message_echoes`
+   * webhook with Meta's Page Inbox app_id — i.e. an agent replied from
+   * Meta's own Page Inbox/Business Suite instead of from NexoOmni. Drives
+   * a small "Enviado desde Meta" tag so the team knows it didn't originate
+   * here. Migration 142.
+   */
+  sent_via_meta_inbox?: boolean;
+  /**
+   * Set when the customer edited this message after sending it (Facebook
+   * Messenger only, up to 5 edits — enforced client-side by Meta).
+   * `content_text` already holds the latest edited text; this just drives
+   * the "(editado)" tag. Migration 143.
+   */
+  edited_at?: string | null;
 }
 
 /** See `Message.ad_referral`. */

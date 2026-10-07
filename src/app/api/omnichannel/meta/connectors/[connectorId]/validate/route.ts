@@ -143,11 +143,17 @@ export async function POST(_request: Request, { params }: { params: Promise<{ co
     let messengerSubscribed = connector.provider !== 'facebook'
     if (connector.provider === 'facebook') {
       const path = `/${encodeURIComponent(connector.external_channel_id)}/subscribed_apps`
-      // messaging_referrals is required (together with messages) for Meta to
-      // attach Click-to-Messenger ad context (message.referral) to the
-      // inbound message that opened the thread — see
+      // messaging_referrals: attaches Click-to-Messenger ad context
+      // (message.referral) to the inbound message that opened the thread.
+      // message_deliveries/message_reads: drive the sent/delivered/read
+      // checkmarks already rendered for WhatsApp (MessageBubble's
+      // StatusIcon) — see ingestReceipt() in the webhook route.
+      // message_echoes: syncs a reply sent from Meta's own Page Inbox back
+      // into the thread here (see ingestEcho()). message_edits: updates a
+      // message in place when the customer edits it (see
+      // ingestMessageEdit()). Both are Messenger-only per Meta's docs.
       // https://developers.facebook.com/documentation/business-messaging/messenger-platform/webhooks/webhook-events/messages#ads-referral
-      const messengerSubscription = await graphPost(path, accessToken, 'messages,messaging_postbacks,messaging_referrals')
+      const messengerSubscription = await graphPost(path, accessToken, 'messages,messaging_postbacks,messaging_referrals,message_deliveries,message_reads,message_echoes,message_edits')
       messengerSubscribed = messengerSubscription.response.ok && messengerSubscription.payload?.success === true
 
       if (messengerSubscribed) {

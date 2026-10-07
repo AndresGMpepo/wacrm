@@ -68,7 +68,7 @@ sistema incluso con la aplicación abierta.
 - **El proveedor aceptó la prueba** significa que el proveedor push
   aceptó el envío, no que el sistema operativo haya mostrado el aviso.
 - Si la prueba llega pero los mensajes no, revisa la asignación de la
-  conversación y el worker que procesa la cola cada minuto.
+  conversación y el worker que procesa la cola cada 20 segundos.
 - Si se rechaza, revisa las claves VAPID y los registros del servidor.
 - Si el proveedor la acepta pero no aparece, revisa los banners del
   sistema, la suscripción y el navegador utilizado por la PWA.
@@ -117,8 +117,10 @@ silencioso o las restricciones de batería.
 
 El envío push lo hace el servidor, no la pantalla de la aplicación.
 El worker debe estar funcionando incluso con todos los dispositivos
-cerrados. Como procesa la cola cada minuto y por lotes, los avisos no son
-instantáneos y pueden demorarse más si hay mensajes pendientes. Si solo
+cerrados. Como procesa la cola cada 20 segundos y por lotes, los avisos
+no son instantáneos y pueden demorarse más si hay mensajes pendientes
+(más en móvil: el sistema operativo puede retrasar la entrega push a una
+PWA en segundo plano, algo fuera del control de NexoOmni). Si solo
 ves el aviso dentro de la aplicación, comprobar permisos no basta:
 revisa también las claves VAPID, la suscripción del dispositivo y el worker.
 
@@ -147,13 +149,13 @@ puedan activar la función:
    contacto. No publicar la clave privada.
 4. En Docker y Easypanel/standalone, configura `APP_URL` y
    `AI_ANALYSIS_WORKER_SECRET` para que el arranque de la aplicación
-   ejecute el worker existente cada minuto. La imagen Docker debe
+   ejecute el worker existente cada 20 segundos. La imagen Docker debe
    reconstruirse para incorporar el nuevo arranque. No hace falta un
    build arg para VAPID: la clave pública se consulta en el servidor al
    activar las notificaciones. Si cambias las claves, vuelve a activar
    las notificaciones en cada dispositivo. Si utilizas otro comando de
    arranque, programa una llamada autenticada a
-   `/api/internal/ai-analysis-worker` cada minuto; no dupliques el
+   `/api/internal/ai-analysis-worker` cada 20 segundos; no dupliques el
    scheduler si ya utilizas el incluido.
 
 Las suscripciones se guardan por usuario y dispositivo; una suscripción

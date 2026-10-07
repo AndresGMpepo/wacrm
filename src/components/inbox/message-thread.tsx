@@ -513,6 +513,23 @@ export function MessageThread({
         .then(({ error }) => {
           if (error) console.error("Failed to reset unread_count:", error);
         });
+      // Mirror Meta's own Page Inbox: the customer sees "Visto" the moment
+      // an agent actually opens the conversation. Best-effort/cosmetic —
+      // see /api/omnichannel/{meta,zernio}/sender-action, never surfaced
+      // as an error.
+      const metaSenderActionEndpoint =
+        conversation?.channel_type === "facebook" || conversation?.channel_type === "instagram"
+          ? "/api/omnichannel/meta/sender-action"
+          : conversation?.channel_type === "zernio_facebook" || conversation?.channel_type === "zernio_instagram"
+            ? "/api/omnichannel/zernio/sender-action"
+            : null;
+      if (metaSenderActionEndpoint) {
+        void fetch(metaSenderActionEndpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ conversation_id: conversationId, action: "mark_seen" }),
+        }).catch(() => {});
+      }
     };
     markRead();
     document.addEventListener("visibilitychange", markRead);
@@ -521,7 +538,7 @@ export function MessageThread({
       document.removeEventListener("visibilitychange", markRead);
       window.removeEventListener("focus", markRead);
     };
-  }, [conversationId, hasUnread, readEnabled]);
+  }, [conversationId, hasUnread, readEnabled, conversation?.channel_type]);
 
   // Auto-scroll to bottom on new messages. Keyed off the last message's id
   // (not the array reference) so a resync/poll replacing the array with

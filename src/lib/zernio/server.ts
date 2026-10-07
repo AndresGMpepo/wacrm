@@ -450,6 +450,34 @@ export async function sendZernioText(conversationId: string, zernioAccountId: st
   return typeof id === 'string' && id.trim() ? id : null
 }
 
+/**
+ * POST /v1/inbox/conversations/{conversationId}/typing — one-shot, no
+ * separate "stop" call: Meta/Zernio auto-expire it (Facebook ~20s,
+ * Instagram similar, WhatsApp ~25s). Always 200s even when the platform
+ * doesn't support it (`success` reports whether it actually reached the
+ * platform) — purely cosmetic, so callers treat this as fire-and-forget.
+ */
+export async function sendZernioTypingIndicator(conversationId: string, zernioAccountId: string) {
+  await zernioFetch(`/inbox/conversations/${encodeURIComponent(conversationId)}/typing`, {
+    method: 'POST',
+    body: JSON.stringify({ accountId: zernioAccountId }),
+  })
+}
+
+/**
+ * POST /v1/inbox/conversations/{conversationId}/read — marks every unread
+ * inbound message read and, on WhatsApp/iMessage, sends the read receipt
+ * to the contact. The human-driven counterpart to listing messages
+ * (which is side-effect-free); call it only when an agent actually opens
+ * the conversation.
+ */
+export async function markZernioConversationRead(conversationId: string, zernioAccountId: string) {
+  await zernioFetch(`/inbox/conversations/${encodeURIComponent(conversationId)}/read`, {
+    method: 'POST',
+    body: JSON.stringify({ accountId: zernioAccountId }),
+  })
+}
+
 export async function uploadZernioMedia(file: Blob, contentType?: string) {
   const form = new FormData()
   form.append('file', file, (file as File).name || 'upload')

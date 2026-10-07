@@ -1,5 +1,7 @@
-// Run from an Easypanel cron job every minute. It only calls the protected
-// internal route; all queue claiming and AI work stays inside the app.
+// Spawned every 20s by scripts/start-standalone.mjs's in-process timer (the
+// canonical entry point — see Dockerfile/package.json's `start` script).
+// Only calls the protected internal route; all queue claiming and AI work
+// stays inside the app.
 const baseUrl = process.env.APP_URL?.replace(/\/$/, '')
 const secret = process.env.AI_ANALYSIS_WORKER_SECRET
 

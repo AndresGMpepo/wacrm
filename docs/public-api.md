@@ -151,7 +151,7 @@ HTTP tool. See the [setup manual](./manuals/telefonia/contexto-y-transferencias-
 
 Deployment prerequisite: apply
 [migration 139](../supabase/migrations/139_yeastar_voice_context.sql)
-before deploying this endpoint. Run the existing minute-level
+before deploying this endpoint. Run the existing 20-second-cadence
 `scripts/run-ai-analysis-worker.mjs` cron with `APP_URL` and
 `AI_ANALYSIS_WORKER_SECRET` to process call transcripts and Nexo Memory;
 the former transcription-retry endpoint remains a protected compatibility

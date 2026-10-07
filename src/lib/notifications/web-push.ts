@@ -184,7 +184,7 @@ export async function processWebPushOutbox(db: SupabaseClient) {
     .eq('status', 'queued')
     .lte('next_attempt_at', now.toISOString())
     .order('created_at')
-    .limit(5);
+    .limit(25);
   if (loadError) {
     console.error('[web-push] Could not load outbox items:', loadError);
     return { sent: 0, skipped: 0, failed: 1 };

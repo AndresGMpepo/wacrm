@@ -58,6 +58,30 @@ function record(value: unknown): Json {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Json) : {}
 }
 
+/**
+ * Click-to-Messenger ad referral. Zernio forwards Meta's referral object
+ * verbatim on `message.received.metadata.referral` (the common case — a
+ * referral riding an actual inbound message) per
+ * https://docs.zernio.com/webhooks/inbox#referralreceived: same
+ * `ref`/`source`/`ad_id`/`ads_context_data` shape as the native Meta
+ * webhook. Only Click-to-Messenger ad clicks (`source: 'ADS'`) carry an ad
+ * to show; an ig.me/m.me link referral has nothing to display here.
+ */
+function extractZernioAdReferral(metadata: Json) {
+  const referral = record(metadata.referral)
+  if (text(referral.source) !== 'ADS') return null
+  const context = record(referral.ads_context_data ?? referral.adsContextData)
+  return {
+    ad_id: text(referral.ad_id, referral.adId) || undefined,
+    ref: text(referral.ref) || undefined,
+    ad_title: text(context.ad_title, context.adTitle) || undefined,
+    photo_url: safeHttpsUrl(context.photo_url ?? context.photoUrl),
+    video_url: safeHttpsUrl(context.video_url ?? context.videoUrl),
+    post_id: text(context.post_id, context.postId) || undefined,
+    product_id: text(context.product_id, context.productId) || undefined,
+  }
+}
+
 function channelFrom(value: unknown): ZernioChannel | null {
   const normalized = text(value).toLowerCase()
   if (normalized.includes('instagram')) return 'instagram'
@@ -396,6 +420,38 @@ async function handleOutboundStatusEvent(
   if (updateError) console.error('[zernio] could not update broadcast recipient status:', updateError.message)
 }
 
+/**
+ * message.edited — the customer edited a message they already sent
+ * (Instagram, Facebook Messenger, Telegram, WhatsApp per
+ * docs.zernio.com/webhooks/inbox#messageedited). `message.text` is
+ * already the latest version; no edit history is kept here, matching
+ * the native Meta path (migration 143's `edited_at`).
+ */
+async function handleMessageEditedEvent(db: ReturnType<typeof admin>, message: Json, editedAt: unknown) {
+  const candidateIds = [message.id, message.platformMessageId, message.platform_message_id, message._id]
+    .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+  const newText = typeof message.text === 'string' ? message.text : null
+  if (candidateIds.length === 0 || newText === null) return
+  const editedAtIso = typeof editedAt === 'string' && editedAt.trim() ? editedAt : new Date().toISOString()
+
+  const { data: matchedMessage, error: fetchError } = await db
+    .from('messages')
+    .select('id')
+    .eq('sender_type', 'customer')
+    .in('platform_message_id', candidateIds)
+    .limit(1)
+    .maybeSingle()
+  if (fetchError) {
+    console.error('[zernio] could not look up message for edit:', fetchError.message)
+    return
+  }
+  if (!matchedMessage) return
+  const { error: updateError } = await db.from('messages')
+    .update({ content_text: newText, edited_at: editedAtIso })
+    .eq('id', matchedMessage.id)
+  if (updateError) console.error('[zernio] could not update edited message:', updateError.message)
+}
+
 
 export async function POST(request: Request) {
   const raw = await request.text()
@@ -430,6 +486,10 @@ async function processZernioWebhook(payload: Json, eventIdHeader: string | null)
       }
       if (eventType === 'message.delivered' || eventType === 'message.read' || eventType === 'message.failed') {
         await handleOutboundStatusEvent(db, eventType, record(event.message), record(event.error))
+        continue
+      }
+      if (eventType === 'message.edited') {
+        await handleMessageEditedEvent(db, record(event.message), event.editedAt)
         continue
       }
       if (eventType !== 'message.received' && eventType !== 'comment.received' && eventType !== 'reaction.received' && eventType !== 'message.sent') continue
@@ -712,6 +772,7 @@ async function processZernioWebhook(payload: Json, eventIdHeader: string | null)
         // meaningful on WhatsApp, where the participant id IS the phone
         // (see contactPhone above). Migration 131.
         sender_phone: channel === 'whatsapp' ? (contactPhone || null) : null,
+        ad_referral: extractZernioAdReferral(replyMetadata),
       })
       if (messageError && !isUniqueViolation(messageError)) throw messageError
 

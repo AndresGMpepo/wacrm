@@ -20,6 +20,7 @@ import {
   Sparkles,
   Download,
   Maximize2,
+  ExternalLink,
 } from "lucide-react";
 import { format } from "date-fns";
 import { ReplyQuote } from "./reply-quote";
@@ -452,6 +453,33 @@ export function MessageBubble({
             >
               <Sparkles className="h-2.5 w-2.5" />
               {t("aiBadge")}
+            </span>
+          )}
+          {/* Synced from Meta's own Page Inbox (message_echoes) — the
+              agent replied from Meta directly, not from here. */}
+          {message.sent_via_meta_inbox && (
+            <span
+              className={cn(
+                "inline-flex items-center gap-0.5 rounded-full px-1.5 py-px text-[9px] font-semibold uppercase leading-none tracking-wide",
+                isAgent
+                  ? "bg-primary-foreground/20 text-primary-foreground"
+                  : "bg-foreground/10 text-foreground",
+              )}
+              title={t("metaInboxBadgeTitle")}
+            >
+              <ExternalLink className="h-2.5 w-2.5" />
+              {t("metaInboxBadge")}
+            </span>
+          )}
+          {/* message_edits — the customer re-edited this after sending it. */}
+          {message.edited_at && (
+            <span
+              className={cn(
+                "text-[10px] italic",
+                isAgent ? "text-primary-foreground/70" : "text-muted-foreground",
+              )}
+            >
+              {t("editedTag")}
             </span>
           )}
           <span

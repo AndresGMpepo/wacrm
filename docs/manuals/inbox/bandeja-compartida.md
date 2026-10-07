@@ -51,6 +51,44 @@ conexión de Facebook después de esta actualización (Configuración →
 Redes sociales → **Validar conexión**), para que Meta empiece a
 enviar ese dato.
 
+## Confirmación de leído en Facebook/Instagram
+
+Los mensajes que envías por Facebook Messenger e Instagram ahora
+muestran las mismas marcas que WhatsApp: una palomita (✓) cuando se
+envió, dos palomitas grises (✓✓) cuando el cliente lo recibió, y dos
+palomitas azules (✓✓) cuando el cliente ya lo leyó. Esto también
+requiere haber validado la conexión después de esta actualización
+(Configuración → Redes sociales → **Validar conexión**).
+
+## "Escribiendo…" y "Visto" hacia el cliente (Facebook/Instagram)
+
+Igual que en la app de Meta, el cliente ve el indicador de
+"escribiendo…" mientras redactas tu respuesta, y "Visto" en cuanto
+abres la conversación. Es puramente informativo para el cliente — no
+necesitas hacer nada, ocurre solo.
+
+## Respuestas enviadas desde Meta directamente
+
+Si un agente responde un mensaje de Facebook/Instagram desde la
+aplicación o bandeja de Meta en vez de desde NexoOmni (por ejemplo,
+mientras resuelve un problema de conexión), ese mensaje ahora también
+aparece aquí, con una etiqueta **"Meta"** junto a la hora, para que el
+equipo sepa que no se envió desde la plataforma. Así las dos vistas de
+la conversación no quedan desincronizadas.
+
+## Mensajes editados por el cliente (Facebook Messenger)
+
+Si el cliente edita un mensaje que ya te envió, el texto se actualiza
+en el hilo y se marca con **(editado)**. Solo Messenger permite esto
+(no Instagram), y el cliente puede editar un mensaje hasta 5 veces.
+
+Todo lo anterior funciona igual si tu Facebook/Instagram está conectado
+directo o a través de un proveedor conectado como Zernio. La única
+diferencia: si usas un proveedor conectado, pide a quien administra esa
+cuenta que su webhook tenga suscrito el evento de "mensaje editado"
+(además del de "mensaje recibido", que ya suele estar activo) para que
+la marca (editado) funcione.
+
 ## Preguntas frecuentes
 
 **¿Por qué un chat no sube al tope aunque el cliente respondió?**
@@ -71,6 +109,13 @@ bloquea ahí. En Facebook/Instagram, un agente humano sí puede
 responder más tarde (igual que desde la app de Meta); si el mensaje
 de verdad queda fuera de la ventana permitida, Meta lo rechaza y verás
 un aviso claro al intentar enviarlo.
+
+**¿La confirmación de leído funciona igual en Instagram que en
+Facebook?**
+En Facebook Messenger verás los tres estados (enviado, entregado,
+leído). En Instagram, Meta no siempre distingue "entregado" de
+"leído" — es posible que el mensaje salte directo a leído sin pasar
+por el estado intermedio.
 
 ## Ver también
 

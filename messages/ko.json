@@ -354,7 +354,10 @@
       "interactiveReply": "[인터랙티브 응답]",
       "unsupported": "[지원되지 않는 메시지 형식]",
       "aiBadge": "AI",
-      "aiBadgeTitle": "AI 어시스턴트가 자동으로 전송함"
+      "aiBadgeTitle": "AI 어시스턴트가 자동으로 전송함",
+      "metaInboxBadge": "Meta",
+      "metaInboxBadgeTitle": "NexoOmni가 아닌 Meta의 받은 편지함에서 전송됨",
+      "editedTag": "(수정됨)"
     },
     "actions": {
       "reply": "답장",

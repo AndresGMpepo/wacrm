@@ -88,9 +88,19 @@ const runRetentionCron = () => {
 
 if (canRunAnalysisWorker) {
   // Give Next enough time to accept the first local/public request, then
-  // continue at the policy's one-minute cadence.
+  // continue at a fast, fixed cadence. processWebPushOutbox() (web push
+  // notification delivery) runs as the very first step inside this
+  // worker — but it used to share a single 60s tick with much heavier,
+  // slower work (AI media analysis, call transcriptions, reminders), and
+  // workerRunning prevents any overlap, so a single slow run silently
+  // pushed the *next* tick's push-notification check out by however long
+  // that run took, compounding into multi-minute delivery delays under
+  // load. Shortening the tick to 20s doesn't risk overlap (still gated by
+  // workerRunning) and means that as soon as a slow run finishes, the next
+  // check is at most ~20s away instead of up to 60s — most ticks are an
+  // instant no-op query anyway when nothing is pending.
   initialWorkerTimer = setTimeout(runAnalysisWorker, 15_000);
-  workerTimer = setInterval(runAnalysisWorker, 60_000);
+  workerTimer = setInterval(runAnalysisWorker, 20_000);
 } else {
   console.info('[ai analysis worker] disabled: APP_URL or AI_ANALYSIS_WORKER_SECRET is missing.');
 }

@@ -235,6 +235,48 @@ export function MessageComposer({
   // dropdown — there's no partial-send state for a closed thread.
   const inputsDisabled = readOnly || sessionExpired || conversationClosed;
 
+  // typing_on / typing_off sender actions — cosmetic parity with Meta's own
+  // Page Inbox (the customer sees "escribiendo…" the same way they would
+  // there). Only Facebook/Instagram support this (native or Zernio-routed);
+  // WhatsApp has no such indicator in the Cloud API. Best-effort: see
+  // /api/omnichannel/{meta,zernio}/sender-action.
+  const isZernioMetaChannel = channelType === "zernio_facebook" || channelType === "zernio_instagram";
+  const supportsMetaTyping = channelType === "facebook" || channelType === "instagram" || isZernioMetaChannel;
+  const senderActionEndpoint = isZernioMetaChannel
+    ? "/api/omnichannel/zernio/sender-action"
+    : "/api/omnichannel/meta/sender-action";
+  const typingActiveRef = useRef(false);
+  const typingOffTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sendSenderAction = useCallback(
+    (action: "typing_on" | "typing_off" | "mark_seen") => {
+      void fetch(senderActionEndpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversation_id: conversationId, action }),
+      }).catch(() => {});
+    },
+    [conversationId, senderActionEndpoint]
+  );
+  // Meta auto-expires typing_on after ~20s anyway, but stopping it the
+  // moment the agent pauses (instead of waiting that long) reads as more
+  // natural — same spirit as Meta's own best-practice guidance.
+  const TYPING_IDLE_MS = 3_000;
+  const stopTyping = useCallback(() => {
+    if (typingOffTimerRef.current !== null) {
+      clearTimeout(typingOffTimerRef.current);
+      typingOffTimerRef.current = null;
+    }
+    if (typingActiveRef.current) {
+      typingActiveRef.current = false;
+      sendSenderAction("typing_off");
+    }
+  }, [sendSenderAction]);
+  useEffect(() => {
+    // Switching threads mid-type must not leave "typing…" showing forever
+    // on the one the agent just left.
+    return () => stopTyping();
+  }, [conversationId, stopTyping]);
+
   const clearTimer = useCallback(() => {
     if (timerRef.current !== null) {
       clearInterval(timerRef.current);
@@ -269,6 +311,7 @@ export function MessageComposer({
 
     setSending(true);
     try {
+      stopTyping();
       onSend(trimmed, replyTo?.id);
       setText("");
       if (textareaRef.current) {
@@ -277,7 +320,7 @@ export function MessageComposer({
     } finally {
       setSending(false);
     }
-  }, [text, sending, sessionExpired, conversationClosed, onSend, replyTo?.id]);
+  }, [text, sending, sessionExpired, conversationClosed, onSend, replyTo?.id, stopTyping]);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -293,8 +336,20 @@ export function MessageComposer({
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       setText(e.target.value);
       adjustHeight();
+      if (!supportsMetaTyping) return;
+      const hasText = e.target.value.trim().length > 0;
+      if (typingOffTimerRef.current !== null) clearTimeout(typingOffTimerRef.current);
+      if (!hasText) {
+        stopTyping();
+        return;
+      }
+      if (!typingActiveRef.current) {
+        typingActiveRef.current = true;
+        sendSenderAction("typing_on");
+      }
+      typingOffTimerRef.current = setTimeout(stopTyping, TYPING_IDLE_MS);
     },
-    [adjustHeight]
+    [adjustHeight, supportsMetaTyping, sendSenderAction, stopTyping]
   );
 
   // Ask the AI assistant for a suggested reply and drop it into the

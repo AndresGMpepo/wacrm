@@ -354,7 +354,10 @@
       "interactiveReply": "[Respuesta interactiva]",
       "unsupported": "[Tipo de mensaje no soportado]",
       "aiBadge": "IA",
-      "aiBadgeTitle": "Enviado automáticamente por el asistente de IA"
+      "aiBadgeTitle": "Enviado automáticamente por el asistente de IA",
+      "metaInboxBadge": "Meta",
+      "metaInboxBadgeTitle": "Enviado desde la bandeja de Meta, no desde NexoOmni",
+      "editedTag": "(editado)"
     },
     "actions": {
       "reply": "Responder",

@@ -354,7 +354,10 @@
       "interactiveReply": "[Interactive reply]",
       "unsupported": "[Unsupported message type]",
       "aiBadge": "AI",
-      "aiBadgeTitle": "Sent automatically by the AI assistant"
+      "aiBadgeTitle": "Sent automatically by the AI assistant",
+      "metaInboxBadge": "Meta",
+      "metaInboxBadgeTitle": "Sent from Meta's inbox, not from NexoOmni",
+      "editedTag": "(edited)"
     },
     "actions": {
       "reply": "Reply",

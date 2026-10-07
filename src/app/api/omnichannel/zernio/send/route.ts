@@ -9,7 +9,7 @@ import {
   META_MESSAGING_WINDOW_CLOSED_MESSAGE,
 } from '@/lib/omnichannel/messaging-window'
 import { checkRateLimit, RATE_LIMITS, rateLimitResponse } from '@/lib/rate-limit'
-import { sendZernioMedia, sendZernioTemplateMessage, sendZernioTemplateToConversation, sendZernioText, zernioAttachmentTypeFrom } from '@/lib/zernio/server'
+import { sendZernioMedia, sendZernioTemplateMessage, sendZernioTemplateToConversation, sendZernioText, zernioAttachmentTypeFrom, ZernioApiError } from '@/lib/zernio/server'
 import { persistZernioOutbound } from '@/lib/zernio/outbound-message'
 import { attachZernioConversation } from '@/lib/zernio/send-template-to-contact'
 import { renderTemplateBody } from '@/lib/whatsapp/broadcast-message-log'
@@ -23,6 +23,25 @@ function admin() {
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY
   if (!url || !key) throw new Error('Falta la configuración del servidor.')
   return createAdminClient(url, key, { auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false } })
+}
+
+/**
+ * zernioFetch() (src/lib/zernio/server.ts) already turns a rejected/timed-out
+ * Zernio call into a descriptive, safe-to-show message (ZernioApiError, or a
+ * plain Error for a network failure) — but letting it bubble to the route's
+ * outer `catch (error) { return toErrorResponse(error) }` discarded all of
+ * that and showed "Internal server error" instead, which is indistinguishable
+ * from an actual bug. Surface it directly, same as the native Meta send route.
+ */
+function zernioSendErrorResponse(error: unknown) {
+  if (error instanceof ZernioApiError) {
+    const status = error.status >= 400 && error.status < 600 ? error.status : 502
+    return NextResponse.json({ error: error.message, code: 'zernio_send_rejected' }, { status })
+  }
+  if (error instanceof Error) {
+    return NextResponse.json({ error: error.message, code: 'zernio_network_error' }, { status: 502 })
+  }
+  throw error
 }
 
 export async function POST(request: Request) {
@@ -116,26 +135,30 @@ export async function POST(request: Request) {
       let targetConversationId: string
       let externalId: string | null
 
-      if (existingConv?.external_session_id) {
-        targetConversationId = existingConv.id
-        externalId = await sendZernioTemplateToConversation({
-          conversationId: existingConv.external_session_id,
-          zernioAccountId: connector.zernio_account_id,
-          templateName, templateLanguage,
-          bodyParams: templateBodyParams, headerText: templateHeaderText,
-        })
-      } else {
-        const templateParams = templateHeaderText ? [templateHeaderText, ...templateBodyParams] : templateBodyParams
-        const result = await sendZernioTemplateMessage({
-          zernioAccountId: connector.zernio_account_id,
-          phone: sanitizedPhone,
-          templateName, templateLanguage, templateParams,
-        })
-        externalId = result.messageId
-        targetConversationId = await attachZernioConversation(
-          db, { accountId, contactId, ownerUserId: userId }, connectorIdInput,
-          existingConv?.id, result.conversationId,
-        )
+      try {
+        if (existingConv?.external_session_id) {
+          targetConversationId = existingConv.id
+          externalId = await sendZernioTemplateToConversation({
+            conversationId: existingConv.external_session_id,
+            zernioAccountId: connector.zernio_account_id,
+            templateName, templateLanguage,
+            bodyParams: templateBodyParams, headerText: templateHeaderText,
+          })
+        } else {
+          const templateParams = templateHeaderText ? [templateHeaderText, ...templateBodyParams] : templateBodyParams
+          const result = await sendZernioTemplateMessage({
+            zernioAccountId: connector.zernio_account_id,
+            phone: sanitizedPhone,
+            templateName, templateLanguage, templateParams,
+          })
+          externalId = result.messageId
+          targetConversationId = await attachZernioConversation(
+            db, { accountId, contactId, ownerUserId: userId }, connectorIdInput,
+            existingConv?.id, result.conversationId,
+          )
+        }
+      } catch (sendError) {
+        return zernioSendErrorResponse(sendError)
       }
 
       const now = new Date().toISOString()
@@ -164,7 +187,17 @@ export async function POST(request: Request) {
     if (!conversation?.connector_id || !conversation.external_session_id) {
       return NextResponse.json({ error: 'Esta conversación no tiene un destinatario conectado disponible.' }, { status: 409 })
     }
-    if (isMetaDirectMessageChannel(conversation.channel_type, Boolean(conversation.social_comment_id)) && !isTemplateSend) {
+    // No proactive 24h-window check for Facebook/Instagram — only WhatsApp
+    // really enforces this with no bypass for a human agent (see
+    // /api/omnichannel/meta/send for the full reasoning: Meta's own Page
+    // Inbox isn't bound by the public Send API's window, and Zernio's own
+    // docs confirm it supports the HUMAN_AGENT message tag to reply past
+    // 24h on both channels — https://docs.zernio.com/messages/send-inbox-message).
+    // Our local "last customer message" timestamp also isn't authoritative
+    // for Messenger (misses reactions, post comments, ad clicks, m.me/
+    // ig.me links as window-reopening events) — let Zernio/Meta's real
+    // response decide; a genuine rejection still surfaces below.
+    if (conversation.channel_type === 'zernio_whatsapp' && isMetaDirectMessageChannel(conversation.channel_type, Boolean(conversation.social_comment_id)) && !isTemplateSend) {
       const { data: lastCustomerMessage, error: lastCustomerMessageError } = await db.from('messages')
         .select('created_at').eq('conversation_id', conversation.id).eq('sender_type', 'customer')
         .order('created_at', { ascending: false }).limit(1).maybeSingle()
@@ -196,25 +229,30 @@ export async function POST(request: Request) {
       }
     }
 
-    const externalId = isTemplateSend
-      ? await sendZernioTemplateToConversation({
-          conversationId: conversation.external_session_id,
-          zernioAccountId: connector.zernio_account_id,
-          templateName,
-          templateLanguage,
-          bodyParams: templateBodyParams,
-          headerText: templateHeaderText,
-        })
-      : isMediaSend
-        ? await sendZernioMedia(
-            conversation.external_session_id,
-            connector.zernio_account_id,
-            text || undefined,
-            mediaUrl,
-            zernioAttachmentTypeFrom(messageType),
-            filename,
-          )
-        : await sendZernioText(conversation.external_session_id, connector.zernio_account_id, text)
+    let externalId: string | null
+    try {
+      externalId = isTemplateSend
+        ? await sendZernioTemplateToConversation({
+            conversationId: conversation.external_session_id,
+            zernioAccountId: connector.zernio_account_id,
+            templateName,
+            templateLanguage,
+            bodyParams: templateBodyParams,
+            headerText: templateHeaderText,
+          })
+        : isMediaSend
+          ? await sendZernioMedia(
+              conversation.external_session_id,
+              connector.zernio_account_id,
+              text || undefined,
+              mediaUrl,
+              zernioAttachmentTypeFrom(messageType),
+              filename,
+            )
+          : await sendZernioText(conversation.external_session_id, connector.zernio_account_id, text)
+    } catch (sendError) {
+      return zernioSendErrorResponse(sendError)
+    }
     const now = new Date().toISOString()
     const contentType = isTemplateSend ? 'template' : isMediaSend ? messageType === 'image' ? 'image' : messageType === 'video' ? 'video' : messageType === 'audio' ? 'audio' : 'document' : 'text'
     const message = await persistZernioOutbound(db, {

@@ -43,10 +43,31 @@ type MetaMessaging = {
     mid?: string
     text?: string
     is_echo?: boolean
+    /**
+     * Graph API app that sent this message. Meta documents a fixed value
+     * (see META_PAGE_INBOX_APP_ID below) for messages sent via its own
+     * Facebook Page Inbox — only meaningful on an echo (is_echo: true).
+     */
+    app_id?: number | string
     attachments?: Array<{ type?: string; payload?: Record<string, unknown> }>
     referral?: MetaMessageReferral
   }
   reaction?: { message_id?: string; emoji?: string }
+  /** message_reads (Messenger). Messenger's `read` receipt. */
+  read?: { watermark?: number }
+  /**
+   * Instagram's read-receipt equivalent (`messaging_seen` field). Meta's own
+   * docs for this field link straight to the message_reads page without
+   * showing an Instagram-specific payload, and third-party reports disagree
+   * on whether it arrives as `seen.watermark` or reuses `read.watermark` —
+   * so both are read defensively in ingestReceipt() below; whichever Meta
+   * actually sends just works, and if neither is present nothing happens.
+   */
+  seen?: { watermark?: number }
+  /** message_deliveries (Messenger only, per Meta's docs). */
+  delivery?: { mids?: string[]; watermark?: number }
+  /** message_edits (Messenger only) — the customer edited a message they already sent. */
+  message_edit?: { mid?: string; text?: string; num_edit?: number }
 }
 type MetaCommentValue = {
   comment_id?: string; id?: string; parent_id?: string; post_id?: string; media_id?: string
@@ -191,8 +212,21 @@ async function resolveMetaCommentDetails(connector: Connector, commentId: string
   }
 }
 
-function eventType(provider: Connector['provider'], kind: 'message' | 'comment' = 'message') {
+/**
+ * Graph API app that every message sent via Meta's own Facebook Page
+ * Inbox / Business Suite is tagged with, since Graph v12.0 — documented
+ * on the message_echoes webhook event. Used to flag a message synced from
+ * an echo as "Enviado desde Meta" instead of just silently absorbing it.
+ */
+const META_PAGE_INBOX_APP_ID = '26390203743090'
+
+type MetaEventKind = 'message' | 'comment' | 'echo' | 'edit'
+
+function eventType(provider: Connector['provider'], kind: MetaEventKind = 'message') {
   if (kind === 'comment') return provider === 'facebook' ? 40011 : 40012
+  if (kind === 'echo') return provider === 'facebook' ? 40021 : 40022
+  // message_edits is Messenger-only per Meta's docs — no Instagram variant.
+  if (kind === 'edit') return 40031
   return provider === 'facebook' ? 40001 : 40002
 }
 function time(value: unknown) {
@@ -204,7 +238,7 @@ function time(value: unknown) {
   return Number.isNaN(date.getTime()) ? new Date().toISOString() : date.toISOString()
 }
 
-async function claimReceipt(db: ReturnType<typeof admin>, connector: Connector, externalMessageId: string, kind: 'message' | 'comment' = 'message') {
+async function claimReceipt(db: ReturnType<typeof admin>, connector: Connector, externalMessageId: string, kind: MetaEventKind = 'message') {
   const type = eventType(connector.provider, kind)
   const { error } = await db.from('omnichannel_webhook_receipts').insert({
     account_id: connector.account_id, connector_id: connector.id, event_type: type, external_message_id: externalMessageId, outcome: 'processing',
@@ -273,6 +307,126 @@ async function resolveContact(db: ReturnType<typeof admin>, connector: Connector
   }
   if (!contactId) throw new Error('No se pudo resolver el contacto de Meta.')
   return { contactId, created: contactCreated }
+}
+
+/**
+ * message_reads / messaging_seen / message_deliveries all report a
+ * "watermark": every message *we* sent (sender_type='agent') with
+ * created_at <= watermark was read/delivered — this is the authoritative
+ * field per Meta's docs (an optional `mids` array on message_deliveries is
+ * "sometimes present... due to backward compatibility", watermark always
+ * is), so it's the only one used here. Drives the same sent/delivered/read
+ * checkmarks already rendered for WhatsApp (MessageBubble's StatusIcon) —
+ * no UI change needed, it just starts receiving real updates.
+ */
+async function ingestReceipt(db: ReturnType<typeof admin>, connector: Connector, event: MetaMessaging) {
+  const senderId = event.sender?.id?.trim()
+  const watermark = event.read?.watermark ?? event.seen?.watermark ?? event.delivery?.watermark
+  if (!senderId || !watermark) return { ignored: true }
+  const { data: conversation, error: findError } = await db.from('conversations').select('id')
+    .eq('account_id', connector.account_id).eq('connector_id', connector.id).eq('external_session_id', senderId).maybeSingle()
+  if (findError) throw findError
+  if (!conversation) return { ignored: true }
+
+  const nextStatus = (event.read ?? event.seen) ? 'read' : 'delivered'
+  const eligibleStatuses = nextStatus === 'read' ? ['sent', 'delivered'] : ['sent']
+  const { error } = await db.from('messages')
+    .update({ status: nextStatus })
+    .eq('conversation_id', conversation.id)
+    .eq('sender_type', 'agent')
+    .in('status', eligibleStatuses)
+    .lte('created_at', new Date(watermark).toISOString())
+  if (error) throw error
+  return { conversationId: conversation.id as string }
+}
+
+/**
+ * message_echoes (Messenger — needs its own field subscription; Instagram
+ * folds echoes into the regular `messages` subscription already in use,
+ * so this also runs for Instagram without any extra setup). Lets a reply
+ * sent from Meta's own Page Inbox/Business Suite — not NexoOmni — still
+ * show up here, so the two views of a conversation don't silently drift
+ * apart (this is exactly what happens when an agent answers from Meta
+ * directly because a send from here failed). sender/recipient are
+ * flipped vs. a normal inbound message: sender = the Page, recipient =
+ * the customer's PSID.
+ */
+async function ingestEcho(db: ReturnType<typeof admin>, connector: Connector, event: MetaMessaging) {
+  const mid = event.message?.mid?.trim()
+  const customerPsid = event.recipient?.id?.trim()
+  if (!mid || !customerPsid) return { ignored: true }
+  if (!await claimReceipt(db, connector, mid, 'echo')) return { duplicate: true }
+
+  // Never duplicate a message we already recorded when WE sent it via
+  // /api/omnichannel/meta/send — that route inserts this exact message_id
+  // the moment Graph confirms the send, well before this echo arrives.
+  const ownMessageId = `meta:out:${connector.id}:${mid}`
+  const { data: ownMessage, error: ownMessageError } = await db.from('messages').select('id').eq('message_id', ownMessageId).maybeSingle()
+  if (ownMessageError) throw ownMessageError
+  if (ownMessage) return { ignored: true }
+
+  const { data: rows, error: findError } = await db.from('conversations').select('id')
+    .eq('account_id', connector.account_id).eq('connector_id', connector.id).eq('external_session_id', customerPsid).limit(1)
+  if (findError) throw findError
+  const conversation = rows?.[0]
+  // No existing thread to attach an external reply to (e.g. the very first
+  // message in this conversation was sent from outside NexoOmni) — rare
+  // enough to safely skip rather than guess at creating one blind.
+  if (!conversation) return { ignored: true }
+
+  const attachment = extractMetaAttachment(event.message ?? {})
+  const contentText = normalizeMetaText(event.message?.text, attachment?.caption)
+  const contentType = attachment && attachment.kind !== 'text' ? attachment.kind : 'text'
+  const mediaUrl = attachment?.url ?? null
+  const createdAt = time(event.timestamp)
+  const sentViaMetaInbox = String(event.message?.app_id ?? '') === META_PAGE_INBOX_APP_ID
+
+  const { error: insertError } = await db.from('messages').insert({
+    conversation_id: conversation.id, sender_type: 'agent', content_type: contentType,
+    content_text: contentText, media_url: mediaUrl, message_id: `meta:echo:${connector.id}:${mid}`,
+    status: 'sent', created_at: createdAt, sent_via_meta_inbox: sentViaMetaInbox,
+  })
+  if (insertError) throw insertError
+
+  const now = new Date().toISOString()
+  const { error: updateError } = await db.from('conversations')
+    .update({ last_message_text: contentText, last_message_at: createdAt, updated_at: now })
+    .eq('id', conversation.id)
+  if (updateError) throw updateError
+
+  await db.from('omnichannel_webhook_receipts').update({ outcome: 'processed', detail: 'Mensaje enviado fuera de NexoOmni sincronizado.', processed_at: now })
+    .eq('connector_id', connector.id).eq('event_type', eventType(connector.provider, 'echo')).eq('external_message_id', mid)
+
+  return { conversationId: conversation.id as string }
+}
+
+/**
+ * message_edits (Messenger only). The customer can re-edit a message they
+ * already sent (up to 5 times, enforced client-side by Meta) — update our
+ * copy in place so the thread shows what they meant, with an "(editado)"
+ * tag (Message.edited_at) instead of silently going stale. No edit
+ * history is kept, matching what Messenger itself shows.
+ */
+async function ingestMessageEdit(db: ReturnType<typeof admin>, connector: Connector, event: MetaMessaging) {
+  const mid = event.message_edit?.mid?.trim()
+  const newText = event.message_edit?.text
+  if (!mid || typeof newText !== 'string') return { ignored: true }
+  if (!await claimReceipt(db, connector, mid, 'edit')) return { duplicate: true }
+
+  const editedAt = time(event.timestamp)
+  const { data, error } = await db.from('messages')
+    .update({ content_text: newText, edited_at: editedAt })
+    .eq('message_id', `meta:${connector.id}:${mid}`)
+    .eq('sender_type', 'customer')
+    .select('conversation_id')
+    .maybeSingle()
+  if (error) throw error
+  if (!data) return { ignored: true }
+
+  await db.from('omnichannel_webhook_receipts').update({ outcome: 'processed', detail: 'Edición de mensaje sincronizada.', processed_at: new Date().toISOString() })
+    .eq('connector_id', connector.id).eq('event_type', eventType(connector.provider, 'edit')).eq('external_message_id', mid)
+
+  return { conversationId: data.conversation_id as string }
 }
 
 async function persistMetaReaction(
@@ -569,14 +723,24 @@ export async function POST(request: Request) {
       const connector = entry.id ? byChannel.get(entry.id) : undefined
       if (!connector || connector.status === 'paused') continue
       for (const event of entry.messaging ?? []) {
+        const kind: MetaEventKind | 'receipt' =
+          (event.read || event.seen || event.delivery) ? 'receipt'
+            : event.message_edit ? 'edit'
+            : event.message?.is_echo ? 'echo'
+            : 'message'
         try {
-          const result = await ingestMessage(db, connector, entry, event)
+          const result = kind === 'receipt' ? await ingestReceipt(db, connector, event)
+            : kind === 'edit' ? await ingestMessageEdit(db, connector, event)
+            : kind === 'echo' ? await ingestEcho(db, connector, event)
+            : await ingestMessage(db, connector, entry, event)
           if ('conversationId' in result) processed += 1
         } catch (error) {
           console.error('[meta] could not ingest message:', error)
-          const id = event.message?.mid
-          if (id) await db.from('omnichannel_webhook_receipts').update({ outcome: 'failed', detail: 'No se pudo procesar el mensaje de Meta.', processed_at: new Date().toISOString() })
-            .eq('connector_id', connector.id).eq('event_type', eventType(connector.provider)).eq('external_message_id', id)
+          const id = event.message?.mid ?? event.message_edit?.mid
+          if (id && kind !== 'receipt') {
+            await db.from('omnichannel_webhook_receipts').update({ outcome: 'failed', detail: 'No se pudo procesar el mensaje de Meta.', processed_at: new Date().toISOString() })
+              .eq('connector_id', connector.id).eq('event_type', eventType(connector.provider, kind)).eq('external_message_id', id)
+          }
         }
       }
       for (const change of entry.changes ?? []) {

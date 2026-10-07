@@ -113,7 +113,7 @@ owner (5) > admin (4) > supervisor (3) > agent (2) > viewer (1)
   seguro')` explícitamente.
 - **Tareas periódicas (cron)**: todas viven en un único worker HTTP
   interno (`/api/internal/ai-analysis-worker`), protegido por un secreto
-  compartido (`AI_ANALYSIS_WORKER_SECRET`), invocado cada minuto por
+  compartido (`AI_ANALYSIS_WORKER_SECRET`), invocado cada 20 segundos por
   `scripts/run-ai-analysis-worker.mjs`. Un cron nuevo se agrega como una
   función más dentro de ese mismo worker (ver `sendTaskReminders()`,
   `markOverdueCommitments()`, `processCallFollowUps()` como ejemplos) —
