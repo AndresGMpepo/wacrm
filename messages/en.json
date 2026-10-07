@@ -414,6 +414,14 @@
       "resumed": "AI resumed.",
       "updateError": "Couldn’t update the AI assistant.",
       "networkError": "Couldn’t reach the server."
+    },
+    "adReferralBanner": {
+      "title": "This is a reply to an ad",
+      "viewDetails": "View details",
+      "hideDetails": "Hide details",
+      "dismiss": "Dismiss",
+      "noTitle": "No ad title available",
+      "adId": "Ad ID: {id}"
     }
   },
   "Contacts": {

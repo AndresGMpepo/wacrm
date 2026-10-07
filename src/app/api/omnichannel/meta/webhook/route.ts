@@ -15,6 +15,26 @@ import type { ChannelType } from '@/types'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 20
 
+/**
+ * Click-to-Messenger (CTM) ad referral, attached by Meta directly to the
+ * `message` object of the inbound event that opened the thread from the ad —
+ * requires the Page to be subscribed to both `messages` and
+ * `messaging_referrals` (see connectors/[connectorId]/validate/route.ts).
+ * https://developers.facebook.com/documentation/business-messaging/messenger-platform/webhooks/webhook-events/messages
+ */
+type MetaMessageReferral = {
+  ref?: string
+  ad_id?: string
+  source?: string
+  type?: string
+  ads_context_data?: {
+    ad_title?: string
+    photo_url?: string
+    video_url?: string
+    post_id?: string
+    product_id?: string
+  }
+}
 type MetaMessaging = {
   sender?: { id?: string }
   recipient?: { id?: string }
@@ -24,6 +44,7 @@ type MetaMessaging = {
     text?: string
     is_echo?: boolean
     attachments?: Array<{ type?: string; payload?: Record<string, unknown> }>
+    referral?: MetaMessageReferral
   }
   reaction?: { message_id?: string; emoji?: string }
 }
@@ -69,6 +90,25 @@ function safeHttpsUrl(value: unknown) {
     return url.protocol === 'https:' ? url.toString() : undefined
   } catch {
     return undefined
+  }
+}
+
+/**
+ * Only Click-to-Messenger ads carry `source: 'ADS'` — m.me/ig.me link
+ * referrals (`source: 'SHORTLINK'`) have no ad to show, so they're ignored
+ * here (the inbox has no "reply to an ad" context to display for those).
+ */
+function extractAdReferral(referral: MetaMessageReferral | undefined) {
+  if (!referral || referral.source !== 'ADS') return null
+  const context = referral.ads_context_data
+  return {
+    ad_id: referral.ad_id,
+    ref: referral.ref,
+    ad_title: context?.ad_title,
+    photo_url: safeHttpsUrl(context?.photo_url),
+    video_url: safeHttpsUrl(context?.video_url),
+    post_id: context?.post_id,
+    product_id: context?.product_id,
   }
 }
 
@@ -300,6 +340,7 @@ async function ingestMessage(db: ReturnType<typeof admin>, connector: Connector,
   const contentText = normalizeMetaText(event.message?.text, attachment?.caption)
   const contentType = attachment && attachment.kind !== 'text' ? attachment.kind : 'text'
   const mediaUrl = attachment?.url ?? null
+  const adReferral = extractAdReferral(event.message?.referral)
   const createdAt = time(event.timestamp)
   const { count: priorCustomerMessages } = await db
     .from('messages')
@@ -310,6 +351,7 @@ async function ingestMessage(db: ReturnType<typeof admin>, connector: Connector,
   const { error: messageError } = await db.from('messages').insert({
     conversation_id: conversation.id, sender_type: 'customer', content_type: contentType,
     content_text: contentText, media_url: mediaUrl, message_id: `meta:${connector.id}:${messageId}`, status: 'delivered', created_at: createdAt,
+    ad_referral: adReferral,
   })
   if (messageError) throw messageError
 

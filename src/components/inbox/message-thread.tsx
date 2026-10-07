@@ -43,6 +43,7 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { MessageBubble } from "./message-bubble";
 import { MessageActions } from "./message-actions";
+import { AdReferralBanner } from "./ad-referral-banner";
 import {
   MessageComposer,
   CHAT_MEDIA_BUCKET,
@@ -262,6 +263,22 @@ export function MessageThread({
     (conversation?.channel_type === "whatsapp" || conversation?.channel_type === "zernio_whatsapp") &&
     !conversation?.social_comment_id;
 
+  // WhatsApp Cloud API strictly enforces the 24h window with no bypass for
+  // a human agent (an approved template is the only sanctioned exception —
+  // see canUseWhatsAppTemplates above), so blocking the composer there is
+  // correct. Facebook/Instagram are different: Meta's own Page Inbox lets a
+  // human agent reply well past 24h (the Messenger HUMAN_AGENT message tag
+  // exists for exactly this), and our local "last customer message"
+  // timestamp misses other window-reopening events Meta tracks (reactions,
+  // post comments, ad clicks, m.me/ig.me links). Disabling the textarea
+  // here on a possibly-stale local guess is what made the composer look
+  // broken (no keyboard on mobile) for a conversation Meta itself would
+  // still accept — so only WhatsApp blocks; Facebook/Instagram let the
+  // send attempt reach the real Graph API, which still returns a clear
+  // error if it truly rejects it (see /api/omnichannel/meta/send).
+  const metaWindowBlocksSending =
+    conversation?.channel_type === "whatsapp" || conversation?.channel_type === "zernio_whatsapp";
+
   // Meta's 24-hour customer service window applies to private WhatsApp,
   // Messenger and Instagram messages. Public comments and Yeastar web chat
   // remain outside this policy.
@@ -284,6 +301,14 @@ export function MessageThread({
       }),
     };
   }, [isMetaDirectConversation, messages, messagingWindowNow, tTimer]);
+
+  // The ad referral is only ever set on the specific message that carried
+  // it (see Message.ad_referral) — normally the first customer message in
+  // the conversation, but found generically in case of any edge case.
+  const adReferral = useMemo(
+    () => messages.find((m) => m.ad_referral)?.ad_referral ?? null,
+    [messages],
+  );
 
   // Presence fallback (REQ-03): neither native WhatsApp Cloud API nor
   // Zernio expose a customer online/typing webhook (platform limitation,
@@ -1159,6 +1184,8 @@ export function MessageThread({
         </div>
       </div>
 
+      {adReferral ? <AdReferralBanner referral={adReferral} /> : null}
+
       {onOpenMobileContactPanel ? (
         <button
           type="button"
@@ -1271,7 +1298,7 @@ export function MessageThread({
       <MessageComposer
         conversationId={conversation.id}
         channelType={conversation.channel_type}
-        sessionExpired={isMetaDirectConversation && sessionInfo.expired}
+        sessionExpired={metaWindowBlocksSending && sessionInfo.expired}
         conversationClosed={conversation.status === "closed"}
         onSend={handleSend}
         onSendMedia={handleSendMedia}

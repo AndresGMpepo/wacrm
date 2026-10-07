@@ -4,7 +4,7 @@ description: "Recibe y responde mensajes y comentarios de Facebook e Instagram d
 section: "primeros-pasos"
 role: ["admin", "owner"]
 plan: ["basico", "crecimiento", "premium"]
-updated: "2026-09-28"
+updated: "2026-10-07"
 ---
 
 ## ¿Qué es?
@@ -28,6 +28,19 @@ agentes solo ven y responden desde el Inbox una vez conectado.
 
 Una vez conectado, los mensajes nuevos aparecen en el Inbox marcados
 con el ícono del canal correspondiente, igual que los de WhatsApp.
+
+Si tu página ya estaba conectada antes de esta actualización, vuelve a
+**Configuración → Redes sociales → Validar conexión** una vez — así
+Meta empieza a enviarnos el contexto del anuncio (ver más abajo) para
+las conversaciones nuevas.
+
+## Contexto del anuncio
+
+Cuando un cliente te escribe desde un anuncio de "Enviar mensaje"
+(Click-to-Messenger), el Inbox muestra un aviso con el anuncio de
+origen — igual que en la app de Meta — para que sepas de qué
+producto o promoción pregunta antes de responder. Ver
+[Bandeja de entrada compartida](../inbox/bandeja-compartida.md).
 
 ## Preguntas frecuentes
 

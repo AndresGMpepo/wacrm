@@ -5,11 +5,6 @@ import { createClient as createAdminClient } from '@supabase/supabase-js'
 
 import { requireEntitlement } from '@/lib/account/entitlements'
 import { toErrorResponse } from '@/lib/auth/account'
-import {
-  getMetaCustomerServiceWindow,
-  isMetaDirectMessageChannel,
-  META_MESSAGING_WINDOW_CLOSED_MESSAGE,
-} from '@/lib/omnichannel/messaging-window'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { checkRateLimit, RATE_LIMITS, rateLimitResponse } from '@/lib/rate-limit'
 import { describeMetaSendError, type MetaProvider } from '@/lib/omnichannel/meta-diagnostics'
@@ -53,40 +48,59 @@ export async function POST(request: Request) {
     let accessToken: string
     try { accessToken = decrypt(connector.meta_access_token) } catch { return NextResponse.json({ error: 'No se pudo leer de forma segura el token de este canal Meta.' }, { status: 503 }) }
     const isPublicComment = Boolean(conversation.social_comment_id)
-    if (isMetaDirectMessageChannel(conversation.channel_type, isPublicComment)) {
-      const { data: lastCustomerMessage, error: lastCustomerMessageError } = await db.from('messages')
-        .select('created_at').eq('conversation_id', conversation.id).eq('sender_type', 'customer')
-        .order('created_at', { ascending: false }).limit(1).maybeSingle()
-      if (lastCustomerMessageError) throw lastCustomerMessageError
-      if (!getMetaCustomerServiceWindow(lastCustomerMessage?.created_at).isOpen) {
-        return NextResponse.json(
-          { error: META_MESSAGING_WINDOW_CLOSED_MESSAGE, code: 'meta_messaging_window_closed' },
-          { status: 409 },
-        )
-      }
-    }
+    // No proactive 24h-window check here on purpose: this route is always a
+    // human agent replying from the inbox (never an automation — those go
+    // through lib/omnichannel/outbound-text.ts, which still blocks). Meta's
+    // own Page Inbox lets a human agent reply well past 24h (Messenger's
+    // HUMAN_AGENT message tag exists for exactly this, up to 7 days — see
+    // https://developers.facebook.com/documentation/business-messaging/messenger-platform/send-messages/#message_tags),
+    // and our local "last customer message" timestamp doesn't track every
+    // window-reopening event Meta does (reactions, post comments, ad
+    // clicks, m.me/ig.me links). Let the real Graph API call decide; a
+    // genuine rejection still surfaces the friendly "window closed"
+    // message below via describeMetaSendError.
     const endpoint = isPublicComment
       ? `https://graph.facebook.com/${graphVersion()}/${encodeURIComponent(conversation.social_comment_id!)}/${conversation.channel_type === 'instagram' ? 'replies' : 'comments'}`
       : `https://graph.facebook.com/${graphVersion()}/${encodeURIComponent(connector.external_channel_id)}/messages`
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        // Graph accepts a bearer Page/Instagram token. Keeping it out of the
-        // JSON payload prevents it from being included in request-body logs.
-        Authorization: `Bearer ${accessToken}`,
-      },
-      body: JSON.stringify({
-        ...(isPublicComment
-          ? { message: text }
-          : {
-              recipient: { id: conversation.external_session_id },
-              ...(conversation.channel_type === 'facebook' ? { messaging_type: 'RESPONSE' } : {}),
-              message: { text },
-            }),
-      }),
-      signal: AbortSignal.timeout(15_000),
-    })
+    let response: Response
+    try {
+      response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          // Graph accepts a bearer Page/Instagram token. Keeping it out of the
+          // JSON payload prevents it from being included in request-body logs.
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          ...(isPublicComment
+            ? { message: text }
+            : {
+                recipient: { id: conversation.external_session_id },
+                ...(conversation.channel_type === 'facebook' ? { messaging_type: 'RESPONSE' } : {}),
+                message: { text },
+              }),
+        }),
+        signal: AbortSignal.timeout(15_000),
+      })
+    } catch (fetchError) {
+      // A network blip/timeout here used to fall through to the generic
+      // catch-all below and surface as an opaque "Internal server error" —
+      // indistinguishable from an actual bug. Report it like every other
+      // Graph rejection instead: the message + conversation are intact and
+      // the agent can just retry.
+      const channel = conversation.channel_type === 'instagram' ? 'Instagram' : 'Facebook Messenger'
+      console.warn('[meta] outgoing message request failed', {
+        provider: conversation.channel_type,
+        publicComment: isPublicComment,
+        error: fetchError instanceof Error ? fetchError.message : 'unknown',
+      })
+      return NextResponse.json({
+        error: `No se pudo contactar a Meta para enviar el mensaje por ${channel}. La conversación y el mensaje no se perdieron.`,
+        code: 'meta_network_error',
+        next_step: 'Intenta reenviar el mensaje en unos segundos. Si el problema persiste, valida la conexión del canal en Configuración → Facebook e Instagram.',
+      }, { status: 502 })
+    }
     const payload = await response.json().catch(() => ({})) as {
       message_id?: string; id?: string
       error?: { message?: string; code?: number; error_subcode?: number; type?: string }

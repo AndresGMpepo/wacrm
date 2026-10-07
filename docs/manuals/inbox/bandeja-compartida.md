@@ -4,7 +4,7 @@ description: "Atiende WhatsApp, Facebook, Instagram y Chat web desde una sola vi
 section: "inbox"
 role: ["agent", "supervisor", "admin", "owner"]
 plan: ["basico", "crecimiento", "premium"]
-updated: "2026-10-06"
+updated: "2026-10-07"
 ---
 
 ## ¿Qué es?
@@ -39,6 +39,18 @@ escritorio: memoria, historial, compromisos, teléfonos, etiquetas,
 tratos, tareas y notas. Cierra el panel para volver a escribir en el chat.
 El aviso de notas internas también abre este panel en móvil.
 
+## Contexto del anuncio en Facebook/Instagram
+
+Si un cliente te escribe después de hacer clic en un anuncio de
+"Enviar mensaje" (Click-to-Messenger), verás un aviso arriba de la
+conversación: **"Esto es una respuesta a un anuncio"**. Pulsa **Ver
+detalles** para ver el título y la imagen del anuncio — así sabes de
+qué producto o promoción pregunta el cliente sin tener que
+adivinarlo. El aviso solo aparece si el administrador validó la
+conexión de Facebook después de esta actualización (Configuración →
+Redes sociales → **Validar conexión**), para que Meta empiece a
+enviar ese dato.
+
 ## Preguntas frecuentes
 
 **¿Por qué un chat no sube al tope aunque el cliente respondió?**
@@ -50,6 +62,15 @@ WhatsApp?**
 Sí — si el contacto tiene más de un número registrado (ver
 [Fusionar contactos duplicados](../contactos/fusionar-contactos.md)),
 cada mensaje muestra debajo "Vía [número]" para que sepas cuál usó.
+
+**¿Por qué en WhatsApp no puedo escribir después de 24 horas, pero en
+Facebook/Instagram sí?**
+Son reglas distintas de Meta. WhatsApp exige una plantilla aprobada
+pasadas las 24 horas, sin excepción — por eso el cuadro de texto se
+bloquea ahí. En Facebook/Instagram, un agente humano sí puede
+responder más tarde (igual que desde la app de Meta); si el mensaje
+de verdad queda fuera de la ventana permitida, Meta lo rechaza y verás
+un aviso claro al intentar enviarlo.
 
 ## Ver también
 

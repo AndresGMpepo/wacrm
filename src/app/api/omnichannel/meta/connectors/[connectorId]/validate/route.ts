@@ -143,7 +143,11 @@ export async function POST(_request: Request, { params }: { params: Promise<{ co
     let messengerSubscribed = connector.provider !== 'facebook'
     if (connector.provider === 'facebook') {
       const path = `/${encodeURIComponent(connector.external_channel_id)}/subscribed_apps`
-      const messengerSubscription = await graphPost(path, accessToken, 'messages,messaging_postbacks')
+      // messaging_referrals is required (together with messages) for Meta to
+      // attach Click-to-Messenger ad context (message.referral) to the
+      // inbound message that opened the thread — see
+      // https://developers.facebook.com/documentation/business-messaging/messenger-platform/webhooks/webhook-events/messages#ads-referral
+      const messengerSubscription = await graphPost(path, accessToken, 'messages,messaging_postbacks,messaging_referrals')
       messengerSubscribed = messengerSubscription.response.ok && messengerSubscription.payload?.success === true
 
       if (messengerSubscribed) {

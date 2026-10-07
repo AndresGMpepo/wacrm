@@ -414,6 +414,14 @@
       "resumed": "AI가 재개되었습니다.",
       "updateError": "AI 어시스턴트를 업데이트하지 못했습니다.",
       "networkError": "서버에 연결할 수 없습니다."
+    },
+    "adReferralBanner": {
+      "title": "광고에 대한 답변입니다",
+      "viewDetails": "세부정보 보기",
+      "hideDetails": "세부정보 숨기기",
+      "dismiss": "닫기",
+      "noTitle": "광고 제목 없음",
+      "adId": "광고 ID: {id}"
     }
   },
   "Contacts": {

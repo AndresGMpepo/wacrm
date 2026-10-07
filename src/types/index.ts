@@ -301,6 +301,25 @@ export interface Message {
    *  the contact has more than one number on file (see
    *  `contacts.alternate_phones`, migration 127). */
   sender_phone?: string | null;
+  /**
+   * Click-to-Messenger ad context Meta attaches to the inbound message that
+   * opened a thread from an ad — mirrors what Meta's own Messenger/Instagram
+   * app shows as "Esto es una respuesta a un anuncio". Only ever set on the
+   * specific message that carried it (normally the first customer message
+   * in the conversation); null otherwise. Migration 141.
+   */
+  ad_referral?: MetaAdReferral | null;
+}
+
+/** See `Message.ad_referral`. */
+export interface MetaAdReferral {
+  ad_id?: string;
+  ref?: string;
+  ad_title?: string;
+  photo_url?: string;
+  video_url?: string;
+  post_id?: string;
+  product_id?: string;
 }
 
 export type ReactionActor = 'customer' | 'agent';

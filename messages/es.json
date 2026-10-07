@@ -414,6 +414,14 @@
       "resumed": "IA reanudada.",
       "updateError": "No se pudo actualizar el asistente de IA.",
       "networkError": "No se pudo conectar con el servidor."
+    },
+    "adReferralBanner": {
+      "title": "Esto es una respuesta a un anuncio",
+      "viewDetails": "Ver detalles",
+      "hideDetails": "Ocultar detalles",
+      "dismiss": "Cerrar aviso",
+      "noTitle": "Anuncio sin título disponible",
+      "adId": "ID del anuncio: {id}"
     }
   },
   "Contacts": {
