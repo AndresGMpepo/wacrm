@@ -42,7 +42,7 @@ navegador sobre llamadas WebRTC en segundo plano.
 ## Avisos de llamada entrante
 
 Para recibir estos avisos, activa antes las notificaciones en
-**Configuración → Notificaciones en segundo plano** (ver
+**Notificaciones → Notificaciones en segundo plano** (ver
 [Instalar NexoOmni](../primeros-pasos/instalar-nexoomni.md)).
 
 - **Escritorio:** si NexoOmni está abierto pero en otra ventana o

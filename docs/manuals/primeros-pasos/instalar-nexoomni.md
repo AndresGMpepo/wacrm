@@ -37,11 +37,15 @@ recargar la aplicación en un momento conveniente.
 
 ## Activar las notificaciones push
 
-1. Ve a **Configuración**. La tarjeta **Notificaciones en segundo plano**
-   aparece arriba del resumen (debajo de tu nombre) y también en
-   **Configuración → Perfil**.
+1. Abre **Notificaciones** en el menú lateral (disponible para todos los
+   roles, incluidos agentes). La tarjeta **Notificaciones en segundo
+   plano** aparece debajo del título. Administradores y propietarios
+   también la ven en **Configuración** (resumen y Perfil).
 2. Selecciona **Activar notificaciones**.
 3. Acepta el permiso del navegador cuando lo solicite.
+
+Cada dispositivo se activa por separado: hazlo una vez en la
+computadora y otra en el celular.
 
 La solicitud de permiso ocurre únicamente al pulsar el botón. Se envían
 alertas por mensajes entrantes asignados a tu usuario; las conversaciones
@@ -50,14 +54,14 @@ control en cualquier momento. En iPhone o iPad, primero agrega la aplicación
 a la pantalla de inicio y luego activa las notificaciones desde ella.
 
 El permiso del sistema por sí solo no registra este dispositivo.
-Configuración comprueba también que la suscripción esté guardada en el
+La tarjeta comprueba también que la suscripción esté guardada en el
 servidor y que use la clave actual. Si informa que falta el registro o
 que la clave cambió, pulsa **Activar notificaciones** para repararlo.
 
 ### Probar el envío al dispositivo
 
-Con las notificaciones activas, pulsa **Probar notificación** en
-Configuración. La prueba se envía desde el servidor directamente al
+Con las notificaciones activas, pulsa **Probar notificación** en la
+misma tarjeta. La prueba se envía desde el servidor directamente al
 dispositivo actual, sin esperar al worker. Debe aparecer un aviso del
 sistema incluso con la aplicación abierta.
 

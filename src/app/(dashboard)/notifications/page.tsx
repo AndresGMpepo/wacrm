@@ -23,6 +23,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { emitNotificationsChanged } from '@/lib/notifications/events';
+import { WebPushSettings } from '@/components/pwa/web-push-settings';
 
 // Icon per notification type. Only one type exists today
 // (conversation_assigned) but this keeps future types a one-line add.
@@ -215,6 +216,8 @@ export default function NotificationsPage() {
           Mark all as read
         </Button>
       </div>
+
+      <WebPushSettings />
 
       {notifications.length === 0 ? (
         <div className="border-border bg-muted/40 flex h-48 flex-col items-center justify-center rounded-xl border border-dashed">

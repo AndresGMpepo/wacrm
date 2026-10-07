@@ -59,7 +59,7 @@ export async function sendDeviceTestPush(subscription: PushSubscriptionRow) {
   }, JSON.stringify({
     title: copy.pushNotificationTitle,
     body: copy.pushTestBody,
-    url: '/settings',
+    url: '/notifications',
     tag: `nexoomni-test-${Date.now()}`,
   }), {
     TTL: 300, timeout: 8_000, urgency: 'high',
