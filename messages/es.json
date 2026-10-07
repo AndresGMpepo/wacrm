@@ -357,7 +357,12 @@
       "aiBadgeTitle": "Enviado automáticamente por el asistente de IA",
       "metaInboxBadge": "Meta",
       "metaInboxBadgeTitle": "Enviado desde la bandeja de Meta, no desde NexoOmni",
-      "editedTag": "(editado)"
+      "editedTag": "(editado)",
+      "statusSending": "Enviando",
+      "statusSent": "Enviado",
+      "statusDelivered": "Entregado",
+      "statusRead": "Leído",
+      "statusFailed": "No se pudo enviar"
     },
     "actions": {
       "reply": "Responder",
@@ -425,6 +430,18 @@
       "dismiss": "Cerrar aviso",
       "noTitle": "Anuncio sin título disponible",
       "adId": "ID del anuncio: {id}"
+    },
+    "postContext": {
+      "story_reply": "Respondió a tu historia",
+      "story_mention": "Te mencionó en su historia",
+      "shared_post": "Compartió una publicación",
+      "shared_reel": "Compartió un reel",
+      "shared_story": "Compartió una historia",
+      "link_referral": "Llegó desde un enlace a tu chat",
+      "unavailable": "Meta no permite mostrar este mensaje aquí. Ábrelo en Facebook o Instagram.",
+      "openPost": "Ver publicación",
+      "storyExpired": "La historia ya no está disponible (Meta las elimina a las 24 h).",
+      "ref": "Referencia: {ref}"
     }
   },
   "Contacts": {

@@ -357,7 +357,12 @@
       "aiBadgeTitle": "Sent automatically by the AI assistant",
       "metaInboxBadge": "Meta",
       "metaInboxBadgeTitle": "Sent from Meta's inbox, not from NexoOmni",
-      "editedTag": "(edited)"
+      "editedTag": "(edited)",
+      "statusSending": "Sending",
+      "statusSent": "Sent",
+      "statusDelivered": "Delivered",
+      "statusRead": "Read",
+      "statusFailed": "Could not be sent"
     },
     "actions": {
       "reply": "Reply",
@@ -425,6 +430,18 @@
       "dismiss": "Dismiss",
       "noTitle": "No ad title available",
       "adId": "Ad ID: {id}"
+    },
+    "postContext": {
+      "story_reply": "Replied to your story",
+      "story_mention": "Mentioned you in their story",
+      "shared_post": "Shared a post",
+      "shared_reel": "Shared a reel",
+      "shared_story": "Shared a story",
+      "link_referral": "Opened your chat from a link",
+      "unavailable": "Meta does not allow this message to be shown here. Open it in Facebook or Instagram.",
+      "openPost": "View post",
+      "storyExpired": "The story is no longer available (Meta removes them after 24 h).",
+      "ref": "Reference: {ref}"
     }
   },
   "Contacts": {

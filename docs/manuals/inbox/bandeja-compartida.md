@@ -53,12 +53,40 @@ enviar ese dato.
 
 ## Confirmación de leído en Facebook/Instagram
 
-Los mensajes que envías por Facebook Messenger e Instagram ahora
-muestran las mismas marcas que WhatsApp: una palomita (✓) cuando se
-envió, dos palomitas grises (✓✓) cuando el cliente lo recibió, y dos
-palomitas azules (✓✓) cuando el cliente ya lo leyó. Esto también
-requiere haber validado la conexión después de esta actualización
-(Configuración → Redes sociales → **Validar conexión**).
+Los mensajes que envías por Facebook Messenger e Instagram muestran las
+mismas marcas que WhatsApp: una palomita (✓) cuando se envió, dos
+palomitas (✓✓) cuando el cliente lo recibió, y dos palomitas **celestes
+y más gruesas** (✓✓) cuando el cliente ya lo leyó. Pasa el cursor sobre
+la marca para ver "Enviado", "Entregado" o "Leído". Cuando el cliente lee
+tu último mensaje, todos los anteriores también se marcan como leídos
+(así lo informa Meta).
+
+- **Instagram no avisa "entregado"**: Meta solo informa cuándo se
+  leyó. En Instagram verás ✓ hasta que el cliente lo lea, y entonces
+  pasará directo a ✓✓ celestes.
+- Facebook Messenger sí informa ambas cosas (entregado y leído).
+
+## De qué publicación o historia te escribe el cliente (Facebook/Instagram)
+
+Arriba del mensaje del cliente verás una tarjeta con el contexto, igual
+que en la bandeja de Meta:
+
+- **Respondió a tu historia** — con la imagen de la historia (Meta la
+  borra a las 24 horas; después verás un aviso de que ya no está
+  disponible).
+- **Te mencionó en su historia**.
+- **Compartió una publicación / un reel / una historia** — con la vista
+  previa y, cuando Meta lo envía, el botón **Ver publicación** para
+  abrirla. En Instagram, cuando alguien escribe desde un anuncio, Meta
+  suele mandar primero la publicación del anuncio de esta forma.
+- **Llegó desde un enlace a tu chat** (ig.me / m.me), con su referencia.
+- **Meta no permite mostrar este mensaje aquí** — cuando Meta oculta el
+  contenido a las integraciones; ábrelo en Facebook o Instagram.
+
+Si el cliente llegó desde un **anuncio**, se sigue mostrando el aviso
+"Esto es una respuesta a un anuncio" de la sección anterior. Meta no
+informa desde qué publicación *normal* (sin anuncio y sin compartirla)
+alguien abrió el chat de Messenger, así que en ese caso no hay tarjeta.
 
 ## "Escribiendo…" y "Visto" hacia el cliente (Facebook/Instagram)
 

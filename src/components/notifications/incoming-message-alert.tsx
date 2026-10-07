@@ -134,10 +134,12 @@ export function IncomingMessageAlert() {
         if (notification.conversation_id) {
           const conversationId = notification.conversation_id;
           void (async () => {
+            // Same policy as web push: the assignee, or everyone while the
+            // conversation is still unassigned (typical for new FB/IG DMs).
             const { data, error } = await supabase.from('conversations')
-              .select('id').eq('id', conversationId).eq('assigned_agent_id', user.id).maybeSingle();
+              .select('id, assigned_agent_id').eq('id', conversationId).maybeSingle();
             if (error) throw error;
-            if (!data) return;
+            if (!data || (data.assigned_agent_id && data.assigned_agent_id !== user.id)) return;
             await showDesktopMessageAlert({
               id: notification.id, conversationId,
               title: pushCopy('pushNotificationTitle'),

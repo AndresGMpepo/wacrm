@@ -357,7 +357,12 @@
       "aiBadgeTitle": "AI 어시스턴트가 자동으로 전송함",
       "metaInboxBadge": "Meta",
       "metaInboxBadgeTitle": "NexoOmni가 아닌 Meta의 받은 편지함에서 전송됨",
-      "editedTag": "(수정됨)"
+      "editedTag": "(수정됨)",
+      "statusSending": "보내는 중",
+      "statusSent": "보냄",
+      "statusDelivered": "전달됨",
+      "statusRead": "읽음",
+      "statusFailed": "보내지 못함"
     },
     "actions": {
       "reply": "답장",
@@ -425,6 +430,18 @@
       "dismiss": "닫기",
       "noTitle": "광고 제목 없음",
       "adId": "광고 ID: {id}"
+    },
+    "postContext": {
+      "story_reply": "내 스토리에 답장함",
+      "story_mention": "자신의 스토리에서 나를 언급함",
+      "shared_post": "게시물을 공유함",
+      "shared_reel": "릴스를 공유함",
+      "shared_story": "스토리를 공유함",
+      "link_referral": "링크를 통해 채팅을 시작함",
+      "unavailable": "Meta에서 이 메시지를 여기에 표시하는 것을 허용하지 않습니다. Facebook 또는 Instagram에서 여세요.",
+      "openPost": "게시물 보기",
+      "storyExpired": "스토리를 더 이상 볼 수 없습니다(Meta는 24시간 후 삭제합니다).",
+      "ref": "참조: {ref}"
     }
   },
   "Contacts": {

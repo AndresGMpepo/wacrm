@@ -9,7 +9,7 @@ vi.mock('web-push', () => ({
 
 afterEach(() => vi.unstubAllEnvs());
 
-function deliveryDatabase(unreadQueryFails = false) {
+function deliveryDatabase(unreadQueryFails = false, assignedAgentId: string | null = 'agent-id') {
   const fetch = vi.fn<typeof globalThis.fetch>().mockImplementation(async (input, init) => {
     const url = new URL(String(input));
     const table = url.pathname.split('/').pop();
@@ -43,7 +43,7 @@ function deliveryDatabase(unreadQueryFails = false) {
           ? Response.json({ message: 'Unavailable' }, { status: 500 })
           : Response.json([{ unread_count: 2 }, { unread_count: 3 }]);
       }
-      return Response.json([{ assigned_agent_id: 'agent-id' }]);
+      return Response.json([{ assigned_agent_id: assignedAgentId }]);
     }
     throw new Error(`Unexpected delivery query: ${url}`);
   });
@@ -94,6 +94,31 @@ describe('background Web Push delivery', () => {
       url: '/inbox?c=conversation-id',
     });
     expect(payload).not.toHaveProperty('message');
+  });
+
+  it('pushes an unassigned conversation (new Facebook/Instagram DM) to every notified agent', async () => {
+    vi.stubEnv('NEXT_PUBLIC_WEB_PUSH_VAPID_PUBLIC_KEY', 'test-public-key');
+    vi.stubEnv('WEB_PUSH_VAPID_PRIVATE_KEY', 'test-private-key');
+    vi.stubEnv('WEB_PUSH_VAPID_SUBJECT', 'mailto:test@example.com');
+    vi.mocked(webpush.sendNotification).mockClear();
+    const { db } = deliveryDatabase(false, null);
+    expect(await processWebPushOutbox(db)).toEqual({ sent: 1, skipped: 0, failed: 0 });
+    expect(webpush.sendNotification).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips a conversation assigned to someone else', async () => {
+    vi.stubEnv('NEXT_PUBLIC_WEB_PUSH_VAPID_PUBLIC_KEY', 'test-public-key');
+    vi.stubEnv('WEB_PUSH_VAPID_PRIVATE_KEY', 'test-private-key');
+    vi.stubEnv('WEB_PUSH_VAPID_SUBJECT', 'mailto:test@example.com');
+    vi.mocked(webpush.sendNotification).mockClear();
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    try {
+      const { db } = deliveryDatabase(false, 'other-agent-id');
+      expect(await processWebPushOutbox(db)).toEqual({ sent: 0, skipped: 1, failed: 0 });
+      expect(webpush.sendNotification).not.toHaveBeenCalled();
+    } finally {
+      info.mockRestore();
+    }
   });
 
   it('retries when unread lookup fails rather than publishing an incorrect zero', async () => {

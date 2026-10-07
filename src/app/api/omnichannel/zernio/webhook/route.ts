@@ -10,6 +10,7 @@ import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
 import { extractZernioMedia, extractZernioReaction, firstZernioContactName, isZernioPlaceholderName, normalizeMetaText, safeZernioContactName } from '@/lib/omnichannel/webhook-normalizer'
 import { getZernioParticipantProfile, verifyZernioSignature, type ZernioChannel } from '@/lib/zernio/server'
 import { persistZernioOutbound, zernioOutboundIsHuman } from '@/lib/zernio/outbound-message'
+import { extractZernioPostContext } from '@/lib/zernio/post-context'
 import { isValidStatusTransition } from '@/lib/whatsapp/recipient-status-ladder'
 import { flagBroadcastReplyIfAny } from '@/lib/whatsapp/broadcast-reply-flag'
 import { handleAgendaProConfirmationReply } from '@/lib/agendapro/confirmation'
@@ -336,6 +337,58 @@ async function handleAccountLifecycleEvent(
 }
 
 /**
+ * Meta reports Messenger/Instagram delivery and read receipts as a
+ * watermark ("every message sent up to this moment was delivered/read"),
+ * not one receipt per message, so Zernio's single status event only names
+ * one message. Without promoting the earlier outbound messages too, every
+ * reply except the last stays on a grey tick forever. When the event's
+ * message isn't one we stored (e.g. sent from Meta's own inbox before
+ * NexoOmni saw it) the conversation + `statusAt` is used as the watermark.
+ */
+async function promoteOutboundWatermark(
+  db: ReturnType<typeof admin>,
+  status: 'delivered' | 'read',
+  context: { conversation: Json; account: Json; statusAt: unknown },
+  anchor: { conversationId: string; createdAt: string } | null,
+) {
+  try {
+    let conversationId = anchor?.conversationId ?? null
+    let watermark = anchor?.createdAt ?? null
+    if (!conversationId) {
+      const externalConversationId = text(context.conversation.id, context.conversation._id)
+      const zernioAccountId = text(context.account.accountId, context.account.id, context.account._id)
+      if (!externalConversationId || !zernioAccountId) return
+      const { data: connectors, error: connectorError } = await db.from('omnichannel_connectors')
+        .select('id')
+        .eq('zernio_account_id', zernioAccountId)
+        .like('provider', 'zernio_%')
+      if (connectorError || !connectors?.length) return
+      const { data: conversationRow, error: conversationError } = await db.from('conversations')
+        .select('id')
+        .in('connector_id', connectors.map((row) => row.id as string))
+        .eq('external_session_id', externalConversationId)
+        .limit(1)
+        .maybeSingle()
+      if (conversationError || !conversationRow) return
+      conversationId = conversationRow.id as string
+      const statusAt = text(context.statusAt)
+      watermark = statusAt && !Number.isNaN(Date.parse(statusAt)) ? statusAt : new Date().toISOString()
+    }
+    if (!conversationId || !watermark) return
+    const lowerStatuses = status === 'read' ? ['sending', 'sent', 'delivered'] : ['sending', 'sent']
+    const { error } = await db.from('messages')
+      .update({ status })
+      .eq('conversation_id', conversationId)
+      .neq('sender_type', 'customer')
+      .lte('created_at', watermark)
+      .in('status', lowerStatuses)
+    if (error) console.error('[zernio] could not apply status watermark:', error.message)
+  } catch (error) {
+    console.error('[zernio] status watermark failed:', error)
+  }
+}
+
+/**
  * Mirrors an OUTBOUND WhatsApp delivery-status webhook onto both
  * `messages` (the ticks shown in the inbox thread — ✓ sent, ✓✓
  * delivered, blue ✓✓ read) and `broadcast_recipients` (mass-send stats).
@@ -350,6 +403,7 @@ async function handleOutboundStatusEvent(
   eventType: 'message.delivered' | 'message.read' | 'message.failed',
   message: Json,
   errorInfo: Json,
+  context: { conversation: Json; account: Json; statusAt: unknown } = { conversation: {}, account: {}, statusAt: null },
 ) {
   // Try every id shape Zernio might use for this message — the one we
   // stored as `whatsapp_message_id` (Zernio's own message id, returned
@@ -358,12 +412,15 @@ async function handleOutboundStatusEvent(
   // the first non-empty candidate.
   const candidateIds = [message.id, message.platformMessageId, message.platform_message_id, message._id]
     .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
-  if (candidateIds.length === 0) {
-    console.warn(`[zernio] ${eventType} webhook carried no usable message id — payload:`, JSON.stringify(message).slice(0, 500))
-    return
-  }
   const status = eventType === 'message.delivered' ? 'delivered' : eventType === 'message.read' ? 'read' : 'failed'
   const now = new Date().toISOString()
+  const statusChannel = channelFrom(message.platform ?? context.account.platform ?? context.conversation.platform)
+  const watermarkStatus = status !== 'failed' && (statusChannel === 'facebook' || statusChannel === 'instagram') ? status : null
+  if (candidateIds.length === 0) {
+    console.warn(`[zernio] ${eventType} webhook carried no usable message id — payload:`, JSON.stringify(message).slice(0, 500))
+    if (watermarkStatus) await promoteOutboundWatermark(db, watermarkStatus, context, null)
+    return
+  }
 
   // 1) Mirror onto the message itself — this is what the inbox thread's
   //    ticks actually render (message-bubble.tsx's StatusIcon). Every
@@ -372,13 +429,13 @@ async function handleOutboundStatusEvent(
   //    message also belongs to a broadcast.
   let { data: matchedMessage, error: messageFetchError } = await db
     .from('messages')
-    .select('id, status')
+    .select('id, status, conversation_id, created_at')
     .neq('sender_type', 'customer')
     .in('platform_message_id', candidateIds)
     .limit(1)
     .maybeSingle()
   if (!matchedMessage && !messageFetchError) {
-    const byInternalId = await db.from('messages').select('id, status')
+    const byInternalId = await db.from('messages').select('id, status, conversation_id, created_at')
       .neq('sender_type', 'customer').in('zernio_internal_message_id', candidateIds)
       .limit(1).maybeSingle()
     matchedMessage = byInternalId.data
@@ -391,6 +448,11 @@ async function handleOutboundStatusEvent(
     // — the failure reason is only ever surfaced on the broadcast mirror.
     const { error: messageUpdateError } = await db.from('messages').update({ status }).eq('id', matchedMessage.id)
     if (messageUpdateError) console.error('[zernio] could not update message status:', messageUpdateError.message)
+  }
+  if (!messageFetchError && watermarkStatus) {
+    await promoteOutboundWatermark(db, watermarkStatus, context, matchedMessage
+      ? { conversationId: matchedMessage.conversation_id as string, createdAt: matchedMessage.created_at as string }
+      : null)
   }
 
   // 2) Mirror onto broadcast_recipients — only present for broadcast
@@ -485,7 +547,11 @@ async function processZernioWebhook(payload: Json, eventIdHeader: string | null)
         continue
       }
       if (eventType === 'message.delivered' || eventType === 'message.read' || eventType === 'message.failed') {
-        await handleOutboundStatusEvent(db, eventType, record(event.message), record(event.error))
+        await handleOutboundStatusEvent(db, eventType, record(event.message), record(event.error), {
+          conversation: record(event.conversation),
+          account: record(event.account),
+          statusAt: event.statusAt,
+        })
         continue
       }
       if (eventType === 'message.edited') {
@@ -757,7 +823,7 @@ async function processZernioWebhook(payload: Json, eventIdHeader: string | null)
         if (quotedError) console.error('[zernio] reply context lookup failed:', quotedError.message)
         else replyToInternalId = quotedRow?.id ?? null
       }
-      const { error: messageError } = await db.from('messages').insert({
+      const inboundRow: Record<string, unknown> = {
         conversation_id: conversationRow.id,
         sender_type: 'customer',
         content_type: contentType,
@@ -773,7 +839,15 @@ async function processZernioWebhook(payload: Json, eventIdHeader: string | null)
         // (see contactPhone above). Migration 131.
         sender_phone: channel === 'whatsapp' ? (contactPhone || null) : null,
         ad_referral: extractZernioAdReferral(replyMetadata),
-      })
+      }
+      const postContext = channel === 'whatsapp' ? null : extractZernioPostContext(record(incoming), replyMetadata)
+      let { error: messageError } = await db.from('messages').insert(postContext ? { ...inboundRow, post_context: postContext } : inboundRow)
+      // Never lose an inbound message because migration 145 hasn't been
+      // applied yet — retry without the optional context column.
+      if (postContext && messageError && (messageError.code === 'PGRST204' || messageError.code === '42703')) {
+        console.error('[zernio] messages.post_context missing (apply migration 145); saving without post context.')
+        ;({ error: messageError } = await db.from('messages').insert(inboundRow))
+      }
       if (messageError && !isUniqueViolation(messageError)) throw messageError
 
       const reaction = extractZernioReaction(record(incoming))

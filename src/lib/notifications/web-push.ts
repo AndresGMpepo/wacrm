@@ -268,11 +268,17 @@ export async function processWebPushOutbox(db: SupabaseClient) {
       continue;
     }
 
+    // Mirrors enqueue_assigned_message_web_push() (migration 144): an
+    // assigned conversation pushes only to its assignee, an unassigned one
+    // (the usual state of a new Facebook/Instagram DM) pushes to everyone
+    // notify_incoming_message() notified. Requiring an exact assignee match
+    // here silently dropped every unassigned FB/IG push as "sent".
     const stillEligible = profile
       && profile.account_id === item.account_id
       && isAccountRole(profile.account_role)
       && hasMinRole(profile.account_role, 'agent')
-      && conversation?.assigned_agent_id === item.user_id;
+      && conversation
+      && (conversation.assigned_agent_id == null || conversation.assigned_agent_id === item.user_id);
     if (!notification || !stillEligible || !subscriptions?.length) {
       if (!notification) {
         console.warn(`[web-push] Notification ${item.notification_id} no longer exists; skipping push.`);

@@ -11,7 +11,7 @@ function admin() {
 }
 
 /**
- * Streams inbound Zernio media (WhatsApp today) to the browser.
+ * Streams inbound Zernio media (WhatsApp, Facebook, Instagram) to the browser.
  *
  * Per https://docs.zernio.com/messages/get-message-attachment, webhook
  * payloads never carry a working, non-expiring URL — the documented way
@@ -88,9 +88,19 @@ export async function GET(
       bytes = resolved.bytes
       mimeType = resolved.mimeType
     } else {
-      const downloaded = await downloadZernioInboundMedia(message.media_url, zernioChannel)
-      bytes = downloaded.bytes
-      mimeType = downloaded.mimeType
+      try {
+        const downloaded = await downloadZernioInboundMedia(message.media_url, zernioChannel)
+        bytes = downloaded.bytes
+        mimeType = downloaded.mimeType
+      } catch (downloadError) {
+        // Facebook/Instagram CDN links are public: if neither re-minting nor
+        // a server-side fetch (which refuses redirects) worked, let the
+        // browser load the original link exactly as it did before.
+        if (zernioChannel !== 'whatsapp' && /^https:\/\//i.test(message.media_url)) {
+          return NextResponse.redirect(message.media_url, 302)
+        }
+        throw downloadError
+      }
     }
 
     return new Response(new Uint8Array(bytes), {

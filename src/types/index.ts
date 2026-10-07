@@ -324,6 +324,26 @@ export interface Message {
    * the "(editado)" tag. Migration 143.
    */
   edited_at?: string | null;
+  /**
+   * Instagram/Messenger origin context for an inbound Zernio message —
+   * a story reply, story mention, shared post/reel or ig.me/m.me link
+   * referral. Rendered above the bubble so an agent knows which post or
+   * story the customer is writing about. Migration 145.
+   */
+  post_context?: MessagePostContext | null;
+}
+
+/** See `Message.post_context`. */
+export interface MessagePostContext {
+  kind: 'story_reply' | 'story_mention' | 'shared_post' | 'shared_reel' | 'shared_story' | 'link_referral' | 'unavailable';
+  /** Media preview (Meta CDN, expires) — story image or shared post media. */
+  url?: string;
+  /** Link to open the post itself on Facebook/Instagram. */
+  permalink?: string;
+  story_id?: string;
+  ref?: string;
+  source?: string;
+  attachment_index?: number;
 }
 
 /** See `Message.ad_referral`. */

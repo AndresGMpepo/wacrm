@@ -25,6 +25,7 @@ import {
 import { format } from "date-fns";
 import { ReplyQuote } from "./reply-quote";
 import { MessageReactions } from "./message-reactions";
+import { PostContextCard } from "./post-context-card";
 import { InteractivePreview } from "@/components/interactive/interactive-preview";
 import { useTranslations } from "next-intl";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -51,28 +52,33 @@ interface MessageBubbleProps {
  * token to download — a plain `<img>`/`<audio>` src can't attach it,
  * so the browser gets an unauthenticated 401/403 and the bubble shows
  * a broken image / "unavailable" audio. Route those through our own
- * authenticated same-origin proxy instead; Facebook/Instagram Zernio
- * media stays public and is left untouched.
+ * authenticated same-origin proxy instead. Facebook/Instagram media is a
+ * signed Meta CDN link that expires, so it goes through the same proxy,
+ * which re-mints it via Zernio's attachment endpoint.
  */
 function resolveMediaSrc(message: Message, channelType?: string | null): string | undefined {
-  if (channelType === "zernio_whatsapp" && message.media_url?.startsWith("http")) {
+  if (channelType?.startsWith("zernio_") && message.media_url?.startsWith("http")) {
     return `/api/omnichannel/zernio/media/${message.id}`;
   }
   return message.media_url;
 }
 
-function StatusIcon({ status }: { status: Message["status"] }) {
+// Outbound bubbles sit on the primary fill, so neutral greys and a blue
+// "read" tick vanish on several theme colors. Sent/delivered use the
+// bubble's own foreground; read gets a bright, thicker tick plus a
+// tooltip so "ya lo leyó" is unmistakable on every theme.
+function StatusIcon({ status, t }: { status: Message["status"]; t: ReturnType<typeof useTranslations> }) {
   switch (status) {
     case "sending":
-      return <Clock className="h-3 w-3 text-muted-foreground" />;
+      return <Clock className="h-3 w-3 text-primary-foreground/70" aria-label={t("statusSending")} />;
     case "sent":
-      return <Check className="h-3 w-3 text-muted-foreground" />;
+      return <span title={t("statusSent")}><Check className="h-3.5 w-3.5 text-primary-foreground/70" aria-label={t("statusSent")} /></span>;
     case "delivered":
-      return <CheckCheck className="h-3 w-3 text-muted-foreground" />;
+      return <span title={t("statusDelivered")}><CheckCheck className="h-3.5 w-3.5 text-primary-foreground/80" aria-label={t("statusDelivered")} /></span>;
     case "read":
-      return <CheckCheck className="h-3 w-3 text-blue-400" />;
+      return <span title={t("statusRead")}><CheckCheck className="h-3.5 w-3.5 text-sky-300 drop-shadow-[0_0_1px_rgba(0,0,0,0.6)]" strokeWidth={3} aria-label={t("statusRead")} /></span>;
     case "failed":
-      return <XCircle className="h-3 w-3 text-red-400" />;
+      return <span title={t("statusFailed")}><XCircle className="h-3.5 w-3.5 text-red-300" aria-label={t("statusFailed")} /></span>;
     default:
       return null;
   }
@@ -405,6 +411,20 @@ export function MessageBubble({
 
   const isAgent = message.sender_type === "agent" || message.sender_type === "bot";
   const time = format(new Date(message.created_at), "HH:mm");
+  const postContext = !isAgent ? message.post_context ?? null : null;
+  // A shared post/story arrives as a link-like "document" attachment; the
+  // card replaces that generic file chip with a real preview.
+  const shareReplacesContent = Boolean(
+    postContext
+      && ["shared_post", "shared_reel", "shared_story", "story_mention"].includes(postContext.kind)
+      && message.content_type === "document",
+  );
+  const shareCaption = shareReplacesContent
+    && message.content_text
+    && message.content_text !== "[Mensaje sin texto]"
+    && !/^https?:\/\//i.test(message.content_text.trim())
+    ? message.content_text
+    : null;
 
   // Row alignment + width cap are owned by <MessageActions> so its hover
   // group matches the bubble's content area, not the full row.
@@ -430,7 +450,17 @@ export function MessageBubble({
             onPrimary={isAgent}
           />
         )}
-        <MessageContent message={message} t={t} channelType={channelType} isAgent={isAgent} />
+        {postContext && (
+          <PostContextCard
+            context={postContext}
+            previewSrc={shareReplacesContent && !postContext.permalink ? resolveMediaSrc(message, channelType) : undefined}
+          />
+        )}
+        {shareReplacesContent ? (
+          shareCaption ? <p className="whitespace-pre-wrap break-words text-sm">{shareCaption}</p> : null
+        ) : (
+          <MessageContent message={message} t={t} channelType={channelType} isAgent={isAgent} />
+        )}
         {showSenderPhone && !isAgent && message.sender_phone ? (
           <p className="mt-1 text-[10px] italic text-muted-foreground">
             Vía {message.sender_phone}
@@ -494,7 +524,7 @@ export function MessageBubble({
           >
             {time}
           </span>
-          {isAgent && <StatusIcon status={message.status} />}
+          {isAgent && <StatusIcon status={message.status} t={t} />}
         </div>
       </div>
       {reactions && reactions.length > 0 && onToggleReaction && (

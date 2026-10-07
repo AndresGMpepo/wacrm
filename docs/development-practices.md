@@ -119,6 +119,26 @@ owner (5) > admin (4) > supervisor (3) > agent (2) > viewer (1)
   `markOverdueCommitments()`, `processCallFollowUps()` como ejemplos) —
   no se crean workers HTTP nuevos salvo que el volumen realmente lo
   justifique.
+- **Avisos de mensaje entrante (push / escritorio)**: la regla de
+  elegibilidad vive en TRES lugares que deben coincidir —
+  `enqueue_assigned_message_web_push()` (migración 144),
+  `processWebPushOutbox()` (`src/lib/notifications/web-push.ts`) y la
+  alerta de escritorio (`incoming-message-alert.tsx`): conversación
+  asignada → solo el asignado; sin asignar → todos los notificados. En
+  octubre 2026 el worker seguía exigiendo "asignado a mí" y descartaba en
+  silencio (como `sent`) todos los push de Facebook/Instagram, que casi
+  siempre llegan sin asignar.
+- **Zernio Facebook/Instagram — recibos**: Meta informa entregado/leído
+  como *marca de agua*; Zernio solo nombra un mensaje, así que el webhook
+  promueve también los salientes anteriores (`promoteOutboundWatermark`,
+  solo FB/IG). Instagram NO emite `message.delivered` (tabla de eventos
+  de docs.zernio.com) — ✓ pasa directo a leído.
+- **Zernio — contexto de publicación**: `metadata.storyReply`,
+  `isStoryMention`, `referral` (no-ADS), `noRenderableContent` y
+  `attachments[].originalType` se guardan en `messages.post_context`
+  (migración 145, `src/lib/zernio/post-context.ts`). Las URLs del CDN de
+  Meta caducan: el bubble usa el proxy `/api/omnichannel/zernio/media/`
+  para todos los canales `zernio_*`.
 
 ## 5. Trabajando con IA en este repositorio
 
