@@ -69,6 +69,91 @@ export async function sendDeviceTestPush(subscription: PushSubscriptionRow) {
 
 const PUSH_MAX_AGE_MS = 15 * 60_000;
 
+interface RingingExtension {
+  extension: string;
+  callerNumber: string | null;
+  callerName: string | null;
+}
+
+/**
+ * Sends an immediate call alert (no outbox/worker: a ringing call is only
+ * relevant for seconds) to every registered device of the agent who owns each
+ * ringing Yeastar extension. Uses the same per-extension tag as the in-page
+ * alert so a device that has both shows a single entry.
+ */
+export async function sendIncomingCallPush(
+  db: SupabaseClient, accountId: string, ringing: RingingExtension[],
+) {
+  if (!ringing.length) return { sent: 0, failed: 0 };
+  let configuration: ReturnType<typeof vapidConfiguration>;
+  try {
+    configuration = vapidConfiguration();
+  } catch (error) {
+    console.error('[web-push] Call alert blocked by missing or invalid VAPID configuration:', error);
+    return { sent: 0, failed: ringing.length };
+  }
+
+  const { data: owners, error: ownerError } = await db.from('telephony_user_configs')
+    .select('user_id, extension')
+    .eq('account_id', accountId)
+    .eq('provider', 'yeastar')
+    .in('extension', ringing.map((item) => item.extension));
+  if (ownerError) throw ownerError;
+  const ownerIds = [...new Set((owners ?? []).map((row) => row.user_id as string))];
+  if (!ownerIds.length) return { sent: 0, failed: 0 };
+
+  const [{ data: profiles, error: profileError }, { data: subscriptions, error: subscriptionError }] = await Promise.all([
+    db.from('profiles').select('user_id, account_role')
+      .eq('account_id', accountId).in('user_id', ownerIds),
+    db.from('web_push_subscriptions').select('id, user_id, endpoint, p256dh, auth, locale')
+      .eq('account_id', accountId).in('user_id', ownerIds),
+  ]);
+  if (profileError) throw profileError;
+  if (subscriptionError) throw subscriptionError;
+
+  const agents = new Set((profiles ?? [])
+    .filter((row) => isAccountRole(row.account_role) && hasMinRole(row.account_role, 'agent'))
+    .map((row) => row.user_id as string));
+  const ringingAt = Date.now();
+  let sent = 0;
+  let failed = 0;
+
+  await Promise.all((owners ?? []).flatMap((owner) => {
+    if (!agents.has(owner.user_id)) return [];
+    const call = ringing.find((item) => item.extension === owner.extension);
+    if (!call) return [];
+    return ((subscriptions ?? []) as (PushSubscriptionRow & { user_id: string })[])
+      .filter((subscription) => subscription.user_id === owner.user_id)
+      .map(async (subscription) => {
+        const copy = pushCopy[subscription.locale] ?? pushCopy.es;
+        const caller = call.callerName ?? call.callerNumber ?? copy.unknownCaller;
+        try {
+          await webpush.sendNotification({
+            endpoint: subscription.endpoint,
+            keys: { p256dh: subscription.p256dh, auth: subscription.auth },
+          }, JSON.stringify({
+            kind: 'call',
+            title: copy.incomingCallTitle,
+            body: copy.incomingCallBody.replace('{caller}', caller),
+            url: '/inbox',
+            tag: `nexoomni-call-${owner.extension}`,
+            ringingAt,
+          }), { TTL: 30, timeout: 5_000, urgency: 'high', vapidDetails: configuration });
+          sent++;
+        } catch (error) {
+          failed++;
+          const statusCode = getStatusCode(error);
+          if (statusCode === 404 || statusCode === 410) {
+            await db.from('web_push_subscriptions').delete().eq('id', subscription.id);
+          } else {
+            console.error(`[web-push] Call alert failed for subscription ${subscription.id}:`, error);
+          }
+        }
+      });
+  }));
+  return { sent, failed };
+}
+
 export async function processWebPushOutbox(db: SupabaseClient) {
   const now = new Date();
   const staleLock = new Date(now.getTime() - 5 * 60_000).toISOString();
@@ -193,6 +278,8 @@ export async function processWebPushOutbox(db: SupabaseClient) {
         console.warn(`[web-push] Notification ${item.notification_id} no longer exists; skipping push.`);
       } else if (!stillEligible) {
         console.info(`[web-push] Assignment or role changed before notification ${item.notification_id} was sent.`);
+      } else {
+        console.info(`[web-push] User ${item.user_id} has no registered push devices; skipping notification ${item.notification_id}.`);
       }
       const { error } = await db.from('web_push_outbox')
         .update({ status: 'sent', delivered_at: new Date().toISOString(), locked_at: null })

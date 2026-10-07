@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from 'react';
 import { toast } from 'sonner';
+import { closeCallSystemAlert, showCallSystemAlert } from '@/lib/notifications/call-alert';
 
 type Session = {
   status?: {
@@ -178,17 +179,24 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
   const consultation = useRef<Session | null>(null);
   const finalizedCallIds = useRef(new Set<string>());
   const liveReportingError = useRef<string | null>(null);
+  const extensionRef = useRef<string | null>(null);
 
-  const notify = useCallback((title: string, body: string) => {
-    if (document.visibilityState === 'visible') return;
-    if ('Notification' in window && Notification.permission === 'granted') {
-      const notification = new Notification(title, { body, icon: '/icon' });
-      notification.onclick = () => {
-        window.focus();
-        setOpen(true);
-        notification.close();
-      };
-    }
+  // `visibilityState` stays 'visible' while a desktop window sits behind
+  // another app, so focus decides whether the system alert is needed.
+  const notify = useCallback((title: string, body: string, ringing = false) => {
+    const extension = extensionRef.current;
+    if (!extension) return;
+    void showCallSystemAlert({ extension, title, body, ringing }).catch((error: unknown) => {
+      console.error('[telephony] Could not show call system notification:', error);
+    });
+  }, []);
+
+  const dismissCallAlert = useCallback(() => {
+    const extension = extensionRef.current;
+    if (!extension) return;
+    void closeCallSystemAlert(extension).catch((error: unknown) => {
+      console.error('[telephony] Could not close call system notification:', error);
+    });
   }, []);
 
   const stopRingtone = useCallback(() => {
@@ -332,8 +340,11 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
     if (missed) {
       setStatus('Llamada perdida');
       toast.error('Llamada perdida', { description: session?.status?.number ?? 'No se atendió la llamada entrante.' });
-      notify('Llamada perdida', session?.status?.number ?? 'No se atendió la llamada entrante.');
+      // Replaces the ringing alert (same tag) when unfocused; otherwise just clears it.
+      if (document.hasFocus()) dismissCallAlert();
+      else notify('Llamada perdida', session?.status?.number ?? 'No se atendió la llamada entrante.');
     } else {
+      dismissCallAlert();
       setStatus('Llamada finalizada');
     }
     // Any real customer call (not an internal attended-transfer consult) is a
@@ -353,7 +364,7 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
       setRemoteStream(null);
     }
     void refreshHistory();
-  }, [notify, refreshHistory, rememberCall, reportLiveCall, restoreSessionMedia, stopRingtone]);
+  }, [dismissCallAlert, notify, refreshHistory, rememberCall, reportLiveCall, restoreSessionMedia, stopRingtone]);
 
   const connect = useCallback(async () => {
     if (connectingRef.current || !live.current) return;
@@ -370,6 +381,7 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
       }
 
       destroy.current?.();
+      extensionRef.current = credentials.extension;
       const sdk = await import('ys-webrtc-sdk-core');
       const operator = await sdk.init({
         username: credentials.extension,
@@ -405,7 +417,7 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
         reportLiveCall(session, 'RING', false, true);
         startRingtone();
         toast.info('Llamada entrante', { description: session.status?.number ?? 'Contesta desde NexPhone.' });
-        notify('Llamada entrante', session.status?.number ?? 'Contesta desde NexoOmni.');
+        notify('Llamada entrante', session.status?.number ?? 'Contesta desde NexoOmni.', true);
         // A missed call never reaches startSession. Listen directly to the
         // incoming session so it is recorded even when Yeastar removes it
         // before emitting a phone-level deleteSession event.
@@ -414,6 +426,7 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
       });
       operator.phone.on('startSession', ({ session }) => {
         stopRingtone();
+        dismissCallAlert();
         activeSession.current = session;
         setActive(session);
         setIncoming(null);
@@ -455,7 +468,7 @@ export function TelephonyProvider({ children }: { children: ReactNode }) {
       connectingRef.current = false;
       setConnecting(false);
     }
-  }, [clearSession, notify, refreshHistory, reportLiveCall, startRingtone, stopRingtone]);
+  }, [clearSession, dismissCallAlert, notify, refreshHistory, reportLiveCall, startRingtone, stopRingtone]);
 
   const refreshConfiguration = useCallback(async () => {
     try {

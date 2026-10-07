@@ -89,10 +89,44 @@ self.addEventListener('message', (event) => {
   event.waitUntil(updateMobileBadge(event.data.count));
 });
 
+// Calls use one tag per extension so the page alert and the server push
+// collapse into one entry. A still-ringing entry is not repeated; an older
+// one (a previous call) is replaced and alerts again.
+const CALL_RING_WINDOW_MS = 60_000;
+const CALL_VIBRATION = [600, 300, 600, 300, 600, 300, 600];
+
+async function showCallNotification(payload) {
+  // A focused NexoOmni window is already ringing through NexPhone.
+  const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+  if (windows.some((client) => client.focused)) return;
+  const existing = await self.registration.getNotifications({ tag: payload.tag });
+  const ringingAt = Number.isFinite(payload.ringingAt) ? payload.ringingAt : Date.now();
+  const stillRinging = existing.some((notification) => {
+    const previous = notification.data?.ringingAt;
+    return Number.isFinite(previous) && Math.abs(ringingAt - previous) < CALL_RING_WINDOW_MS;
+  });
+  if (stillRinging) return;
+  await self.registration.showNotification(payload.title, {
+    body: payload.body,
+    icon: '/icon-192.png',
+    badge: '/icon-192.png',
+    tag: payload.tag,
+    silent: false,
+    renotify: true,
+    requireInteraction: true,
+    vibrate: CALL_VIBRATION,
+    data: { url: payload.url, focusOnly: true, ringingAt },
+  });
+}
+
 self.addEventListener('push', (event) => {
   if (!event.data) return;
   event.waitUntil((async () => {
     const payload = event.data.json();
+    if (payload.kind === 'call') {
+      await showCallNotification(payload);
+      return;
+    }
     // A visible browser window can be behind another app. Push must always
     // display a system notification, independently of page visibility.
     const existing = await self.registration.getNotifications({ tag: payload.tag });
@@ -122,6 +156,8 @@ self.addEventListener('notificationclick', (event) => {
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(async (clients) => {
       const existing = clients.find((client) => new URL(client.url).origin === self.location.origin);
+      // Navigating would reload the page and drop the ringing WebRTC session.
+      if (existing && event.notification.data?.focusOnly === true) return existing.focus();
       if (existing) {
         await existing.navigate(target.href);
         return existing.focus();

@@ -136,4 +136,54 @@ describe('service worker message notifications', () => {
     });
     expect(respondWith).not.toHaveBeenCalled();
   });
+
+  const callPush = (worker: ReturnType<typeof createWorker>, ringingAt: number) => worker.dispatch('push', {
+    json: () => ({
+      kind: 'call', title: 'Llamada entrante', body: 'Ana is calling.',
+      url: '/inbox', tag: 'nexoomni-call-1001', ringingAt,
+    }),
+  });
+
+  it('shows a persistent ringing call alert that focuses without reloading the softphone', async () => {
+    const worker = createWorker('Mozilla/5.0 (Linux; Android 14) Mobile');
+    worker.matchAll.mockResolvedValue([]);
+    await callPush(worker, 1_000);
+    expect(worker.showNotification).toHaveBeenCalledWith('Llamada entrante', expect.objectContaining({
+      tag: 'nexoomni-call-1001', requireInteraction: true, renotify: true, silent: false,
+      vibrate: [600, 300, 600, 300, 600, 300, 600],
+      data: { url: '/inbox', focusOnly: true, ringingAt: 1_000 },
+    }));
+    expect(worker.setAppBadge).not.toHaveBeenCalled();
+
+    const navigate = vi.fn();
+    const focus = vi.fn().mockResolvedValue(undefined);
+    worker.matchAll.mockResolvedValue([{ url: 'https://nexoomni.example/inbox', navigate, focus }]);
+    const close = vi.fn();
+    await new Promise<void>((resolve) => {
+      worker.handlers.get('notificationclick')?.({
+        notification: { close, data: { url: '/inbox', focusOnly: true } },
+        waitUntil: (promise: Promise<unknown>) => { void promise.then(() => resolve()); },
+      } as unknown as WorkerEvent);
+    });
+    expect(focus).toHaveBeenCalledOnce();
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it('skips the call push while a NexoOmni window is focused', async () => {
+    const worker = createWorker('Windows');
+    worker.matchAll.mockResolvedValue([{ url: 'https://nexoomni.example/inbox', focused: true }]);
+    await callPush(worker, 1_000);
+    expect(worker.showNotification).not.toHaveBeenCalled();
+  });
+
+  it('collapses repeated alerts for the same ringing call but alerts again for a later call', async () => {
+    const worker = createWorker('Android Mobile');
+    worker.matchAll.mockResolvedValue([]);
+    worker.getNotifications.mockResolvedValueOnce([{ data: { ringingAt: 1_000 } }]);
+    await callPush(worker, 5_000);
+    expect(worker.showNotification).not.toHaveBeenCalled();
+    worker.getNotifications.mockResolvedValueOnce([{ data: { ringingAt: 1_000 } }]);
+    await callPush(worker, 120_000);
+    expect(worker.showNotification).toHaveBeenCalledOnce();
+  });
 });

@@ -1,10 +1,11 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
-import { NextResponse } from 'next/server'
+import { after, NextResponse } from 'next/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { findExistingContact } from '@/lib/contacts/dedupe'
 import { aiCdrIds, findValue, parsePbxLocalTime, type JsonRecord } from '@/lib/telephony/yeastar-ai'
 import { callCustomerPhone } from '@/lib/telephony/call-party'
+import { sendIncomingCallPush } from '@/lib/notifications/web-push'
 
 export const dynamic = 'force-dynamic'
 
@@ -285,6 +286,7 @@ export async function POST(request: Request, context: { params: Promise<{ accoun
   }
 
   const transitions: string[] = []
+  const ringing = new Map<string, string | null>()
   for (const member of event.members) {
     const calls = trackedCalls(member, knownExtensions, peer)
     if (!calls.length) {
@@ -314,7 +316,28 @@ export async function POST(request: Request, context: { params: Promise<{ accoun
         return NextResponse.json({ error: 'Could not persist event' }, { status: 500 })
       }
       transitions.push(`Extensión ${call.extension}: ${call.status}, visible en Supervisión.`)
+      // Yeastar documents RING as "the callee is ringing", independent of the
+      // trunk direction, so this is the moment that agent needs an alert.
+      if (call.status === 'RING') ringing.set(call.extension, call.peerNumber)
     }
+  }
+  if (ringing.size) {
+    after(async () => {
+      try {
+        const names = new Map<string, string | null>()
+        await Promise.all([...new Set([...ringing.values()].filter((value): value is string => Boolean(value)))].map(async (number) => {
+          const contact = await findExistingContact(db, accountId, number)
+          const row = contact ? (await db.from('contacts').select('name').eq('id', contact.id).maybeSingle()).data : null
+          names.set(number, row?.name?.trim() || null)
+        }))
+        const result = await sendIncomingCallPush(db, accountId, [...ringing].map(([extension, callerNumber]) => ({
+          extension, callerNumber, callerName: callerNumber ? names.get(callerNumber) ?? null : null,
+        })))
+        if (result.failed) console.warn('[yeastar] incoming call push:', result)
+      } catch (error) {
+        console.error('[yeastar] incoming call push failed:', error)
+      }
+    })
   }
   await receipt(db, accountId, 'processed', transitions.join(' ') || `Evento 30011 procesado con ${event.members.length} miembro(s), sin una extensión supervisable.`, event.eventType, event.callId)
   return NextResponse.json({ received: true })

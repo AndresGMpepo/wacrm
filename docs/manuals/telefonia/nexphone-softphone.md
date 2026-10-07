@@ -39,6 +39,34 @@ transferencias y seguimientos. La tarjeta de llamada entrante también
 queda dentro de la pantalla. Esto no cambia las restricciones del
 navegador sobre llamadas WebRTC en segundo plano.
 
+## Avisos de llamada entrante
+
+Para recibir estos avisos, activa antes las notificaciones en
+**Configuración → Notificaciones en segundo plano** (ver
+[Instalar NexoOmni](../primeros-pasos/instalar-nexoomni.md)).
+
+- **Escritorio:** si NexoOmni está abierto pero en otra ventana o
+  minimizado, aparece un aviso del sistema **Llamada entrante** con
+  sonido. El aviso permanece hasta que contestes o cuelgues. Al hacer clic
+  vuelves a NexoOmni sin recargar la página, así que puedes contestar desde
+  NexPhone. Si la llamada no se contesta, el aviso cambia a **Llamada
+  perdida**.
+- **Celular:** cuando el conmutador empieza a hacer sonar tu extensión,
+  NexoOmni envía de inmediato un aviso con vibración, aunque la app esté
+  en segundo plano. Si el número está guardado como contacto, el aviso
+  muestra su nombre.
+
+**Límites en el celular.** Una app instalada desde el navegador no puede
+timbrar como una llamada telefónica normal (pantalla completa y timbre
+continuo). Eso solo lo pueden hacer las apps nativas. Si Android cerró
+NexoOmni, al tocar el aviso la app se abre y NexPhone vuelve a
+conectarse, pero no se garantiza que todavía puedas contestar esa misma
+llamada. Si necesitas contestar con seguridad desde el celular con la app
+cerrada, usa Linkus Mobile de Yeastar en la misma extensión.
+
+El aviso inmediato en el celular requiere que el administrador haya
+configurado los eventos de llamada de Yeastar en Supervisión en vivo.
+
 ## Contexto al contestar una llamada
 
 Al contestar una llamada entrante en NexPhone se abre una ventana con:

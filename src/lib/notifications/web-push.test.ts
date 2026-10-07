@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import webpush from 'web-push';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { processWebPushOutbox, sendDeviceTestPush } from './web-push';
+import { processWebPushOutbox, sendDeviceTestPush, sendIncomingCallPush } from './web-push';
 
 vi.mock('web-push', () => ({
   default: { setVapidDetails: vi.fn(), sendNotification: vi.fn().mockResolvedValue({ statusCode: 201 }) },
@@ -131,5 +131,56 @@ describe('background Web Push delivery', () => {
     const cutoff = Date.parse(url.searchParams.get('created_at')!.replace(/^lt\./, ''));
     expect(before - cutoff).toBeGreaterThanOrEqual(15 * 60_000 - 1_000);
     expect(before - cutoff).toBeLessThanOrEqual(15 * 60_000 + 1_000);
+  });
+});
+
+describe('incoming call Web Push', () => {
+  function callDatabase(role = 'agent') {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockImplementation(async (input) => {
+      const table = new URL(String(input)).pathname.split('/').pop();
+      if (table === 'telephony_user_configs') {
+        return Response.json([{ user_id: 'agent-id', extension: '1001' }]);
+      }
+      if (table === 'profiles') return Response.json([{ user_id: 'agent-id', account_role: role }]);
+      if (table === 'web_push_subscriptions') {
+        return Response.json([{
+          id: 'subscription-id', user_id: 'agent-id', endpoint: 'https://fcm.googleapis.com/fcm/send/phone',
+          p256dh: 'key', auth: 'auth', locale: 'es',
+        }]);
+      }
+      throw new Error(`Unexpected call push query: ${String(input)}`);
+    });
+    return createClient('https://supabase.example', 'test-service-key', {
+      global: { fetch }, auth: { persistSession: false, autoRefreshToken: false },
+    });
+  }
+
+  it('sends an immediate short-lived call alert tagged by the ringing extension', async () => {
+    vi.mocked(webpush.sendNotification).mockClear();
+    vi.stubEnv('NEXT_PUBLIC_WEB_PUSH_VAPID_PUBLIC_KEY', 'test-public-key');
+    vi.stubEnv('WEB_PUSH_VAPID_PRIVATE_KEY', 'test-private-key');
+    vi.stubEnv('WEB_PUSH_VAPID_SUBJECT', 'mailto:test@example.com');
+    const result = await sendIncomingCallPush(callDatabase(), 'account-id', [
+      { extension: '1001', callerNumber: '+525512345678', callerName: 'Ana López' },
+    ]);
+    expect(result).toEqual({ sent: 1, failed: 0 });
+    const [subscription, payload, options] = vi.mocked(webpush.sendNotification).mock.calls[0];
+    expect(subscription.endpoint).toBe('https://fcm.googleapis.com/fcm/send/phone');
+    expect(JSON.parse(String(payload))).toMatchObject({
+      kind: 'call', tag: 'nexoomni-call-1001', url: '/inbox', body: expect.stringContaining('Ana López'),
+    });
+    expect(options).toMatchObject({ TTL: 30, urgency: 'high' });
+  });
+
+  it('never alerts a user whose role is below agent', async () => {
+    vi.mocked(webpush.sendNotification).mockClear();
+    vi.stubEnv('NEXT_PUBLIC_WEB_PUSH_VAPID_PUBLIC_KEY', 'test-public-key');
+    vi.stubEnv('WEB_PUSH_VAPID_PRIVATE_KEY', 'test-private-key');
+    vi.stubEnv('WEB_PUSH_VAPID_SUBJECT', 'mailto:test@example.com');
+    const result = await sendIncomingCallPush(callDatabase('viewer'), 'account-id', [
+      { extension: '1001', callerNumber: null, callerName: null },
+    ]);
+    expect(result).toEqual({ sent: 0, failed: 0 });
+    expect(webpush.sendNotification).not.toHaveBeenCalled();
   });
 });
