@@ -48,6 +48,50 @@ sin asignar no generan una alerta push. Puedes desactivarlas desde el mismo
 control en cualquier momento. En iPhone o iPad, primero agrega la aplicación
 a la pantalla de inicio y luego activa las notificaciones desde ella.
 
+## Avisos en escritorio y móvil
+
+Los mensajes asignados generan un aviso del sistema, aunque NexoOmni esté
+en segundo plano o una ventana quede detrás de otra aplicación. En
+escritorio se solicita que el aviso permanezca hasta que lo atiendas;
+el navegador puede no admitir esa opción. Al pulsar el aviso se abre el chat.
+
+En móvil se solicita un aviso con sonido y vibración. En dispositivos
+compatibles, el ícono de la aplicación instalada muestra el total de
+mensajes sin leer de las conversaciones asignadas a ti, no el número de
+notificaciones de la campana. El contador se actualiza al recibir push y
+al leer o reasignar conversaciones con la aplicación abierta. No aparece
+un contador nuevo en el ícono de escritorio. Algunos móviles solo muestran
+un punto o no admiten contadores.
+
+Un chat abierto en segundo plano no marca los mensajes como leídos:
+debes volver a la aplicación y tener el chat visible y enfocado. Pulsar
+un aviso no borra por sí solo los mensajes de otros chats.
+
+El sonido, la vibración, los banners y la pantalla bloqueada dependen de
+los ajustes del sistema. Permite **banners**, **sonidos** e **insignias**
+para NexoOmni o el navegador y revisa los modos No molestar/Concentración.
+En iPhone/iPad se requiere iOS/iPadOS 16.4 o posterior y la PWA instalada.
+La aplicación no puede forzar un sonido personalizado ni saltarse el modo
+silencioso o las restricciones de batería.
+
+El envío push lo hace el servidor, no la pantalla de la aplicación.
+El worker debe estar funcionando incluso con todos los dispositivos
+cerrados. Como procesa la cola cada minuto y por lotes, los avisos no son
+instantáneos y pueden demorarse más si hay mensajes pendientes. Si solo
+ves el aviso dentro de la aplicación, comprobar permisos no basta:
+revisa también las claves VAPID, la suscripción del dispositivo y el worker.
+
+### Comprobar los avisos después de desplegar
+
+1. Activa las notificaciones en cada dispositivo que uses.
+2. En escritorio, cambia a otra aplicación; en móvil, deja NexoOmni en
+   segundo plano y bloquea la pantalla.
+3. Envía dos mensajes a una conversación asignada a ese agente.
+4. Comprueba el aviso del sistema y, en móviles compatibles, el contador
+   de mensajes sin leer (si no tenías otros, pasa a 1 y después a 2).
+5. Abre ese chat: el contador debe bajar al leerlo; los pendientes de
+   otras conversaciones asignadas siguen contando.
+
 ## Configuración del servidor
 
 El administrador debe completar estos pasos antes de que los usuarios

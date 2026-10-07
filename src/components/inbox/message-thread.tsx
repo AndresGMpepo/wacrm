@@ -469,25 +469,28 @@ export function MessageThread({
     setReplyTo(null);
   }, [conversationId]);
 
-  // Reset the server-side unread_count to 0 whenever an unread count
-  // surfaces on the active conversation — covers both (a) opening a
-  // conversation that had unread messages and (b) new messages arriving
-  // while the user is already viewing the thread (webhook server-bumps
-  // unread_count to N+1; the realtime UPDATE propagates it into the
-  // client, which re-runs this effect and flips it back to 0).
-  //
-  // Guarding on hasUnread prevents the eq-update loop: once unread_count
-  // is 0 the condition is false, so no further UPDATE is issued.
+  // A mounted thread in a background tab is not being read. Keep its
+  // unread messages (and mobile badge) until the user returns to it.
   useEffect(() => {
     if (!conversationId || !hasUnread) return;
     const supabase = createClient();
-    supabase
-      .from("conversations")
-      .update({ unread_count: 0 })
-      .eq("id", conversationId)
-      .then(({ error }) => {
-        if (error) console.error("Failed to reset unread_count:", error);
-      });
+    const markRead = () => {
+      if (document.visibilityState !== "visible" || !document.hasFocus()) return;
+      void supabase
+        .from("conversations")
+        .update({ unread_count: 0 })
+        .eq("id", conversationId)
+        .then(({ error }) => {
+          if (error) console.error("Failed to reset unread_count:", error);
+        });
+    };
+    markRead();
+    document.addEventListener("visibilitychange", markRead);
+    window.addEventListener("focus", markRead);
+    return () => {
+      document.removeEventListener("visibilitychange", markRead);
+      window.removeEventListener("focus", markRead);
+    };
   }, [conversationId, hasUnread]);
 
   // Auto-scroll to bottom on new messages. Keyed off the last message's id

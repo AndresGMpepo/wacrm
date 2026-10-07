@@ -150,7 +150,7 @@
     "updateNow": "Actualizar",
     "pushTitle": "Notificaciones en segundo plano",
     "pushDescription": "Recibe una alerta cuando llegue un mensaje nuevo asignado a ti, incluso si Nexoomni no está abierto.",
-    "pushEnabledDescription": "Las alertas de mensajes asignados están activas en este navegador.",
+    "pushEnabledDescription": "Avisos del sistema para mensajes asignados, incluso en segundo plano. En móviles compatibles, el ícono muestra los mensajes sin leer. El sonido y la vibración dependen de los ajustes del dispositivo.",
     "pushNotificationTitle": "Nuevo mensaje en Nexoomni",
     "pushNotificationBody": "Tienes un mensaje nuevo asignado.",
     "enablePush": "Activar notificaciones",

@@ -4,6 +4,7 @@ import esMessages from '../../../messages/es.json';
 import enMessages from '../../../messages/en.json';
 import koMessages from '../../../messages/ko.json';
 import { hasMinRole, isAccountRole } from '@/lib/auth/roles';
+import { countAssignedUnreadMessages } from './unread-messages';
 
 interface PushOutboxRow {
   id: string;
@@ -172,6 +173,16 @@ export async function processWebPushOutbox(db: SupabaseClient) {
       continue;
     }
 
+    let unreadCount: number;
+    try {
+      unreadCount = await countAssignedUnreadMessages(db, item.account_id, item.user_id);
+    } catch (error) {
+      console.error(`[web-push] Could not count unread messages for ${item.id}:`, error);
+      await retryOutboxItem(db, item, attempt, 'Could not count unread messages.');
+      failed++;
+      continue;
+    }
+
     const outcomes = await Promise.all((subscriptions as PushSubscriptionRow[]).map(async (subscription) => {
       try {
         const copy = pushCopy[subscription.locale];
@@ -180,11 +191,12 @@ export async function processWebPushOutbox(db: SupabaseClient) {
           body: copy.pushNotificationBody,
           url: `/inbox?c=${encodeURIComponent(item.conversation_id)}`,
           tag: `nexoomni-${notification.id}`,
+          unreadCount,
         });
         await webpush.sendNotification({
           endpoint: subscription.endpoint,
           keys: { p256dh: subscription.p256dh, auth: subscription.auth },
-        }, payload, { TTL: 300, timeout: 8_000 });
+        }, payload, { TTL: 300, timeout: 8_000, urgency: 'high' });
         return { ok: true as const };
       } catch (error) {
         const statusCode = getStatusCode(error);

@@ -150,7 +150,7 @@
     "updateNow": "Update",
     "pushTitle": "Background notifications",
     "pushDescription": "Get an alert when a new message assigned to you arrives, even when Nexoomni is closed.",
-    "pushEnabledDescription": "Alerts for assigned messages are active in this browser.",
+    "pushEnabledDescription": "System alerts for assigned messages, even in the background. On supported mobile devices, the app icon shows unread messages. Sound and vibration depend on your device settings.",
     "pushNotificationTitle": "New message in Nexoomni",
     "pushNotificationBody": "You have a new assigned message.",
     "enablePush": "Enable notifications",

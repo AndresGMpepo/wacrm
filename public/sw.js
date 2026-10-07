@@ -69,29 +69,45 @@ self.addEventListener('fetch', (event) => {
   );
 });
 
+const isMobileDevice = () => /Android|iPhone|iPad|iPod|Mobile/i.test(self.navigator.userAgent);
+
+async function updateMobileBadge(count) {
+  if (!isMobileDevice() || !Number.isSafeInteger(count) || count < 0) return;
+  try {
+    if (count === 0 && self.navigator.clearAppBadge) {
+      await self.navigator.clearAppBadge();
+    } else if (self.navigator.setAppBadge) {
+      await self.navigator.setAppBadge(count);
+    }
+  } catch (error) {
+    console.error('[pwa] Could not update mobile app badge:', error);
+  }
+}
+
+self.addEventListener('message', (event) => {
+  if (event.data?.type !== 'NEXOOMNI_UNREAD_MESSAGES') return;
+  event.waitUntil(updateMobileBadge(event.data.count));
+});
+
 self.addEventListener('push', (event) => {
   if (!event.data) return;
-  const payload = event.data.json();
-
-  event.waitUntil(
-    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(async (clients) => {
-      const activeAppClient = clients.some((client) => {
-        const url = new URL(client.url);
-        return url.origin === self.location.origin
-          && client.visibilityState === 'visible'
-          && !['/login', '/signup'].includes(url.pathname);
-      });
-      if (activeAppClient) return;
-
-      await self.registration.showNotification(payload.title, {
-        body: payload.body,
-        icon: '/icon-192.png',
-        badge: '/icon-192.png',
-        tag: payload.tag,
-        data: { url: payload.url },
-      });
-    }),
-  );
+  event.waitUntil((async () => {
+    const payload = event.data.json();
+    // A visible browser window can be behind another app. Push must always
+    // display a system notification, independently of page visibility.
+    await self.registration.showNotification(payload.title, {
+      body: payload.body,
+      icon: '/icon-192.png',
+      badge: '/icon-192.png',
+      tag: payload.tag,
+      silent: false,
+      renotify: true,
+      requireInteraction: !isMobileDevice(),
+      vibrate: [200, 100, 200],
+      data: { url: payload.url },
+    });
+    await updateMobileBadge(payload.unreadCount);
+  })());
 });
 
 self.addEventListener('notificationclick', (event) => {

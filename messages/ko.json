@@ -150,7 +150,7 @@
     "updateNow": "업데이트",
     "pushTitle": "백그라운드 알림",
     "pushDescription": "Nexoomni가 닫혀 있어도 내게 배정된 새 메시지를 알림으로 받습니다.",
-    "pushEnabledDescription": "이 브라우저에서 배정된 메시지 알림이 활성화되어 있습니다.",
+    "pushEnabledDescription": "백그라운드에서도 배정된 메시지의 시스템 알림을 받습니다. 지원되는 모바일 기기에서는 앱 아이콘에 읽지 않은 메시지 수가 표시됩니다. 소리와 진동은 기기 설정에 따라 달라집니다.",
     "pushNotificationTitle": "Nexoomni 새 메시지",
     "pushNotificationBody": "새 메시지가 배정되었습니다.",
     "enablePush": "알림 켜기",
