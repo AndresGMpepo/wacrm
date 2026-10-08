@@ -143,6 +143,12 @@ function InboxPageInner() {
   // chat until a full reload.
   const manualSelectionRef = useRef<string | null>(null);
 
+  // Mobile back clears the selection immediately, but router.replace
+  // ("/inbox") lands asynchronously — until then `deepLinkConvId` still
+  // names the chat being closed, and the deep-link sync would re-open it
+  // (the back button needed two taps).
+  const closingDeepLinkRef = useRef<string | null>(null);
+
   // Tracks conversations whose hydrate fetch is currently in flight. The
   // conv-INSERT and the first-message-INSERT events both call into
   // hydrateConversation; the dedupe here keeps it at one refetch per
@@ -222,7 +228,11 @@ function InboxPageInner() {
   // ConversationList's initial fetch effect to run again. Resolve the target
   // here so every `?c=` link opens its thread, including closed or older ones.
   useEffect(() => {
-    if (!deepLinkConvId) return;
+    if (!deepLinkConvId) {
+      closingDeepLinkRef.current = null;
+      return;
+    }
+    if (closingDeepLinkRef.current === deepLinkConvId) return;
     if (activeConversation?.id === deepLinkConvId) {
       // URL and state now agree — if that's because our own manual
       // selection's router.replace just landed, clear the guard so a
@@ -529,6 +539,7 @@ function InboxPageInner() {
       ) {
         return;
       }
+      if (deepLinkConvId && closingDeepLinkRef.current === deepLinkConvId) return;
       // Resolve a pending deep-link here rather than in an effect — this
       // is an event handler, so the setState calls below are allowed by
       // react-hooks/set-state-in-effect. Runs once per ?c=<id> URL value
@@ -652,8 +663,10 @@ function InboxPageInner() {
     // Clearing the ref lets the deep-link auto-selector fire again if
     // the user later visits /inbox?c=<same-id> — desirable UX.
     autoSelectedForDeepLinkRef.current = null;
+    manualSelectionRef.current = null;
+    closingDeepLinkRef.current = deepLinkConvId;
     router.replace("/inbox", { scroll: false });
-  }, [router]);
+  }, [router, deepLinkConvId]);
 
 
   const handleMessagesLoaded = useCallback((loaded: Message[]) => {

@@ -336,6 +336,9 @@ async function handleAccountLifecycleEvent(
   }
 }
 
+const WATERMARK_GRACE_MS = 10_000
+const STATUS_RACE_RETRY_MS = 2_500
+
 /**
  * Meta reports Messenger/Instagram delivery and read receipts as a
  * watermark ("every message sent up to this moment was delivered/read"),
@@ -371,8 +374,12 @@ async function promoteOutboundWatermark(
         .maybeSingle()
       if (conversationError || !conversationRow) return
       conversationId = conversationRow.id as string
+      // Our created_at is stamped after Zernio's send call returns, i.e. a
+      // little later than Meta's own timestamp — allow for that round-trip
+      // so the message the customer just read isn't left out.
       const statusAt = text(context.statusAt)
-      watermark = statusAt && !Number.isNaN(Date.parse(statusAt)) ? statusAt : new Date().toISOString()
+      const statusMs = statusAt ? Date.parse(statusAt) : Number.NaN
+      watermark = new Date((Number.isNaN(statusMs) ? Date.now() : statusMs) + WATERMARK_GRACE_MS).toISOString()
     }
     if (!conversationId || !watermark) return
     const lowerStatuses = status === 'read' ? ['sending', 'sent', 'delivered'] : ['sending', 'sent']
@@ -427,19 +434,25 @@ async function handleOutboundStatusEvent(
   //    outbound Zernio send stores its `platform_message_id` (see
   //    zernio/send/route.ts), so this matches regardless of whether the
   //    message also belongs to a broadcast.
-  let { data: matchedMessage, error: messageFetchError } = await db
-    .from('messages')
-    .select('id, status, conversation_id, created_at')
-    .neq('sender_type', 'customer')
-    .in('platform_message_id', candidateIds)
-    .limit(1)
-    .maybeSingle()
-  if (!matchedMessage && !messageFetchError) {
-    const byInternalId = await db.from('messages').select('id, status, conversation_id, created_at')
+  const lookupStatusTarget = async () => {
+    const byPlatformId = await db
+      .from('messages')
+      .select('id, status, conversation_id, created_at')
+      .neq('sender_type', 'customer')
+      .in('platform_message_id', candidateIds)
+      .limit(1)
+      .maybeSingle()
+    if (byPlatformId.data || byPlatformId.error) return byPlatformId
+    return db.from('messages').select('id, status, conversation_id, created_at')
       .neq('sender_type', 'customer').in('zernio_internal_message_id', candidateIds)
       .limit(1).maybeSingle()
-    matchedMessage = byInternalId.data
-    messageFetchError = byInternalId.error
+  }
+  let { data: matchedMessage, error: messageFetchError } = await lookupStatusTarget()
+  // A customer watching the thread reads the reply within a second — the
+  // read event can beat send/route.ts persisting the row. Retry once.
+  if (!matchedMessage && !messageFetchError && watermarkStatus) {
+    await new Promise((resolve) => setTimeout(resolve, STATUS_RACE_RETRY_MS))
+    ;({ data: matchedMessage, error: messageFetchError } = await lookupStatusTarget())
   }
   if (messageFetchError) {
     console.error('[zernio] could not look up message for status update:', messageFetchError.message)
@@ -849,6 +862,13 @@ async function processZernioWebhook(payload: Json, eventIdHeader: string | null)
         ;({ error: messageError } = await db.from('messages').insert(inboundRow))
       }
       if (messageError && !isUniqueViolation(messageError)) throw messageError
+      // A Messenger/Instagram customer can only reply from inside the open
+      // thread, which marks it seen in Meta's own UI — but Meta does not
+      // always emit a fresh read watermark for messages sent seconds
+      // earlier, which left the last agent reply stuck on grey ticks.
+      if (!messageError && (channel === 'facebook' || channel === 'instagram')) {
+        await promoteOutboundWatermark(db, 'read', { conversation: {}, account: {}, statusAt: null }, { conversationId: conversationRow.id, createdAt: now })
+      }
 
       const reaction = extractZernioReaction(record(incoming))
       if (reaction?.targetMessageId) {

@@ -65,6 +65,10 @@ tu último mensaje, todos los anteriores también se marcan como leídos
   leyó. En Instagram verás ✓ hasta que el cliente lo lea, y entonces
   pasará directo a ✓✓ celestes.
 - Facebook Messenger sí informa ambas cosas (entregado y leído).
+- **Si el cliente te responde**, todos tus mensajes anteriores se marcan
+  como leídos: para escribir tuvo que abrir el chat. Esto cubre los
+  casos en que Meta no manda el aviso de leído de tu último mensaje
+  (pasa sobre todo cuando el cliente lo lee al instante).
 
 ## De qué publicación o historia te escribe el cliente (Facebook/Instagram)
 

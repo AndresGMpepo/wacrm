@@ -132,7 +132,14 @@ owner (5) > admin (4) > supervisor (3) > agent (2) > viewer (1)
   como *marca de agua*; Zernio solo nombra un mensaje, así que el webhook
   promueve también los salientes anteriores (`promoteOutboundWatermark`,
   solo FB/IG). Instagram NO emite `message.delivered` (tabla de eventos
-  de docs.zernio.com) — ✓ pasa directo a leído.
+  de docs.zernio.com) — ✓ pasa directo a leído. Un mensaje entrante del
+  cliente en FB/IG también promueve a `read` lo saliente anterior, y si
+  el evento de estado llega antes de que send/route.ts guarde la fila se
+  reintenta la búsqueda una vez (2.5 s); `statusAt` lleva 10 s de margen
+  porque nuestro `created_at` se sella después de la respuesta de Zernio.
+- **Inbox móvil — botón atrás**: `router.replace` es asíncrono; mientras
+  la URL aún trae `?c=<id>`, la sincronización de deep-link reabría el
+  chat. `closingDeepLinkRef` en `inbox/page.tsx` lo evita — no quitarlo.
 - **Zernio — contexto de publicación**: `metadata.storyReply`,
   `isStoryMention`, `referral` (no-ADS), `noRenderableContent` y
   `attachments[].originalType` se guardan en `messages.post_context`
