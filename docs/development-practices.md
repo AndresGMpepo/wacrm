@@ -135,8 +135,15 @@ owner (5) > admin (4) > supervisor (3) > agent (2) > viewer (1)
   de docs.zernio.com) — ✓ pasa directo a leído. Un mensaje entrante del
   cliente en FB/IG también promueve a `read` lo saliente anterior, y si
   el evento de estado llega antes de que send/route.ts guarde la fila se
-  reintenta la búsqueda una vez (2.5 s); `statusAt` lleva 10 s de margen
-  porque nuestro `created_at` se sella después de la respuesta de Zernio.
+  reintenta la búsqueda una vez (2.5 s). La marca de agua es el MÁS
+  TARDÍO entre el mensaje que nombra Zernio y `statusAt` (+5 s de margen,
+  porque nuestro `created_at` se sella después de la respuesta de
+  Zernio): Zernio puede nombrar un mensaje anterior al último leído
+  (observado en producción: de dos respuestas solo la primera pasaba a
+  azul).
+- **Push inmediato**: el webhook de Zernio llama `processWebPushOutbox`
+  dentro de `after()` tras guardar un entrante; el tick de 20 s del
+  worker queda como red de seguridad. El claim por fila es atómico.
 - **Inbox móvil — botón atrás**: `router.replace` es asíncrono; mientras
   la URL aún trae `?c=<id>`, la sincronización de deep-link reabría el
   chat. `closingDeepLinkRef` en `inbox/page.tsx` lo evita — no quitarlo.

@@ -11,6 +11,7 @@ import { extractZernioMedia, extractZernioReaction, firstZernioContactName, isZe
 import { getZernioParticipantProfile, verifyZernioSignature, type ZernioChannel } from '@/lib/zernio/server'
 import { persistZernioOutbound, zernioOutboundIsHuman } from '@/lib/zernio/outbound-message'
 import { extractZernioPostContext } from '@/lib/zernio/post-context'
+import { processWebPushOutbox } from '@/lib/notifications/web-push'
 import { isValidStatusTransition } from '@/lib/whatsapp/recipient-status-ladder'
 import { flagBroadcastReplyIfAny } from '@/lib/whatsapp/broadcast-reply-flag'
 import { handleAgendaProConfirmationReply } from '@/lib/agendapro/confirmation'
@@ -336,7 +337,7 @@ async function handleAccountLifecycleEvent(
   }
 }
 
-const WATERMARK_GRACE_MS = 10_000
+const WATERMARK_GRACE_MS = 5_000
 const STATUS_RACE_RETRY_MS = 2_500
 
 /**
@@ -374,12 +375,21 @@ async function promoteOutboundWatermark(
         .maybeSingle()
       if (conversationError || !conversationRow) return
       conversationId = conversationRow.id as string
-      // Our created_at is stamped after Zernio's send call returns, i.e. a
-      // little later than Meta's own timestamp — allow for that round-trip
-      // so the message the customer just read isn't left out.
-      const statusAt = text(context.statusAt)
-      const statusMs = statusAt ? Date.parse(statusAt) : Number.NaN
-      watermark = new Date((Number.isNaN(statusMs) ? Date.now() : statusMs) + WATERMARK_GRACE_MS).toISOString()
+    }
+    // `statusAt` is when Meta reported the read/delivery (docs.zernio.com
+    // webhooks/inbox), and Meta's receipts mean "everything sent before
+    // this moment". Zernio's event can name an EARLIER message than the
+    // last one the customer saw (observed: of two replies only the first
+    // turned blue), so the watermark is the later of the two. Our
+    // created_at is stamped after Zernio's send call returns — a little
+    // later than Meta's own timestamp — hence the grace margin.
+    const statusMs = Date.parse(text(context.statusAt))
+    const statusWatermark = Number.isNaN(statusMs)
+      ? (anchor ? null : Date.now() + WATERMARK_GRACE_MS)
+      : statusMs + WATERMARK_GRACE_MS
+    if (statusWatermark !== null) {
+      const anchorMs = watermark ? Date.parse(watermark) : Number.NaN
+      if (Number.isNaN(anchorMs) || statusWatermark > anchorMs) watermark = new Date(statusWatermark).toISOString()
     }
     if (!conversationId || !watermark) return
     const lowerStatuses = status === 'read' ? ['sending', 'sent', 'delivered'] : ['sending', 'sent']
@@ -862,6 +872,19 @@ async function processZernioWebhook(payload: Json, eventIdHeader: string | null)
         ;({ error: messageError } = await db.from('messages').insert(inboundRow))
       }
       if (messageError && !isUniqueViolation(messageError)) throw messageError
+      // The insert's triggers already queued this message's push in
+      // web_push_outbox; deliver it now instead of waiting up to 20s for
+      // the background worker tick. Claims are atomic, so a concurrent
+      // worker run can't double-send.
+      if (!messageError) {
+        after(async () => {
+          try {
+            await processWebPushOutbox(admin())
+          } catch (error) {
+            console.error('[zernio] immediate push delivery failed:', error)
+          }
+        })
+      }
       // A Messenger/Instagram customer can only reply from inside the open
       // thread, which marks it seen in Meta's own UI — but Meta does not
       // always emit a fresh read watermark for messages sent seconds
