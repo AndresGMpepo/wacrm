@@ -163,6 +163,14 @@ self.addEventListener('notificationclick', (event) => {
         return existing.focus();
       }
       return self.clients.openWindow(target.href);
+    }).catch((error) => {
+      // openWindow()/navigate() can be silently blocked by OS-level background
+      // restrictions (e.g. OnePlus/OxygenOS "deep optimization" freezing the
+      // browser process) once the device has been idle for a while. There is
+      // nothing else this handler can do, but logging it makes that failure
+      // visible via chrome://inspect/#service-workers instead of looking like
+      // a dropped tap.
+      console.error('[pwa] Could not open/focus a window from notificationclick:', error);
     }),
   );
 });
