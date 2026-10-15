@@ -28,6 +28,7 @@ export function YeastarMonitoringConfig() {
   const [webhookSecret, setWebhookSecret] = useState('')
   const [clientId, setClientId] = useState('')
   const [clientSecret, setClientSecret] = useState('')
+  const [extensionFilter, setExtensionFilter] = useState('')
   const [configured, setConfigured] = useState({ webhook: false, api: false })
   const [receipts, setReceipts] = useState<WebhookReceipt[]>([])
   const [lastCallEndReceipt, setLastCallEndReceipt] = useState<LastCallEndReceipt>(null)
@@ -41,6 +42,7 @@ export function YeastarMonitoringConfig() {
       if (!response.ok) throw new Error(data.error)
       setWebhookUrl(data.webhookUrl ?? '')
       setConfigured({ webhook: Boolean(data.config?.webhookConfigured), api: Boolean(data.config?.apiConfigured) })
+      setExtensionFilter(data.config?.extensionFilter ?? '')
       setReceipts(data.receipts ?? [])
       setLastCallEndReceipt(data.lastCallEndReceipt ?? null)
     } catch (error) { toast.error(error instanceof Error ? error.message : 'No se pudo cargar la supervisión Yeastar.') }
@@ -51,7 +53,7 @@ export function YeastarMonitoringConfig() {
   const save = async () => {
     setSaving(true)
     try {
-      const response = await fetch('/api/telephony/yeastar/monitoring-config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ webhookSecret, clientId, clientSecret }) })
+      const response = await fetch('/api/telephony/yeastar/monitoring-config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ webhookSecret, clientId, clientSecret, extensionFilter }) })
       const data = await response.json()
       if (!response.ok) throw new Error(data.error)
       setWebhookSecret(''); setClientId(''); setClientSecret('')
@@ -65,6 +67,11 @@ export function YeastarMonitoringConfig() {
     <div className="space-y-2"><Label>URL del webhook NexoOmni</Label><div className="flex gap-2"><Input readOnly value={webhookUrl} /><Button type="button" size="icon" variant="outline" onClick={() => void copy()} disabled={!webhookUrl}><Copy className="size-4" /></Button></div></div>
     <div className="space-y-2"><Label htmlFor="yeastar-webhook-secret">Secreto del webhook</Label><Input id="yeastar-webhook-secret" type="password" value={webhookSecret} onChange={(event) => setWebhookSecret(event.target.value)} placeholder={configured.webhook ? 'Guardado — escribe solo para reemplazarlo' : 'Pega el secreto generado por Yeastar'} disabled={loading || saving} /><p className="text-xs text-muted-foreground">En Yeastar: Integraciones → API → Webhook Event Push. Usa POST, selecciona los eventos 30011 Call State Changed y 30012 Call End Details Notification en el mismo webhook, y pega aquí su secreto.</p></div>
     <div className="grid gap-4 md:grid-cols-2"><div className="space-y-2"><Label htmlFor="yeastar-api-client-id">Client ID OpenAPI</Label><Input id="yeastar-api-client-id" value={clientId} onChange={(event) => setClientId(event.target.value)} placeholder={configured.api ? 'Guardado — opcional reemplazar' : 'Se usará después para Susurrar/Intervenir'} disabled={loading || saving} /></div><div className="space-y-2"><Label htmlFor="yeastar-api-client-secret">Client Secret OpenAPI</Label><Input id="yeastar-api-client-secret" type="password" value={clientSecret} onChange={(event) => setClientSecret(event.target.value)} placeholder={configured.api ? 'Guardado — opcional reemplazar' : 'Se usará después para Susurrar/Intervenir'} disabled={loading || saving} /></div></div>
+    <div className="space-y-2">
+      <Label htmlFor="yeastar-extension-filter">Rango de extensiones de esta cuenta (opcional)</Label>
+      <Input id="yeastar-extension-filter" value={extensionFilter} onChange={(event) => setExtensionFilter(event.target.value)} placeholder="Ej. 1000-1120,1200" disabled={loading || saving} />
+      <p className="text-xs text-muted-foreground">Solo necesario si este PBX es compartido por varios clientes de NexoOmni. Escribe los rangos o extensiones sueltas de esta cuenta, separados por comas (ej. 1000-1120,1200). NexoOmni ignorará llamadas y transcripciones de cualquier otra extensión del mismo PBX, aunque no use NexoOmni. Déjalo vacío si este PBX pertenece solo a esta cuenta.</p>
+    </div>
     <p className="rounded-md border border-primary/25 bg-primary/8 p-3 text-xs text-muted-foreground">Estado: webhook {configured.webhook ? 'configurado' : 'pendiente'} · OpenAPI {configured.api ? 'configurada' : 'pendiente'}.</p>
     <div className="rounded-md border p-3 text-xs">
       <p className="font-medium text-foreground">Diagnóstico: último evento 30012 (fin de llamada / transcripción)</p>

@@ -1,66 +1,13 @@
 import { NextResponse } from 'next/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
-import { decrypt } from '@/lib/whatsapp/encryption'
 import { toErrorResponse } from '@/lib/auth/account'
 import { requireEntitlement } from '@/lib/account/entitlements'
+import { isStaleSoftphoneCall, reconcileYeastarLiveCalls } from '@/lib/telephony/live-call-reconcile'
 
 export const dynamic = 'force-dynamic'
 
-type YeastarReply = { errcode?: number; errmsg?: string; access_token?: string; access_token_expire_time?: number }
-type YeastarCallReply = YeastarReply & {
-  data?: Array<{ members?: Array<{ extension?: { number?: string; member_status?: string } }> }>
-}
-type CachedToken = { value: string; expiresAt: number }
-const tokenCache = new Map<string, CachedToken>()
-
 function admin() {
   return createAdminClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
-}
-
-function apiUrl(pbxUrl: string, endpoint: string) {
-  return new URL(`openapi/v1.0/${endpoint}`, `${pbxUrl.replace(/\/+$/, '')}/`)
-}
-
-async function parseReply(response: Response): Promise<YeastarReply> {
-  return response.json().catch(() => ({})) as Promise<YeastarReply>
-}
-
-async function accessToken(accountId: string, pbxUrl: string, clientId: string, clientSecret: string) {
-  const cached = tokenCache.get(accountId)
-  if (cached && cached.expiresAt > Date.now()) return cached.value
-  const response = await fetch(apiUrl(pbxUrl, 'get_token'), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'User-Agent': 'WACRM-Yeastar-Supervision/1.0' },
-    body: JSON.stringify({ username: clientId, password: clientSecret }),
-    signal: AbortSignal.timeout(15_000),
-  })
-  const data = await parseReply(response)
-  if (!response.ok || data.errcode !== 0 || !data.access_token) throw new Error(data.errmsg || 'Yeastar no aceptó las credenciales OpenAPI.')
-  const ttl = Math.max(60, (data.access_token_expire_time ?? 1800) - 60)
-  tokenCache.set(accountId, { value: data.access_token, expiresAt: Date.now() + ttl * 1000 })
-  return data.access_token
-}
-
-async function reconcilePbXCalls(db: ReturnType<typeof admin>, accountId: string, calls: Array<{ call_id: string; extension: string; channel_id: string }>, pbxUrl: string | null | undefined, clientId: string | null | undefined, clientSecret: string | null | undefined) {
-  if (!pbxUrl || !clientId || !clientSecret) return
-  const token = await accessToken(accountId, pbxUrl, decrypt(clientId), decrypt(clientSecret))
-  const url = apiUrl(pbxUrl, 'call/query')
-  url.searchParams.set('access_token', token)
-  const response = await fetch(url, { headers: { 'User-Agent': 'WACRM-Yeastar-Supervision/1.0' }, signal: AbortSignal.timeout(15_000) })
-  const result = await parseReply(response) as YeastarCallReply
-  if (!response.ok || result.errcode !== 0) throw new Error(result.errmsg || 'Yeastar no pudo consultar las llamadas activas.')
-
-  const activeExtensions = new Set((result.data ?? []).flatMap((call) => (call.members ?? []).flatMap((member) => {
-    const extension = member.extension
-    return extension?.number && extension.member_status !== 'BYE' ? [extension.number] : []
-  })))
-  // Rows written from PBX webhooks are cache only. Yeastar's live query is
-  // authoritative and removes an ALERT/ANSWER row when its final BYE webhook
-  // was not delivered.
-  await Promise.all(calls
-    .filter((call) => !call.channel_id.startsWith('wacrm:') && !activeExtensions.has(call.extension))
-    .map((call) => db.from('yeastar_live_calls').delete()
-      .eq('account_id', accountId).eq('call_id', call.call_id).eq('extension', call.extension)))
 }
 
 export async function GET() {
@@ -82,7 +29,7 @@ export async function GET() {
     if (channelsResult.error) throw channelsResult.error
     if (monitoringResult.error) throw monitoringResult.error
     if (integrationResult.error) throw integrationResult.error
-    await reconcilePbXCalls(
+    await reconcileYeastarLiveCalls(
       db,
       accountId,
       callsResult.data ?? [],
@@ -105,7 +52,6 @@ export async function GET() {
     // hides any legacy row written before that protection existed.
     const channelCallIds = new Set((channelsResult.data ?? []).map((channel) => channel.call_id))
     const latestByExtension = new Map<string, NonNullable<typeof callsResult.data>[number]>()
-    const staleSoftphoneBefore = Date.now() - 45_000
     for (const call of callsResult.data ?? []) {
       if (!usersByExtension.has(call.extension)) continue
       const isSoftphoneCall = call.channel_id.startsWith('wacrm:')
@@ -115,7 +61,7 @@ export async function GET() {
       // Browser-originated calls send a heartbeat every 15 seconds. If the
       // tab closes before its final DELETE reaches us, hide that stale row
       // without expiring long-running PBX-originated calls.
-      if (isSoftphoneCall && new Date(call.last_event_at).getTime() < staleSoftphoneBefore) continue
+      if (isStaleSoftphoneCall(call)) continue
       const current = latestByExtension.get(call.extension)
       if (!current || new Date(call.last_event_at).getTime() > new Date(current.last_event_at).getTime()) latestByExtension.set(call.extension, call)
     }

@@ -57,6 +57,7 @@
     "remaining": "{count} new call legs remain to import. Click the button again.",
     "noPublishedTranscripts": "Yeastar did not include AI transcripts in this export. This does not mean the connection is down; the PBX may not have published the transcript yet. Wait a few minutes and try again.",
     "nothingToImport": "Yeastar included {count} transcripts, but they were already saved in NexoOmni. There were no new transcripts.",
+    "importOutOfScope": "Skipped {count} legs from extensions outside this account's configured range.",
     "importError": "The import could not be completed.",
     "importErrorConnection": "Could not connect to Yeastar. Check the OpenAPI configuration; saved transcripts are preserved.",
     "importErrorQuery": "Could not query the Yeastar export. Check that the PBX is reachable and try again.",

@@ -15,6 +15,8 @@ const report: ExecutiveReport = {
   },
   funnel: [{ stage: 'Nuevo', position: 0, deals: 1, won_deals: 1, lost_deals: 0, open_deals: 0, value: 9000, won_value: 9000 }],
   campaigns: { totals: { recipients: 10, sent: 10, delivered: 9, read: 8, replied: 2, failed: 1 }, delivery_rate: 90, read_rate: 80, reply_rate: 20, items: [] },
+  calls: { total: 20, transcribed: 18, inbound: 15, outbound: 4, internal: 1, average_duration_seconds: 185, average_sentiment_score: 70, negative: 2, negative_rate: 11, sentiment_breakdown: { positive: 10, neutral: 5, negative: 2, mixed: 1 } },
+  agendapro: { total: 10, confirmed: 4, attended: 3, no_show: 1, cancelled: 2, no_show_rate: 10, cancellation_rate: 20, attendance_rate: 30 },
 }
 
 const insight: ExecutiveReportInsight = {
@@ -58,5 +60,16 @@ describe('executive report exports', () => {
   it('adds the visible AI insight to spreadsheet exports when provided', () => {
     expect(executiveReportCsv(report, insight)).toContain('Dictamen IA')
     expect(executiveReportExcelXml(report, insight)).toContain('Dictamen IA')
+  })
+
+  it('includes calls and AgendaPro sheets only when that data is present', () => {
+    const csv = executiveReportCsv(report)
+    expect(csv).toContain('Llamadas')
+    expect(csv).toContain('AgendaPro')
+    expect(csv).not.toContain('Citas')
+    expect(csv).not.toContain('Nexo Memory')
+    const workbook = executiveReportExcelXml(report)
+    expect(workbook).toContain('ss:Name="Llamadas"')
+    expect(workbook).toContain('ss:Name="AgendaPro"')
   })
 })

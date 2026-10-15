@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { apiUrl, parsePbxLocalTime, yeastarAiConnection, type JsonRecord } from './yeastar-ai'
 import { callAgentExtension, callCustomerPhone } from './call-party'
 import { normalizeCallSummary } from './call-summary'
+import { isExtensionAllowed, type ExtensionRange } from './extension-scope'
 
 export class TranscriptionArchiveError extends Error {
   constructor(
@@ -66,8 +67,9 @@ export function parseTranscriptionArchive(value: unknown) {
 export async function syncTranscriptionArchive(db: SupabaseClient, accountId: string, phone?: string) {
   let pbxUrl: string
   let token: string
+  let extensionRanges: ExtensionRange[] | null
   try {
-    ({ pbxUrl, token } = await yeastarAiConnection(db, accountId))
+    ({ pbxUrl, token, extensionRanges } = await yeastarAiConnection(db, accountId))
   } catch (error) {
     console.error('[yeastar] transcript export credentials or connection unavailable:', error)
     throw new TranscriptionArchiveError('yeastar_connection_unavailable', 'No se pudo conectar con Yeastar para consultar la exportación. Las transcripciones ya guardadas no se eliminan.')
@@ -125,7 +127,14 @@ export async function syncTranscriptionArchive(db: SupabaseClient, accountId: st
     console.error('[yeastar] transcript export parsing failed:', error)
     throw new TranscriptionArchiveError('yeastar_invalid_export', 'No se pudo interpretar la exportación de Yeastar. Verifica que el PBX entregue el formato de transcripciones de IA.')
   }
-  if (!rows.length) return { imported: 0, updated: 0, dated: 0, remaining: 0, available: 0, alreadyPresent: 0, undated: 0 }
+  // Yeastar's export covers the whole PBX. When this account only owns a
+  // range of extensions (shared PBX with other NexoOmni tenants), drop any
+  // leg whose extension isn't in that range before it ever reaches this
+  // account's data — including legs with no determinable extension at all.
+  const totalParsed = rows.length
+  if (extensionRanges) rows = rows.filter((row) => isExtensionAllowed(row.agentExtension, extensionRanges))
+  const outOfScope = totalParsed - rows.length
+  if (!rows.length) return { imported: 0, updated: 0, dated: 0, remaining: 0, available: 0, alreadyPresent: 0, undated: 0, outOfScope }
   if (rows.length > 2000) throw new TranscriptionArchiveError('yeastar_export_too_large', 'La exportación contiene más de 2000 tramos. Filtra por teléfono de cliente para importar un conjunto más pequeño.', 413)
   const known: {
     id: string; call_id: string; cdr_id: string; transcript: string | null; started_at: string | null
@@ -204,5 +213,6 @@ export async function syncTranscriptionArchive(db: SupabaseClient, accountId: st
     remaining: Math.max(0, queuedIds.size - batch.length),
     available: rows.length, alreadyPresent: rows.length - queuedIds.size,
     undated: batch.filter((row) => row.dateUnavailable).length,
+    outOfScope,
   }
 }

@@ -4,7 +4,7 @@ description: "Cómo un administrador asigna la extensión telefónica de cada ag
 section: "telefonia"
 role: ["admin", "owner"]
 plan: ["premium"]
-updated: "2026-09-28"
+updated: "2026-10-14"
 ---
 
 ## ¿Qué es?
@@ -45,6 +45,18 @@ cuenta?**
 El sistema te avisa que primero hay que configurar la integración
 Yeastar (URL, Access ID, Access Key) antes de poder asignar
 extensiones.
+
+**Un mismo PBX da servicio a varios clientes de NexoOmni, cada uno con
+su propio rango de extensiones — ¿cómo evito que se mezclen sus
+llamadas?**
+En **Configuración → Telefonía → Supervisión de llamadas Yeastar**,
+escribe el **rango de extensiones de esta cuenta** (por ejemplo
+`1000-1120`, o varios rangos/extensiones sueltas separados por comas:
+`1000-1120,1200`). NexoOmni ignorará cualquier llamada o transcripción
+de una extensión fuera de ese rango, aunque llegue al mismo webhook o
+a la misma exportación de Yeastar — incluidas las de agentes que no
+usan NexoOmni. Deja el campo vacío si este PBX pertenece solo a esta
+cuenta (comportamiento por defecto, sin restricción).
 
 ## Ver también
 

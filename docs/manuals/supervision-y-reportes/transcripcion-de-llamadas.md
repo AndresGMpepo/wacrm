@@ -110,6 +110,11 @@ a analizar y deja de serlo, una futura reincidencia vuelve a generar aviso.
    intentarlo unos minutos después.
 7. El análisis y la actualización de Nexo Memory se hacen en segundo
    plano. Recarga el listado después de unos minutos.
+8. Si el PBX es compartido por varios clientes de NexoOmni y configuraste
+   un **rango de extensiones** en Configuración → Telefonía (ver
+   [Extensiones de NexPhone por agente](../telefonia/extensiones-por-agente.md)),
+   los tramos de extensiones fuera de ese rango se omiten y NexoOmni
+   indica cuántos se descartaron.
 
 Si la exportación es demasiado grande, filtra por teléfono. Si la
 exportación falla, el mensaje identifica si Yeastar rechazó la consulta,
@@ -136,6 +141,14 @@ publica el CDR y la transcripción de una extensión de Linkus, aplicación
 móvil o teléfono físico, NexoOmni la importa y la analiza de la misma
 forma. El nombre solo aparece si la extensión está vinculada a un miembro
 o si Yeastar lo incluye en su exportación.
+
+Si el mismo PBX físico da servicio a varios clientes de NexoOmni, cada uno
+con su propio rango de extensiones, configura ese rango en **Configuración
+→ Telefonía → Supervisión de llamadas Yeastar** (ver
+[Extensiones de NexPhone por agente](../telefonia/extensiones-por-agente.md)).
+Sin ese rango, NexoOmni importaría las llamadas de cualquier extensión del
+PBX que llegue a su webhook o a la exportación de Yeastar, incluidas las de
+otro cliente.
 
 ## Preguntas frecuentes
 

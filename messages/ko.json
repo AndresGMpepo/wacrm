@@ -57,6 +57,7 @@
     "remaining": "가져올 새 통화 구간이 {count}개 남았습니다. 버튼을 다시 누르세요.",
     "noPublishedTranscripts": "이 내보내기에 Yeastar AI 녹취록이 포함되지 않았습니다. 연결이 끊겼다는 뜻은 아닙니다. PBX가 아직 녹취록을 게시하지 않았을 수 있습니다. 몇 분 후 다시 시도하세요.",
     "nothingToImport": "Yeastar가 녹취록 {count}개를 반환했지만 이미 NexoOmni에 저장되어 있습니다. 새 녹취록이 없습니다.",
+    "importOutOfScope": "이 계정에 설정된 범위를 벗어난 내선의 통화 구간 {count}개를 건너뛰었습니다.",
     "importError": "가져오기를 완료하지 못했습니다.",
     "importErrorConnection": "Yeastar에 연결할 수 없습니다. OpenAPI 설정을 확인하세요. 저장된 녹취록은 유지됩니다.",
     "importErrorQuery": "Yeastar 내보내기를 조회할 수 없습니다. PBX 연결을 확인한 후 다시 시도하세요.",

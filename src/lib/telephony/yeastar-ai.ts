@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { decrypt } from '@/lib/whatsapp/encryption'
+import { parseExtensionRanges, type ExtensionRange } from './extension-scope'
 
 export type JsonRecord = Record<string, unknown>
 type CachedToken = { value: string; expiresAt: number }
@@ -163,9 +164,9 @@ export function aiCdrIds(payload: JsonRecord): string[] {
   return [...ids]
 }
 
-export async function yeastarAiConnection(db: SupabaseClient, accountId: string) {
+export async function yeastarAiConnection(db: SupabaseClient, accountId: string): Promise<{ pbxUrl: string; token: string; extensionRanges: ExtensionRange[] | null }> {
   const [monitoring, telephony] = await Promise.all([
-    db.from('yeastar_monitoring_configs').select('api_client_id, api_client_secret').eq('account_id', accountId).maybeSingle(),
+    db.from('yeastar_monitoring_configs').select('api_client_id, api_client_secret, extension_filter').eq('account_id', accountId).maybeSingle(),
     db.from('telephony_configs').select('pbx_url').eq('account_id', accountId).eq('provider', 'yeastar').maybeSingle(),
   ])
   if (monitoring.error) throw monitoring.error
@@ -173,7 +174,7 @@ export async function yeastarAiConnection(db: SupabaseClient, accountId: string)
   if (!monitoring.data?.api_client_id || !monitoring.data.api_client_secret || !telephony.data?.pbx_url) throw new Error('Faltan las credenciales OpenAPI de Yeastar para consultar la IA.')
   const pbxUrl = telephony.data.pbx_url
   const token = await accessToken(accountId, pbxUrl, decrypt(monitoring.data.api_client_id), decrypt(monitoring.data.api_client_secret))
-  return { pbxUrl, token }
+  return { pbxUrl, token, extensionRanges: parseExtensionRanges(monitoring.data.extension_filter) }
 }
 
 export async function fetchAiResult(db: SupabaseClient, accountId: string, callId: string, payload: JsonRecord): Promise<AiResult> {

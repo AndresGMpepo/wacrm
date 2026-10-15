@@ -4,7 +4,7 @@ description: "Ve qué agentes están conectados, escucha llamadas activas y atie
 section: "supervision-y-reportes"
 role: ["supervisor", "admin", "owner"]
 plan: ["premium"]
-updated: "2026-09-28"
+updated: "2026-10-14"
 ---
 
 ## ¿Qué es?
@@ -37,6 +37,16 @@ Supervisores, administradores y el propietario.
 **¿El cliente se entera si estoy escuchando la llamada?**
 No, el modo "escuchar" es completamente silencioso; "susurrar" solo lo
 escucha el agente, nunca el cliente.
+
+**Un agente ya colgó o se desconectó, pero sigue marcado "En llamada"
+¿qué hago?**
+Pulsa **Actualizar**: el panel de agentes vuelve a consultar
+directamente el estado de llamadas de Yeastar (no solo el último
+evento guardado), así que corrige sola una llamada que quedó marcada
+activa porque el PBX nunca envió el aviso final de fin de llamada.
+Esto requiere tener configurado el **Client ID/Secret OpenAPI** en
+Configuración → Telefonía → Supervisión de llamadas Yeastar; sin esas
+credenciales, el panel solo puede mostrar el último evento recibido.
 
 **¿Quién puede ver esta sección?**
 Antes solo administradores/propietario; ahora también el rol

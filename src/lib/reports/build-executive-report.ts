@@ -1,4 +1,6 @@
 import { createClient as createAdminClient } from '@supabase/supabase-js'
+import { isAgendaProCancelled } from '@/lib/agendapro/server'
+import { normalizeStatusKey } from '@/lib/agendapro/status-colors'
 
 export type OperatingMode = 'commercial' | 'support' | 'hybrid'
 type ConversationRow = {
@@ -11,6 +13,11 @@ type ConversationRow = {
 type MessageRow = { conversation_id: string; sender_type: string; created_at: string }
 type AnalysisRow = { conversation_id: string; sentiment: string | null; sentiment_score: number | null; qa_score: number | null }
 type AppointmentRow = { status: string; contact_id: string | null; created_at: string }
+type CallRow = {
+  direction: string | null; duration_seconds: number | null; transcription_status: string
+  sentiment: string | null; sentiment_score: number | null
+}
+type AgendaProBookingRow = { status_id: number | null; status_name: string | null }
 type DealChannel = 'whatsapp' | 'yeastar_live_chat' | 'yeastar_voice' | 'facebook' | 'instagram' | 'tiktok' | 'other'
 type DealStageRow = { name: string; position: number }
 type DealRow = { value: number | string | null; status: string; updated_at: string; source_broadcast_id: string | null; source_channel: DealChannel | null; stage: DealStageRow | DealStageRow[] | null }
@@ -153,7 +160,7 @@ async function messageRowsForConversations(db: ReturnType<typeof admin>, ids: st
 export async function buildExecutiveReport(accountId: string, range: ExecutiveReportRange) {
   const db = admin()
 
-  const [accountResult, conversationResult, previousConversationResult, backlogResult, resolvedResult, profilesResult, openConversationsResult, analysesResult, dealsResult, openDealsResult, broadcastsResult, contactMemoryResult, contactObjectionsResult, overdueCommitmentsResult, appointmentsResult] = await Promise.all([
+  const [accountResult, conversationResult, previousConversationResult, backlogResult, resolvedResult, profilesResult, openConversationsResult, analysesResult, dealsResult, openDealsResult, broadcastsResult, contactMemoryResult, contactObjectionsResult, overdueCommitmentsResult, appointmentsResult, callsResult, agendaProBookingsResult] = await Promise.all([
     withRetry(() => db.from('accounts').select('operating_mode, default_currency').eq('id', accountId).single()),
     withRetry(() => db.from('conversations').select('id, assigned_agent_id, status, channel_type, created_at').eq('account_id', accountId).gte('created_at', range.from).lt('created_at', range.toExclusive).order('created_at')),
     withRetry(() => db.from('conversations').select('*', { count: 'exact', head: true }).eq('account_id', accountId).gte('created_at', range.previousFrom).lt('created_at', range.previousToExclusive)),
@@ -175,9 +182,18 @@ export async function buildExecutiveReport(accountId: string, range: ExecutiveRe
     // happened), not starts_at (when it's scheduled for) — that's what
     // "conversion in this period" and "cancellation rate this period" mean.
     withRetry(() => db.from('appointments').select('status, contact_id, created_at').eq('account_id', accountId).gte('created_at', range.from).lt('created_at', range.toExclusive)),
+    // Yeastar call transcriptions — ranged by started_at (when the call
+    // happened), same rationale as conversations. Calls whose date Yeastar
+    // never published (see transcripcion-de-llamadas) fall outside any
+    // range and are not counted here.
+    withRetry(() => db.from('yeastar_call_transcriptions').select('direction, duration_seconds, transcription_status, sentiment, sentiment_score').eq('account_id', accountId).gte('started_at', range.from).lt('started_at', range.toExclusive)),
+    // AgendaPro bookings are a separate module from the native Appointments
+    // table (independent by design — see migration 132) — ranged by
+    // agendapro_created_at (when the booking was made in AgendaPro).
+    withRetry(() => db.from('agendapro_bookings').select('status_id, status_name').eq('account_id', accountId).gte('agendapro_created_at', range.from).lt('agendapro_created_at', range.toExclusive)),
   ])
 
-  for (const result of [accountResult, conversationResult, previousConversationResult, backlogResult, resolvedResult, profilesResult, openConversationsResult, analysesResult, dealsResult, openDealsResult, broadcastsResult, contactMemoryResult, contactObjectionsResult, overdueCommitmentsResult, appointmentsResult]) {
+  for (const result of [accountResult, conversationResult, previousConversationResult, backlogResult, resolvedResult, profilesResult, openConversationsResult, analysesResult, dealsResult, openDealsResult, broadcastsResult, contactMemoryResult, contactObjectionsResult, overdueCommitmentsResult, appointmentsResult, callsResult, agendaProBookingsResult]) {
     if (result.error) throw result.error
   }
 
@@ -350,6 +366,21 @@ export async function buildExecutiveReport(accountId: string, range: ExecutiveRe
   const appointmentsFromConversation = appointments.filter((row) => row.contact_id && contactIdsWithConversation.has(row.contact_id)).length
   const appointmentsByStatus = (status: string) => appointments.filter((row) => row.status === status).length
 
+  const calls = (callsResult.data ?? []) as CallRow[]
+  const transcribedCalls = calls.filter((row) => row.transcription_status === 'completed')
+  const callDurations = calls.map((row) => row.duration_seconds).filter((value): value is number => typeof value === 'number' && value > 0)
+  const callSentimentScores = transcribedCalls.map((row) => row.sentiment_score).filter((value): value is number => typeof value === 'number')
+  const negativeCalls = transcribedCalls.filter((row) => row.sentiment === 'negative').length
+  const callsByDirection = (direction: string) => calls.filter((row) => row.direction === direction).length
+  const callsBySentiment = (sentiment: string) => transcribedCalls.filter((row) => row.sentiment === sentiment).length
+
+  const agendaproBookings = (agendaProBookingsResult.data ?? []) as AgendaProBookingRow[]
+  const agendaproCancelled = agendaproBookings.filter((row) => isAgendaProCancelled(row.status_id, row.status_name)).length
+  const agendaproStatusIs = (key: string) => agendaproBookings.filter((row) => !isAgendaProCancelled(row.status_id, row.status_name) && normalizeStatusKey(row.status_name || '') === key).length
+  const agendaproNoShow = agendaproStatusIs('no asiste')
+  const agendaproAttended = agendaproStatusIs('asiste')
+  const agendaproConfirmed = agendaproStatusIs('confirmado')
+
   return {
     meta: {
       operating_mode: mode,
@@ -428,6 +459,33 @@ export async function buildExecutiveReport(accountId: string, range: ExecutiveRe
       no_show_rate: percentage(appointmentsByStatus('no_show'), appointments.length),
       occupancy_rate: percentage(appointmentsByStatus('completed'), appointments.length),
       conversion_rate: percentage(appointmentsFromConversation, appointments.length),
+    },
+    agendapro: {
+      total: agendaproBookings.length,
+      confirmed: agendaproConfirmed,
+      attended: agendaproAttended,
+      no_show: agendaproNoShow,
+      cancelled: agendaproCancelled,
+      no_show_rate: percentage(agendaproNoShow, agendaproBookings.length),
+      cancellation_rate: percentage(agendaproCancelled, agendaproBookings.length),
+      attendance_rate: percentage(agendaproAttended, agendaproBookings.length),
+    },
+    calls: {
+      total: calls.length,
+      transcribed: transcribedCalls.length,
+      inbound: callsByDirection('inbound'),
+      outbound: callsByDirection('outbound'),
+      internal: callsByDirection('internal'),
+      average_duration_seconds: callDurations.length ? Math.round(callDurations.reduce((sum, value) => sum + value, 0) / callDurations.length) : null,
+      average_sentiment_score: callSentimentScores.length ? Math.round(callSentimentScores.reduce((sum, value) => sum + value, 0) / callSentimentScores.length) : null,
+      negative: negativeCalls,
+      negative_rate: percentage(negativeCalls, transcribedCalls.length),
+      sentiment_breakdown: {
+        positive: callsBySentiment('positive'),
+        neutral: callsBySentiment('neutral'),
+        negative: callsBySentiment('negative'),
+        mixed: callsBySentiment('mixed'),
+      },
     },
   }
 }

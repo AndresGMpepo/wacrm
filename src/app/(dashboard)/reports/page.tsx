@@ -2,7 +2,8 @@
 
 import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, ArrowUpRight, BarChart3, Bot, BriefcaseBusiness, CheckCircle2, Clock3, Download, Handshake, Loader2, Megaphone, PhoneCall, RefreshCw, ShieldAlert, Siren, Sparkles, UsersRound } from 'lucide-react'
+import { AlertTriangle, ArrowUpRight, BarChart3, Bot, BriefcaseBusiness, CalendarClock, CheckCircle2, Clock3, Download, Handshake, Loader2, Megaphone, PhoneCall, RefreshCw, ShieldAlert, Siren, Sparkles, UsersRound } from 'lucide-react'
+import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts'
 
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -27,8 +28,11 @@ const nf = new Intl.NumberFormat('es-MX')
 function dateOffset(days: number) { const date = new Date(); date.setDate(date.getDate() - days + 1); return date.toISOString().slice(0, 10) }
 function today() { return new Date().toISOString().slice(0, 10) }
 function minutes(value: number | null) { if (value === null) return 'Sin datos'; return value < 60 ? `${value} min` : `${Math.floor(value / 60)} h ${value % 60} min` }
+function callDuration(seconds: number | null) { if (seconds === null) return 'Sin datos'; return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}` }
 function ratio(value: number | null) { return value === null ? '—' : `${value}%` }
 function money(value: number, currency: string) { return new Intl.NumberFormat('es-MX', { style: 'currency', currency, maximumFractionDigits: 0 }).format(value) }
+
+const SENTIMENT_COLORS: Record<string, string> = { Positivo: '#34d399', Neutral: '#38bdf8', Negativo: '#f87171', Mixto: '#fbbf24' }
 
 function MetricCard({ icon: Icon, label, value, detail, tone = 'primary' }: { icon: typeof BarChart3; label: string; value: string; detail: string; tone?: 'primary' | 'emerald' | 'amber' | 'red' }) {
   const toneClass = { primary: 'text-primary bg-primary/10', emerald: 'text-emerald-400 bg-emerald-500/10', amber: 'text-amber-400 bg-amber-500/10', red: 'text-red-400 bg-red-500/10' }[tone]
@@ -213,7 +217,7 @@ export default function ReportsPage() {
           <div><p className="text-sm font-medium text-foreground">Oportunidades</p><ul className="mt-2 space-y-1 text-sm text-muted-foreground">{insight.opportunities.length ? insight.opportunities.map((item) => <li key={item}>• {item}</li>) : <li>Sin oportunidades concluyentes con los datos actuales.</li>}</ul></div>
           <div><p className="text-sm font-medium text-foreground">Indicadores a vigilar</p><ul className="mt-2 space-y-1 text-sm text-muted-foreground">{insight.indicators_to_watch.length ? insight.indicators_to_watch.map((item) => <li key={item}>• {item}</li>) : <li>Revisa el volumen, la primera respuesta y los casos negativos.</li>}</ul></div>
         </div>
-        {insight.data_note ? <p className="rounded-md border border-amber-500/25 bg-amber-500/10 p-3 text-xs text-amber-200">Nota de datos: {insight.data_note}</p> : null}
+        {insight.data_note ? <p className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-800 dark:text-amber-300">Nota de datos: {insight.data_note}</p> : null}
       </CardContent> : null}
       {insightError ? <CardContent className="pt-0 text-sm text-red-400">{insightError}</CardContent> : null}
     </Card>
@@ -256,6 +260,25 @@ export default function ReportsPage() {
 
     {report.appointments && report.appointments.total > 0 ? <Card><CardHeader><CardTitle className="flex items-center gap-2"><CheckCircle2 className="size-4 text-primary" /> Citas del periodo</CardTitle><CardDescription>Confirmación, cancelación, no-show, ocupación y conversión de conversación a cita.</CardDescription></CardHeader><CardContent><div className="grid grid-cols-2 gap-3 sm:grid-cols-5"><div className="rounded-lg bg-muted p-3 text-center"><p className="text-lg font-semibold text-foreground">{ratio(report.appointments.confirmation_rate)}</p><p className="text-[11px] text-muted-foreground">confirmación</p></div><div className="rounded-lg bg-muted p-3 text-center"><p className="text-lg font-semibold text-red-400">{ratio(report.appointments.cancellation_rate)}</p><p className="text-[11px] text-muted-foreground">cancelación</p></div><div className="rounded-lg bg-muted p-3 text-center"><p className="text-lg font-semibold text-amber-400">{ratio(report.appointments.no_show_rate)}</p><p className="text-[11px] text-muted-foreground">no-show</p></div><div className="rounded-lg bg-muted p-3 text-center"><p className="text-lg font-semibold text-emerald-400">{ratio(report.appointments.occupancy_rate)}</p><p className="text-[11px] text-muted-foreground">ocupación</p></div><div className="rounded-lg bg-primary/10 p-3 text-center"><p className="text-lg font-semibold text-primary">{ratio(report.appointments.conversion_rate)}</p><p className="text-[11px] text-muted-foreground">conversión desde chat</p></div></div><p className="mt-3 text-xs text-muted-foreground">{report.appointments.total} citas en el periodo · {report.appointments.completed} completadas · {report.appointments.cancelled} canceladas · {report.appointments.no_show} sin asistir.</p></CardContent></Card> : null}
 
+    {report.agendapro && report.agendapro.total > 0 ? <Card><CardHeader><CardTitle className="flex items-center gap-2"><CalendarClock className="size-4 text-primary" /> AgendaPro del periodo</CardTitle><CardDescription>Reservas confirmadas, atendidas, no-show y canceladas en AgendaPro.</CardDescription></CardHeader><CardContent><div className="grid grid-cols-2 gap-3 sm:grid-cols-4"><div className="rounded-lg bg-muted p-3 text-center"><p className="text-lg font-semibold text-foreground">{nf.format(report.agendapro.confirmed)}</p><p className="text-[11px] text-muted-foreground">confirmadas</p></div><div className="rounded-lg bg-emerald-500/10 p-3 text-center"><p className="text-lg font-semibold text-emerald-400">{ratio(report.agendapro.attendance_rate)}</p><p className="text-[11px] text-muted-foreground">atención</p></div><div className="rounded-lg bg-amber-500/10 p-3 text-center"><p className="text-lg font-semibold text-amber-400">{ratio(report.agendapro.no_show_rate)}</p><p className="text-[11px] text-muted-foreground">no-show</p></div><div className="rounded-lg bg-red-500/10 p-3 text-center"><p className="text-lg font-semibold text-red-400">{ratio(report.agendapro.cancellation_rate)}</p><p className="text-[11px] text-muted-foreground">cancelación</p></div></div><p className="mt-3 text-xs text-muted-foreground">{report.agendapro.total} reservas en el periodo · {report.agendapro.attended} atendidas · {report.agendapro.no_show} sin asistir · {report.agendapro.cancelled} canceladas.</p></CardContent></Card> : null}
+
+    {report.calls && report.calls.total > 0 ? <Card><CardHeader><CardTitle className="flex items-center gap-2"><PhoneCall className="size-4 text-primary" /> Llamadas del periodo</CardTitle><CardDescription>Volumen, duración y sentimiento de las llamadas transcritas — incluidas las atendidas fuera de NexoOmni (sucursal, softphone Linkus).</CardDescription></CardHeader><CardContent className="grid gap-4 md:grid-cols-[minmax(0,1fr)_220px]">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="rounded-lg bg-muted p-3 text-center"><p className="text-lg font-semibold text-foreground">{nf.format(report.calls.total)}</p><p className="text-[11px] text-muted-foreground">llamadas</p></div>
+        <div className="rounded-lg bg-muted p-3 text-center"><p className="text-lg font-semibold text-foreground">{callDuration(report.calls.average_duration_seconds)}</p><p className="text-[11px] text-muted-foreground">duración media</p></div>
+        <div className="rounded-lg bg-muted p-3 text-center"><p className="text-lg font-semibold text-foreground">{report.calls.inbound} / {report.calls.outbound}</p><p className="text-[11px] text-muted-foreground">entrantes / salientes</p></div>
+        <div className="rounded-lg bg-red-500/10 p-3 text-center"><p className="text-lg font-semibold text-red-400">{ratio(report.calls.negative_rate)}</p><p className="text-[11px] text-muted-foreground">sentimiento negativo</p></div>
+      </div>
+      {report.calls.transcribed > 0 ? <div className="h-[180px]"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={[
+        { name: 'Positivo', value: report.calls.sentiment_breakdown.positive },
+        { name: 'Neutral', value: report.calls.sentiment_breakdown.neutral },
+        { name: 'Negativo', value: report.calls.sentiment_breakdown.negative },
+        { name: 'Mixto', value: report.calls.sentiment_breakdown.mixed },
+      ].filter((item) => item.value > 0)} dataKey="value" nameKey="name" innerRadius={42} outerRadius={70} paddingAngle={2}>
+        {(['Positivo', 'Neutral', 'Negativo', 'Mixto'] as const).map((name) => <Cell key={name} fill={SENTIMENT_COLORS[name]} />)}
+      </Pie><Tooltip /></PieChart></ResponsiveContainer></div> : <p className="flex items-center justify-center text-center text-xs text-muted-foreground">Aún no hay análisis de sentimiento para graficar.</p>}
+    </CardContent></Card> : null}
+
     <Card>
       <CardHeader>
         <CardTitle>Scorecard de campañas</CardTitle>
@@ -266,7 +289,7 @@ export default function ReportsPage() {
       </CardContent>
     </Card>
 
-    {report.meta.response_metrics_capped ? <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-200">La métrica de primera respuesta se calculó sobre las primeras 5,000 conversaciones del periodo para proteger el rendimiento. La siguiente fase incorporará agregados en base de datos para volúmenes mayores.</p> : null}
+    {report.meta.response_metrics_capped ? <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-800 dark:text-amber-300">La métrica de primera respuesta se calculó sobre las primeras 5,000 conversaciones del periodo para proteger el rendimiento. La siguiente fase incorporará agregados en base de datos para volúmenes mayores.</p> : null}
     <ReportScheduleManager />
     {error ? <p className="text-sm text-red-400">{error}</p> : null}
     <p className="flex items-center gap-2 text-xs text-muted-foreground"><Download className="size-3.5" /> CSV, Excel y PDF usan exactamente el periodo visible. En PDF, el navegador abrirá la opción para guardar como PDF.</p>

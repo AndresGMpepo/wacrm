@@ -33,6 +33,28 @@ export type ExecutiveReport = {
     occupancy_rate: number | null
     conversion_rate: number | null
   }
+  agendapro?: {
+    total: number
+    confirmed: number
+    attended: number
+    no_show: number
+    cancelled: number
+    no_show_rate: number | null
+    cancellation_rate: number | null
+    attendance_rate: number | null
+  }
+  calls?: {
+    total: number
+    transcribed: number
+    inbound: number
+    outbound: number
+    internal: number
+    average_duration_seconds: number | null
+    average_sentiment_score: number | null
+    negative: number
+    negative_rate: number | null
+    sentiment_breakdown: { positive: number; neutral: number; negative: number; mixed: number }
+  }
 }
 
 export type ExecutiveReportInsight = {
@@ -58,6 +80,7 @@ function safeCell(value: ExportCell) {
 
 function asPercent(value: number | null) { return value === null ? 'Sin datos' : `${value}%` }
 function minutes(value: number | null) { return value === null ? 'Sin datos' : value < 60 ? `${value} min` : `${Math.floor(value / 60)} h ${value % 60} min` }
+function callDuration(seconds: number | null) { return seconds === null ? 'Sin datos' : `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}` }
 function operatingMode(mode: ExecutiveReport['meta']['operating_mode']) { return mode === 'commercial' ? 'Comercial' : mode === 'support' ? 'Soporte' : 'Híbrido' }
 
 function reportSheets(report: ExecutiveReport, insight?: ExecutiveReportInsight | null): ExportSheet[] {
@@ -94,6 +117,53 @@ function reportSheets(report: ExecutiveReport, insight?: ExecutiveReportInsight 
       ['Tasas', '', '', asPercent(report.campaigns.delivery_rate), asPercent(report.campaigns.read_rate), asPercent(report.campaigns.reply_rate)],
     ] },
   ]
+  if (report.nexo_memory) {
+    const memory = report.nexo_memory
+    sheets.push({ name: 'Nexo Memory', rows: [
+      ['Métrica', 'Valor'],
+      ['Contactos con memoria', memory.contacts_with_memory],
+      ['Riesgo alto', memory.high_risk_count], ['Riesgo medio', memory.medium_risk_count], ['Riesgo bajo', memory.low_risk_count],
+      ['Oportunidad promedio', memory.average_opportunity_score ?? 'Sin datos'],
+      ['Compromisos vencidos', memory.overdue_commitments], [],
+      ['Objeción frecuente', 'Menciones'],
+      ...memory.top_objections.map((item) => [item.objection, item.count]),
+    ] })
+  }
+  if (report.appointments) {
+    const appointments = report.appointments
+    sheets.push({ name: 'Citas', rows: [
+      ['Métrica', 'Valor'],
+      ['Citas totales', appointments.total], ['Agendadas', appointments.scheduled], ['Confirmadas', appointments.confirmed],
+      ['Completadas', appointments.completed], ['Canceladas', appointments.cancelled], ['No-show', appointments.no_show],
+      ['Tasa de confirmación', asPercent(appointments.confirmation_rate)], ['Tasa de cancelación', asPercent(appointments.cancellation_rate)],
+      ['Tasa de no-show', asPercent(appointments.no_show_rate)], ['Ocupación', asPercent(appointments.occupancy_rate)],
+      ['Conversión desde conversación', asPercent(appointments.conversion_rate)],
+    ] })
+  }
+  if (report.agendapro) {
+    const agendapro = report.agendapro
+    sheets.push({ name: 'AgendaPro', rows: [
+      ['Métrica', 'Valor'],
+      ['Reservas totales', agendapro.total], ['Confirmadas', agendapro.confirmed], ['Atendidas', agendapro.attended],
+      ['No-show', agendapro.no_show], ['Canceladas', agendapro.cancelled],
+      ['Tasa de no-show', asPercent(agendapro.no_show_rate)], ['Tasa de cancelación', asPercent(agendapro.cancellation_rate)],
+      ['Tasa de atención', asPercent(agendapro.attendance_rate)],
+    ] })
+  }
+  if (report.calls) {
+    const calls = report.calls
+    sheets.push({ name: 'Llamadas', rows: [
+      ['Métrica', 'Valor'],
+      ['Llamadas totales', calls.total], ['Con transcripción', calls.transcribed],
+      ['Entrantes', calls.inbound], ['Salientes', calls.outbound], ['Internas', calls.internal],
+      ['Duración promedio', callDuration(calls.average_duration_seconds)],
+      ['Sentimiento promedio', calls.average_sentiment_score ?? 'Sin datos'],
+      ['Análisis negativos', calls.negative], ['Tasa de análisis negativos', asPercent(calls.negative_rate)], [],
+      ['Sentimiento', 'Llamadas'],
+      ['Positivo', calls.sentiment_breakdown.positive], ['Neutral', calls.sentiment_breakdown.neutral],
+      ['Negativo', calls.sentiment_breakdown.negative], ['Mixto', calls.sentiment_breakdown.mixed],
+    ] })
+  }
   if (insight) {
     sheets.push({ name: 'Dictamen IA', rows: [
       ['Dictamen IA para dirección'],

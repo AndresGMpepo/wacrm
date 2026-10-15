@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createClient } from '@supabase/supabase-js'
 import { parseTranscriptionArchive, syncTranscriptionArchive } from './transcription-archive'
+import { yeastarAiConnection } from './yeastar-ai'
 
 vi.mock('./yeastar-ai', async (original) => ({
   ...await original<typeof import('./yeastar-ai')>(),
-  yeastarAiConnection: vi.fn().mockResolvedValue({ pbxUrl: 'https://pbx.example.test', token: 'test-token' }),
+  yeastarAiConnection: vi.fn().mockResolvedValue({ pbxUrl: 'https://pbx.example.test', token: 'test-token', extensionRanges: null }),
 }))
 afterEach(() => vi.unstubAllGlobals())
 
@@ -37,10 +38,10 @@ describe('Yeastar archive synchronization', () => {
       expect(ids.length).toBeLessThanOrEqual(100)
       return Response.json(ids.flatMap((id) => stored.has(id) ? [stored.get(id)] : []))
     } } })
-    expect(await syncTranscriptionArchive(db, 'account-a')).toEqual({ imported: 100, updated: 0, dated: 0, remaining: 101, available: 201, alreadyPresent: 0, undated: 0 })
-    expect(await syncTranscriptionArchive(db, 'account-a')).toEqual({ imported: 100, updated: 0, dated: 0, remaining: 1, available: 201, alreadyPresent: 100, undated: 0 })
-    expect(await syncTranscriptionArchive(db, 'account-a')).toEqual({ imported: 1, updated: 0, dated: 0, remaining: 0, available: 201, alreadyPresent: 200, undated: 0 })
-    expect(await syncTranscriptionArchive(db, 'account-a')).toEqual({ imported: 0, updated: 0, dated: 0, remaining: 0, available: 201, alreadyPresent: 201, undated: 0 })
+    expect(await syncTranscriptionArchive(db, 'account-a')).toEqual({ imported: 100, updated: 0, dated: 0, remaining: 101, available: 201, alreadyPresent: 0, undated: 0, outOfScope: 0 })
+    expect(await syncTranscriptionArchive(db, 'account-a')).toEqual({ imported: 100, updated: 0, dated: 0, remaining: 1, available: 201, alreadyPresent: 100, undated: 0, outOfScope: 0 })
+    expect(await syncTranscriptionArchive(db, 'account-a')).toEqual({ imported: 1, updated: 0, dated: 0, remaining: 0, available: 201, alreadyPresent: 200, undated: 0, outOfScope: 0 })
+    expect(await syncTranscriptionArchive(db, 'account-a')).toEqual({ imported: 0, updated: 0, dated: 0, remaining: 0, available: 201, alreadyPresent: 201, undated: 0, outOfScope: 0 })
     expect(stored.size).toBe(201)
     expect([...stored.values()].every((row) => row.analysis_status === 'pending')).toBe(true)
     expect([...stored.values()].every((row) =>
@@ -156,5 +157,19 @@ describe('Yeastar archive synchronization', () => {
       analysis_status: 'completed',
       memory_applied_at: '2026-10-05T18:00:00Z',
     })
+  })
+  it("skips legs from extensions outside this account's configured range on a shared PBX", async () => {
+    upstream([record(1), { ...record(2), call_to: '9999' }])
+    vi.mocked(yeastarAiConnection).mockResolvedValueOnce({
+      pbxUrl: 'https://pbx.example.test', token: 'test-token', extensionRanges: [[7000, 7000]],
+    })
+    const saved: Record<string, unknown>[] = []
+    const db = createClient('https://db.example.test', 'test-key', { global: { fetch: async (_input, init) => {
+      if (init?.method === 'POST') { saved.push(...JSON.parse(String(init.body)) as Record<string, unknown>[]); return Response.json([]) }
+      return Response.json([])
+    } } })
+    expect(await syncTranscriptionArchive(db, 'account-a')).toMatchObject({ imported: 1, available: 1, outOfScope: 1 })
+    expect(saved).toHaveLength(1)
+    expect(saved[0]).toMatchObject({ agent_extension: '7000' })
   })
 })

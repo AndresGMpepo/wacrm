@@ -5,6 +5,7 @@ import { decrypt } from '@/lib/whatsapp/encryption'
 import { findExistingContact } from '@/lib/contacts/dedupe'
 import { aiCdrIds, findValue, parsePbxLocalTime, type JsonRecord } from '@/lib/telephony/yeastar-ai'
 import { callAgentExtension, callCustomerPhone } from '@/lib/telephony/call-party'
+import { isExtensionAllowed, parseExtensionRanges } from '@/lib/telephony/extension-scope'
 import { sendIncomingCallPush } from '@/lib/notifications/web-push'
 
 export const dynamic = 'force-dynamic'
@@ -180,7 +181,7 @@ export async function POST(request: Request, context: { params: Promise<{ accoun
   const rawBody = await request.text()
   const db = admin()
   const { data: config, error: configError } = await db.from('yeastar_monitoring_configs')
-    .select('webhook_secret').eq('account_id', accountId).maybeSingle()
+    .select('webhook_secret, extension_filter').eq('account_id', accountId).maybeSingle()
   if (configError || !config?.webhook_secret) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   let secret: string
@@ -218,6 +219,10 @@ export async function POST(request: Request, context: { params: Promise<{ accoun
   }
   const knownExtensions = new Set((configuredExtensions ?? []).map((row) => row.extension))
   const peer = callPeer(event.members, knownExtensions)
+  // Extensions this account owns on a (possibly shared) PBX. Unset means no
+  // restriction, so every extension is accepted — unchanged for the common
+  // single-tenant-per-PBX setup.
+  const extensionRanges = parseExtensionRanges(config.extension_filter)
 
   if (event.eventType === '30012') {
     try {
@@ -236,6 +241,12 @@ export async function POST(request: Request, context: { params: Promise<{ accoun
         call_from: callFrom,
         call_to: callTo,
       })
+      if (!isExtensionAllowed(agentExtension, extensionRanges)) {
+        // This extension belongs to another NexoOmni tenant sharing the same
+        // PBX — never store its call here.
+        await receipt(db, accountId, 'ignored', `La extensión ${agentExtension ?? 'desconocida'} no pertenece al rango configurado para esta cuenta.`, event.eventType, event.callId)
+        return NextResponse.json({ received: true })
+      }
       const customerPhone = callCustomerPhone(event.payload)
       const direction = callType && ['inbound', 'outbound', 'internal'].includes(callType.toLowerCase()) ? callType.toLowerCase() : 'unknown'
       const durationValue = firstNestedNumber(event.payload, ['call_duration', 'talk_duration'])

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { derivePresence, type StoredPresence } from '@/lib/presence'
 import { requireRole, toErrorResponse } from '@/lib/auth/account'
+import { isStaleSoftphoneCall, reconcileYeastarLiveCalls } from '@/lib/telephony/live-call-reconcile'
 
 export const dynamic = 'force-dynamic'
 
@@ -11,15 +12,40 @@ export async function GET() {
   try {
     const { accountId } = await requireRole('supervisor')
     const db = admin()
-    const [profilesResult, presenceResult, conversationsResult, extensionsResult, callsResult, analysesResult] = await Promise.all([
+    const [profilesResult, presenceResult, conversationsResult, extensionsResult, callsResult, analysesResult, monitoringResult, integrationResult] = await Promise.all([
       db.from('profiles').select('user_id, full_name, account_role').eq('account_id', accountId).order('full_name'),
       db.from('member_presence').select('user_id, status, last_seen_at').eq('account_id', accountId),
       db.from('conversations').select('id, assigned_agent_id').eq('account_id', accountId).eq('status', 'open'),
       db.from('telephony_user_configs').select('user_id, extension').eq('account_id', accountId).eq('provider', 'yeastar'),
-      db.from('yeastar_live_calls').select('extension').eq('account_id', accountId),
+      db.from('yeastar_live_calls').select('call_id, extension, channel_id, last_event_at').eq('account_id', accountId),
       db.from('ai_conversation_analyses').select('conversation_id').eq('account_id', accountId).eq('status', 'completed').eq('sentiment', 'negative'),
+      db.from('yeastar_monitoring_configs').select('api_client_id, api_client_secret').eq('account_id', accountId).maybeSingle(),
+      db.from('telephony_configs').select('pbx_url').eq('account_id', accountId).eq('provider', 'yeastar').maybeSingle(),
     ])
-    for (const result of [profilesResult, presenceResult, conversationsResult, extensionsResult, callsResult, analysesResult]) if (result.error) throw result.error
+    for (const result of [profilesResult, presenceResult, conversationsResult, extensionsResult, callsResult, analysesResult, monitoringResult, integrationResult]) if (result.error) throw result.error
+    // The `yeastar_live_calls` cache only clears on a webhook BYE. If Yeastar
+    // never delivers that final event (dropped webhook, PBX restart), a row
+    // is stuck "in call" forever — this board showed agents on calls that
+    // ended hours earlier, even after they disconnected. Reconciling against
+    // Yeastar's own live call query (same safety net "Supervisión en vivo"
+    // already has) fixes that; best-effort so a Yeastar hiccup never breaks
+    // the whole agent board.
+    let liveCalls = callsResult.data ?? []
+    try {
+      await reconcileYeastarLiveCalls(
+        db, accountId, liveCalls,
+        integrationResult.data?.pbx_url,
+        monitoringResult.data?.api_client_id,
+        monitoringResult.data?.api_client_secret,
+      )
+      if (liveCalls.some((call) => !call.channel_id.startsWith('wacrm:'))) {
+        const { data, error } = await db.from('yeastar_live_calls').select('call_id, extension, channel_id, last_event_at').eq('account_id', accountId)
+        if (error) throw error
+        liveCalls = data ?? []
+      }
+    } catch (error) {
+      console.error('[yeastar] live call reconciliation failed, showing cached state:', error)
+    }
     const negativeIds = new Set((analysesResult.data ?? []).map((entry) => entry.conversation_id))
     const openByAgent = new Map<string, number>()
     const negativeByAgent = new Map<string, { count: number; conversationId: string }>()
@@ -38,7 +64,7 @@ export async function GET() {
     }
     const presenceByUser = new Map((presenceResult.data ?? []).map((entry) => [entry.user_id, entry]))
     const extensionByUser = new Map((extensionsResult.data ?? []).map((entry) => [entry.user_id, entry.extension]))
-    const activeExtensions = new Set((callsResult.data ?? []).map((entry) => entry.extension))
+    const activeExtensions = new Set(liveCalls.filter((call) => !isStaleSoftphoneCall(call)).map((call) => call.extension))
     const now = Date.now()
     return NextResponse.json({ agents: (profilesResult.data ?? []).map((profile) => {
       const presence = presenceByUser.get(profile.user_id)

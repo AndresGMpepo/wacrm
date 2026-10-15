@@ -200,12 +200,12 @@ function CallTranscriptionsContent() {
       const response = await fetch('/api/telephony/yeastar/transcriptions/sync', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: syncPhone }),
       })
-      const result = await response.json() as { imported?: number; updated?: number; dated?: number; remaining?: number; available?: number; alreadyPresent?: number; undated?: number; code?: string }
+      const result = await response.json() as { imported?: number; updated?: number; dated?: number; remaining?: number; available?: number; alreadyPresent?: number; undated?: number; outOfScope?: number; code?: string }
       if (!response.ok) {
         setSyncError(archiveErrorMessage(result.code))
         return
       }
-      setSyncMessage(result.imported || result.updated
+      setSyncMessage((result.imported || result.updated
         ? t('importSuccess', { count: result.imported ?? 0, updated: result.updated ?? 0 })
           + (result.dated ? ` ${t('importDated', { count: result.dated })}` : '')
           + (result.undated ? ` ${t('importUndated', { count: result.undated })}` : '')
@@ -213,6 +213,7 @@ function CallTranscriptionsContent() {
         : result.available === 0
           ? t('noPublishedTranscripts')
           : t('nothingToImport', { count: result.alreadyPresent ?? 0 }))
+        + (result.outOfScope ? ` ${t('importOutOfScope', { count: result.outOfScope })}` : ''))
       if (page !== 1) setPage(1)
       else await load(true)
     } catch (reason) {
