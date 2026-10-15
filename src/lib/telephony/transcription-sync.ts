@@ -105,6 +105,10 @@ export async function processCallTranscriptions(db: SupabaseClient) {
       }
       const { error: analysisError } = await db.from('yeastar_call_transcriptions').update({
         summary: analysis.summary, key_points: analysis.key_points, action_items: analysis.action_items,
+        // Persisted so the call list can show sentiment on its own and so the
+        // DB trigger can alert supervisors even for calls with no conversation
+        // (e.g. a branch extension or an agent on the Linkus softphone).
+        sentiment: analysis.sentiment, sentiment_score: analysis.sentiment_score,
       }).eq('id', row.id).eq('account_id', row.account_id)
       if (analysisError) throw analysisError
       if (contactId) {

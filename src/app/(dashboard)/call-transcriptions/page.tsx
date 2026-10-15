@@ -4,7 +4,7 @@ import { Suspense, useCallback, useEffect, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { useSearchParams } from 'next/navigation'
 import { hasMinRole } from '@/lib/auth/roles'
-import { ChevronLeft, ChevronRight, Loader2, PhoneCall, RefreshCw } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Frown, Loader2, Meh, MessageCircleQuestion, PhoneCall, RefreshCw, Smile } from 'lucide-react'
 import { useAuth } from '@/hooks/use-auth'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -39,6 +39,8 @@ type CallRecord = {
   action_items: Array<{ description: string; owner: 'agent' | 'customer'; due_date: string | null }> | null
   transcription_status: string
   analysis_status: string
+  sentiment: 'positive' | 'neutral' | 'negative' | 'mixed' | null
+  sentiment_score: number | null
   memory_applied_at: string | null
   ai_first_touch: boolean
   ai_handoff: {
@@ -55,6 +57,22 @@ type CallRecord = {
 function date(value: string | null) { return value ? new Intl.DateTimeFormat('es-MX', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) : 'Sin fecha' }
 function dueDate(value: string | null) { return value ? new Intl.DateTimeFormat('es-MX', { dateStyle: 'medium' }).format(new Date(value)) : '' }
 function duration(value: number | null) { if (value == null) return 'Sin datos'; return `${Math.floor(value / 60)}:${String(value % 60).padStart(2, '0')}` }
+
+const SENTIMENT_META = {
+  positive: { label: 'Positivo', icon: Smile, className: 'text-emerald-500' },
+  neutral: { label: 'Neutral', icon: Meh, className: 'text-sky-500' },
+  negative: { label: 'Negativo', icon: Frown, className: 'text-red-500' },
+  mixed: { label: 'Mixto', icon: MessageCircleQuestion, className: 'text-amber-500' },
+} as const
+
+function SentimentBadge({ sentiment, score }: { sentiment: CallRecord['sentiment']; score: CallRecord['sentiment_score'] }) {
+  if (!sentiment) return null
+  const meta = SENTIMENT_META[sentiment]
+  const Icon = meta.icon
+  return <span className={`flex items-center gap-1 text-xs font-medium ${meta.className}`}>
+    <Icon className="size-3.5" />{meta.label}{score != null ? ` (${score})` : ''}
+  </span>
+}
 
 const EVENT_LABELS: Record<string, (data: Record<string, unknown> | null) => string> = {
   call_to: (data) => data?.to ? `Llamada a ${data.to}` : 'Llamada iniciada',
@@ -268,6 +286,7 @@ function CallTranscriptionsContent() {
                   </div>
                   <span className="text-xs text-muted-foreground">{date(call.ended_at || call.started_at)} · {duration(call.duration_seconds)} · {call.direction || 'unknown'}</span>
                 </div>
+                <SentimentBadge sentiment={call.sentiment} score={call.sentiment_score} />
               </CardHeader>
               <CardContent className="space-y-4">
                 {call.transcription_status === 'failed' ? <p className="text-sm text-red-400">{t('transcriptFailed')}</p> : null}

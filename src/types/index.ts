@@ -239,6 +239,10 @@ export interface Notification {
   type: NotificationType;
   conversation_id?: string;
   contact_id?: string;
+  /** Yeastar call transcription this alert is about — set instead of
+   * conversation_id for calls with no NexoOmni conversation (e.g. a
+   * branch extension or the Linkus softphone). See migration 148. */
+  call_id?: string;
   /** Who triggered it. Null when an automation/system assigned it. */
   actor_user_id?: string;
   title: string;

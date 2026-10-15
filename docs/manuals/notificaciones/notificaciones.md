@@ -4,7 +4,7 @@ description: "Avisos en tiempo real: mensajes nuevos, conversaciones asignadas, 
 section: "notificaciones"
 role: ["agent", "supervisor", "admin", "owner"]
 plan: ["basico", "crecimiento", "premium"]
-updated: "2026-09-28"
+updated: "2026-10-14"
 ---
 
 ## ¿Qué es?
@@ -22,7 +22,9 @@ Todos los roles reciben notificaciones relevantes a lo que pueden ver.
 - **Conversación asignada/transferida** — te asignaron un chat, o
   confirmación de que transferiste uno.
 - **Mensaje entrante** — un cliente te escribió.
-- **Sentimiento negativo** — la IA detectó una conversación que
+- **Sentimiento negativo** — la IA detectó una conversación o una
+  llamada telefónica (incluidas las que no pasaron por una conversación
+  de NexoOmni, como una sucursal o un agente en el softphone Linkus) que
   necesita atención urgente.
 - **Seguimiento de llamada** — una llamada quedó sin respuesta y
   necesita seguimiento.
@@ -34,8 +36,8 @@ Todos los roles reciben notificaciones relevantes a lo que pueden ver.
 ## Cómo se usa
 
 1. Haz clic en la campana para ver el historial completo.
-2. Haz clic en una notificación para ir directo a la conversación,
-   Seguimientos o Reportes según corresponda.
+2. Haz clic en una notificación para ir directo a la conversación, la
+   llamada, Seguimientos o Reportes según corresponda.
 3. **Marcar todas como leídas** limpia el contador.
 
 ## Preguntas frecuentes

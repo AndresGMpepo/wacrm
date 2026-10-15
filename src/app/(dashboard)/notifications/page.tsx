@@ -139,6 +139,8 @@ export default function NotificationsPage() {
       if (!n.read_at) markRead(n.id);
       if (n.conversation_id) {
         router.push(`/inbox?c=${n.conversation_id}`);
+      } else if (n.call_id) {
+        router.push(`/call-transcriptions?call=${n.call_id}`);
       } else if (n.type === 'task_reminder') {
         router.push('/call-tasks');
       } else if (n.type === 'nexo_memory_alert') {

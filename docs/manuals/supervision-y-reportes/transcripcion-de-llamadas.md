@@ -70,6 +70,20 @@ completo de llamadas de la cuenta.
    y el contexto de handoff antes del resumen de cada tramo.
 6. Revisa el estado del análisis. Una transcripción puede estar lista
    mientras todavía se genera su resumen o se actualiza Nexo Memory.
+7. Cada llamada analizada muestra su **sentimiento** (positivo, neutral,
+   negativo o mixto) junto a la fecha y duración. Es el mismo análisis que
+   ya se aplica a las conversaciones de WhatsApp.
+
+### Alertas de sentimiento negativo
+
+El propietario y los administradores reciben la misma alerta de
+**sentimiento negativo** (campana de notificaciones) que ya existe para
+conversaciones de chat, pero ahora también por llamadas, incluidas las que
+nunca pasaron por una conversación de NexoOmni — por ejemplo, una llamada
+de una sucursal o de un agente remoto que contestó desde el softphone
+Linkus de Yeastar. La alerta abre directamente la llamada en esta pantalla.
+Solo se notifica una vez por llamada mientras siga negativa; si se vuelve
+a analizar y deja de serlo, una futura reincidencia vuelve a generar aviso.
 
 ### Recuperar llamadas que ya aparecen en Yeastar
 

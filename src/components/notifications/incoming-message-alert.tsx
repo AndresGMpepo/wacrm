@@ -168,13 +168,15 @@ export function IncomingMessageAlert() {
               label: 'Abrir chat',
               onClick: () => router.push(`/inbox?c=${notification.conversation_id}`),
             }
-          : notification.type === 'task_reminder'
-            ? { label: 'Ver seguimientos', onClick: () => router.push('/call-tasks') }
-            : notification.type === 'nexo_memory_alert'
-              ? { label: 'Ver reportes', onClick: () => router.push('/reports') }
-              : notification.type === 'agendapro_unconfirmed_appointment'
-                ? { label: 'Ver AgendaPro', onClick: () => router.push('/agendapro') }
-                : undefined,
+          : notification.call_id
+            ? { label: 'Ver llamada', onClick: () => router.push(`/call-transcriptions?call=${notification.call_id}`) }
+            : notification.type === 'task_reminder'
+              ? { label: 'Ver seguimientos', onClick: () => router.push('/call-tasks') }
+              : notification.type === 'nexo_memory_alert'
+                ? { label: 'Ver reportes', onClick: () => router.push('/reports') }
+                : notification.type === 'agendapro_unconfirmed_appointment'
+                  ? { label: 'Ver AgendaPro', onClick: () => router.push('/agendapro') }
+                  : undefined,
       });
 
     };
