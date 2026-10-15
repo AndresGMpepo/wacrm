@@ -40,6 +40,10 @@
     "transcriptUnavailable": "예상 기간 내에 녹취록을 사용할 수 없었습니다. Yeastar에서 가져오기를 사용하여 복구를 시도하세요.",
     "memoryNotLinked": "분석은 준비되었지만 유효한 외부 전화번호가 없어 통화가 Nexo Memory에 연결되지 않았습니다.",
     "aiReceptionist": "AI 리셉셔니스트",
+    "aiFirstTouch": "AI 리셉셔니스트가 먼저 응대한 후 상담원에게 전달했습니다.",
+    "aiHandoffTitle": "AI 리셉셔니스트가 전달한 맥락",
+    "aiCustomerNeed": "요청: {need}",
+    "aiNextAction": "다음 단계: {action}",
     "agentUnidentified": "상담원 확인 불가",
     "extensionAgent": "PBX 상담원",
     "extensionShort": "내선",
@@ -65,7 +69,12 @@
     "importErrorInput": "전화번호 필터 형식을 확인한 후 다시 시도하세요.",
     "analysisPending": "분석이 진행 중입니다. 새로고침을 눌러 상태를 확인하세요.",
     "analysisFailed": "분석 또는 Nexo Memory 업데이트에 실패하여 재시도됩니다.",
-    "analysisUnavailable": "계정 AI를 설정하고 다시 동기화하여 요약과 Nexo Memory를 생성하세요."
+    "analysisUnavailable": "계정 AI를 설정하고 다시 동기화하여 요약과 Nexo Memory를 생성하세요.",
+    "searchPlaceholder": "고객, 전화번호, 상담원, 내선 또는 텍스트 검색",
+    "search": "검색",
+    "previousPage": "이전",
+    "nextPage": "다음",
+    "pageStatus": "{pages}페이지 중 {page}페이지 · 통화 {total}건"
   },
   "LoginPage": {
     "titleAccept": "로그인하여 수락하기",
@@ -130,6 +139,7 @@
     "automations": "자동화",
     "supervision": "운영 감독",
     "reports": "리포트",
+    "callTranscriptions": "통화 녹취",
     "settings": "설정",
     "openMenu": "메뉴 열기",
     "openAccountMenu": "계정 메뉴 열기",
@@ -430,6 +440,13 @@
       "dismiss": "닫기",
       "noTitle": "광고 제목 없음",
       "adId": "광고 ID: {id}"
+    },
+    "socialPublication": {
+      "facebookComment": "Facebook 공개 댓글",
+      "instagramComment": "Instagram 공개 댓글",
+      "unknownPost": "Meta 또는 Zernio에서 게시물 텍스트를 제공하지 않았습니다.",
+      "paidAd": "광고 {id}",
+      "openPost": "게시물 보기"
     },
     "postContext": {
       "story_reply": "내 스토리에 답장함",

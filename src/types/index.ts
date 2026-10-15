@@ -207,6 +207,11 @@ export interface Conversation {
   social_comment_id?: string | null;
   social_parent_comment_id?: string | null;
   social_post_id?: string | null;
+  social_post_title?: string | null;
+  social_post_url?: string | null;
+  social_post_preview_url?: string | null;
+  social_ad_id?: string | null;
+  social_ad_title?: string | null;
 }
 
 // ============================================================

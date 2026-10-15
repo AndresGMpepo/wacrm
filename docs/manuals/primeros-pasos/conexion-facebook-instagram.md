@@ -4,7 +4,7 @@ description: "Recibe y responde mensajes y comentarios de Facebook e Instagram d
 section: "primeros-pasos"
 role: ["admin", "owner"]
 plan: ["basico", "crecimiento", "premium"]
-updated: "2026-10-07"
+updated: "2026-10-14"
 ---
 
 ## ¿Qué es?
@@ -46,8 +46,20 @@ producto o promoción pregunta antes de responder. Ver
 
 **¿Los comentarios públicos también llegan aquí?**
 Sí — un comentario en una publicación de Facebook o Instagram genera
-una conversación igual que un mensaje directo, para que no se te
-escape ningún caso.
+una conversación independiente de Messenger. El encabezado indica que
+es un comentario público y muestra el texto, imagen y enlace de la
+publicación cuando el proveedor los entrega.
+
+Si usas la conexión guiada por Zernio, su webhook debe incluir el evento
+oficial **`comment.received`**, además de **`message.received`**. No es
+necesario abandonar Zernio ni configurar Meta manualmente para obtener
+esta trazabilidad. Si el evento no puede habilitarse en esa cuenta, se
+puede usar la conexión Meta nativa como complemento para comentarios.
+
+En una conexión Meta nativa de Facebook, pulsa **Validar conexión** para
+suscribir también el campo `feed`; Meta exige el permiso
+`pages_manage_metadata`. Si el token no tiene ese permiso, Messenger
+puede seguir funcionando aunque los comentarios queden pendientes.
 
 **¿Puedo identificar al mismo cliente si me escribe por WhatsApp y por
 Instagram?**

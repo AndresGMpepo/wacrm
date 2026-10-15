@@ -4,7 +4,7 @@ description: "Recupera las transcripciones que publica Yeastar y conviértelas e
 section: "supervision-y-reportes"
 role: ["supervisor", "admin", "owner"]
 plan: ["premium"]
-updated: "2026-10-05"
+updated: "2026-10-14"
 ---
 
 ## ¿Qué es?
@@ -22,8 +22,18 @@ importa grabaciones**; el audio permanece en el PBX y no se copia al
 almacenamiento de NexoOmni. Para escuchar una grabación, consúltala
 directamente en Yeastar.
 
-Los tramos CDR vacíos que no tienen transcripción, resumen ni agente
-identificado se omiten para evitar mostrar filas intermedias confusas.
+Yeastar puede dividir una llamada transferida en varios tramos CDR.
+NexoOmni conserva cada tramo para no perder su transcripción, pero los
+relaciona con el identificador raíz de la misma llamada. Si el recepcionista
+de IA guardó un handoff antes de transferir, todos los tramos muestran
+**Atendida primero por el recepcionista de IA** y el contexto que recibió
+el agente. La plataforma no deduce esa atribución únicamente porque Yeastar
+haya generado una transcripción automática.
+
+El listado se carga en páginas de 25 llamadas desde NexoOmni; cambiar de
+página, buscar o abrir una transcripción no vuelve a consultar el PBX.
+Esto evita cargar miles de filas en el navegador y no agrega tráfico a
+Yeastar durante la supervisión diaria.
 El estado del análisis no provoca recargas automáticas. Pulsa
 **Actualizar** cuando quieras consultar los cambios. Si ya hay un resumen
 o Nexo Memory actualizado, no se muestra un aviso de análisis pendiente
@@ -37,14 +47,15 @@ completo de llamadas de la cuenta.
 ## Cómo se usa
 
 1. Ve a **Transcripciones de llamadas**.
-2. Busca por contacto, o filtra por fecha.
+2. Busca por contacto, teléfono, nombre de agente, extensión o texto.
 3. Abre una llamada para ver: resumen, puntos clave, pendientes,
    transcripción completa.
-4. Revisa quién atendió: NexoOmni identifica al **Recepcionista de IA**
-   cuando la transcripción proviene del contexto de IA de Yeastar. Para
-   las demás extensiones, muestra al agente asignado o el número de
-   extensión si aún no está vinculado a un usuario.
-5. Revisa el estado del análisis. Una transcripción puede estar lista
+4. Revisa quién atendió. NexoOmni muestra el nombre del miembro vinculado;
+   si la extensión no pertenece a un usuario de NexoOmni, usa el nombre
+   publicado por Yeastar y conserva siempre el número de extensión.
+5. Si la llamada pasó primero por el recepcionista de IA, revisa el aviso
+   y el contexto de handoff antes del resumen de cada tramo.
+6. Revisa el estado del análisis. Una transcripción puede estar lista
    mientras todavía se genera su resumen o se actualiza Nexo Memory.
 
 ### Recuperar llamadas que ya aparecen en Yeastar
@@ -81,7 +92,8 @@ datos; las transcripciones anteriores se conservan.
 ### Requisitos de configuración
 
 Un administrador debe conectar OpenAPI de Yeastar y sus notificaciones
-de fin de llamada (**30012**), y mantener activo el proceso periódico
+de fin de llamada (**30012**) para **todas las extensiones que deban
+analizarse**, y mantener activo el proceso periódico
 de NexoOmni. La consulta de transcripciones utiliza OpenAPI v2.0;
 en **P-Series Cloud Edition**, Yeastar documenta firmware
 **84.23.0.83 o superior** para consultar el contexto de IA. Confirma
@@ -91,6 +103,12 @@ También debe configurarse la IA de la cuenta para generar el análisis.
 La transcripción recuperada se conserva aunque el análisis falle y
 se vuelva a intentar. Una llamada sin teléfono externo válido no puede
 vincularse automáticamente a la memoria de un cliente.
+
+No es necesario que la llamada se atienda dentro de NexoOmni. Si Yeastar
+publica el CDR y la transcripción de una extensión de Linkus, aplicación
+móvil o teléfono físico, NexoOmni la importa y la analiza de la misma
+forma. El nombre solo aparece si la extensión está vinculada a un miembro
+o si Yeastar lo incluye en su exportación.
 
 ## Preguntas frecuentes
 

@@ -4,7 +4,7 @@ import { Suspense, useCallback, useEffect, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { useSearchParams } from 'next/navigation'
 import { hasMinRole } from '@/lib/auth/roles'
-import { Loader2, PhoneCall, RefreshCw } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Loader2, PhoneCall, RefreshCw } from 'lucide-react'
 import { useAuth } from '@/hooks/use-auth'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -16,10 +16,12 @@ type TimelineLeg = { leg: number; events: TimelineEvent[] }
 type CallRecord = {
   id: string
   call_id: string
+  session_call_id: string
   customer_phone: string | null
   customer_name: string | null
   customer_email: string | null
   agent_extension: string | null
+  agent_name: string | null
   direction: string | null
   started_at: string | null
   ended_at: string | null
@@ -38,7 +40,13 @@ type CallRecord = {
   transcription_status: string
   analysis_status: string
   memory_applied_at: string | null
-  receptionist_ai: boolean
+  ai_first_touch: boolean
+  ai_handoff: {
+    summary: string
+    customer_need: string | null
+    next_action: string | null
+    created_at: string
+  } | null
   error_message: string | null
   contact: { name: string | null; phone: string; email: string | null } | null
   agent: { full_name: string | null; email: string | null } | null
@@ -114,6 +122,9 @@ function CallTranscriptionsContent() {
   const allowed = !!accountRole && hasMinRole(accountRole, 'supervisor')
   const [calls, setCalls] = useState<CallRecord[]>([])
   const [query, setQuery] = useState('')
+  const [appliedQuery, setAppliedQuery] = useState('')
+  const [page, setPage] = useState(1)
+  const [pagination, setPagination] = useState({ page: 1, page_size: 25, total: 0, total_pages: 1 })
   const requestedCallId = searchParams.get('call')?.trim() ?? ''
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -129,14 +140,19 @@ function CallTranscriptionsContent() {
     try {
       const params = new URLSearchParams()
       if (requestedCallId) params.set('call', requestedCallId)
-      else if (query) params.set('q', query)
+      else {
+        params.set('page', String(page))
+        params.set('page_size', '25')
+        if (appliedQuery) params.set('q', appliedQuery)
+      }
       const response = await fetch(`/api/telephony/yeastar/transcriptions${params.size ? `?${params.toString()}` : ''}`, { cache: 'no-store' })
       const payload = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(payload.error || 'No se pudieron cargar las transcripciones.')
       setCalls(payload.calls ?? [])
+      if (payload.pagination) setPagination(payload.pagination)
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'No se pudieron cargar las transcripciones.') }
     finally { if (!quiet) setLoading(false) }
-  }, [query, requestedCallId])
+  }, [appliedQuery, page, requestedCallId])
 
   const archiveErrorMessage = (code?: string) => {
     switch (code) {
@@ -177,7 +193,8 @@ function CallTranscriptionsContent() {
         : result.available === 0
           ? t('noPublishedTranscripts')
           : t('nothingToImport', { count: result.alreadyPresent ?? 0 }))
-      await load(true)
+      if (page !== 1) setPage(1)
+      else await load(true)
     } catch (reason) {
       console.error('[yeastar] manual transcript sync failed:', reason)
       setSyncError(t('importError'))
@@ -204,9 +221,17 @@ function CallTranscriptionsContent() {
       </div>
       <Button variant="outline" onClick={async () => { setRefreshing(true); try { await load(true) } finally { setRefreshing(false) } }} disabled={loading || refreshing}><RefreshCw className={refreshing ? 'size-4 animate-spin' : 'size-4'} />Actualizar</Button>
     </div>
-    {!requestedCallId ? <form className="flex gap-2" onSubmit={(event) => { event.preventDefault(); void load() }}>
-      <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar por cliente, número o texto" />
-      <Button type="submit">Buscar</Button>
+    {!requestedCallId ? <form className="flex gap-2" onSubmit={(event) => {
+      event.preventDefault()
+      const nextQuery = query.trim()
+      if (page === 1 && nextQuery === appliedQuery) void load()
+      else {
+        setPage(1)
+        setAppliedQuery(nextQuery)
+      }
+    }}>
+      <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t('searchPlaceholder')} />
+      <Button type="submit">{t('search')}</Button>
     </form> : null}
     {loading
       ? <div className="flex justify-center py-12 text-muted-foreground"><Loader2 className="mr-2 size-5 animate-spin" />Cargando</div>
@@ -223,9 +248,10 @@ function CallTranscriptionsContent() {
                     <CardDescription>
                       {call.contact?.phone || call.customer_phone || 'Sin número'}
                       {call.contact?.email || call.customer_email ? ` · ${call.contact?.email || call.customer_email}` : ''}
-                      {' · '}{call.receptionist_ai ? t('aiReceptionist') : call.agent?.full_name || (call.agent_extension ? t('extensionAgent', { extension: call.agent_extension }) : t('agentUnidentified'))}
+                      {' · '}{call.agent?.full_name || call.agent_name || (call.agent_extension ? t('extensionAgent', { extension: call.agent_extension }) : t('agentUnidentified'))}
                       {call.agent_extension ? ` · ${t('extensionShort')} ${call.agent_extension}` : ''}
                     </CardDescription>
+                    {call.ai_first_touch ? <p className="mt-1 text-xs font-medium text-primary">{t('aiFirstTouch')}</p> : null}
                   </div>
                   <span className="text-xs text-muted-foreground">{date(call.ended_at || call.started_at)} · {duration(call.duration_seconds)} · {call.direction || 'unknown'}</span>
                 </div>
@@ -244,6 +270,12 @@ function CallTranscriptionsContent() {
                   ? <p className="text-sm text-amber-500">{t('memoryNotLinked')}</p>
                   : null}
                 <TimeBreakdown call={call} />
+                {call.ai_handoff ? <div className="rounded-md border border-primary/20 bg-primary/5 p-3">
+                  <h2 className="text-sm font-semibold">{t('aiHandoffTitle')}</h2>
+                  <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">{call.ai_handoff.summary}</p>
+                  {call.ai_handoff.customer_need ? <p className="mt-1 text-xs text-muted-foreground">{t('aiCustomerNeed', { need: call.ai_handoff.customer_need })}</p> : null}
+                  {call.ai_handoff.next_action ? <p className="mt-1 text-xs text-muted-foreground">{t('aiNextAction', { action: call.ai_handoff.next_action })}</p> : null}
+                </div> : null}
                 <div>
                   <h2 className="text-sm font-semibold">Resumen</h2>
                   <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">{call.summary || 'Sin resumen disponible.'}</p>
@@ -266,6 +298,17 @@ function CallTranscriptionsContent() {
                 </details> : null}
               </CardContent>
             </Card>)}
+            {!requestedCallId && pagination.total_pages > 1 ? <div className="flex items-center justify-between gap-3 pt-2">
+              <Button variant="outline" onClick={() => setPage((value) => Math.max(1, value - 1))} disabled={page <= 1 || loading}>
+                <ChevronLeft className="size-4" />{t('previousPage')}
+              </Button>
+              <p className="text-sm text-muted-foreground">
+                {t('pageStatus', { page: pagination.page, pages: pagination.total_pages, total: pagination.total })}
+              </p>
+              <Button variant="outline" onClick={() => setPage((value) => Math.min(pagination.total_pages, value + 1))} disabled={page >= pagination.total_pages || loading}>
+                {t('nextPage')}<ChevronRight className="size-4" />
+              </Button>
+            </div> : null}
           </div>}
   </div>
 }

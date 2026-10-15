@@ -40,6 +40,10 @@
     "transcriptUnavailable": "La transcripción no estuvo disponible dentro del plazo esperado. Usa Importar desde Yeastar para volver a consultarla.",
     "memoryNotLinked": "El análisis está listo, pero la llamada no se vinculó a Nexo Memory porque falta un teléfono externo válido.",
     "aiReceptionist": "Recepcionista de IA",
+    "aiFirstTouch": "Atendida primero por el recepcionista de IA y después transferida.",
+    "aiHandoffTitle": "Contexto entregado por el recepcionista de IA",
+    "aiCustomerNeed": "Necesidad: {need}",
+    "aiNextAction": "Siguiente paso: {action}",
     "agentUnidentified": "Agente no identificado",
     "extensionAgent": "Agente de PBX",
     "extensionShort": "Ext.",
@@ -65,7 +69,12 @@
     "importErrorInput": "Revisa el formato del filtro de teléfono e inténtalo de nuevo.",
     "analysisPending": "El análisis está en proceso. Pulsa Actualizar para consultar su estado.",
     "analysisFailed": "El análisis o la actualización de Nexo Memory falló y se reintentará.",
-    "analysisUnavailable": "Configura la IA de la cuenta y vuelve a sincronizar para generar el resumen y Nexo Memory."
+    "analysisUnavailable": "Configura la IA de la cuenta y vuelve a sincronizar para generar el resumen y Nexo Memory.",
+    "searchPlaceholder": "Buscar por cliente, teléfono, agente, extensión o texto",
+    "search": "Buscar",
+    "previousPage": "Anterior",
+    "nextPage": "Siguiente",
+    "pageStatus": "Página {page} de {pages} · {total} llamadas"
   },
   "LoginPage": {
     "titleAccept": "Inicia sesión para aceptar",
@@ -130,6 +139,7 @@
     "automations": "Automatizaciones",
     "supervision": "Supervisión operativa",
     "reports": "Reportes",
+    "callTranscriptions": "Transcripciones de llamadas",
     "settings": "Configuración",
     "openMenu": "Abrir menú",
     "openAccountMenu": "Abrir menú de cuenta",
@@ -430,6 +440,13 @@
       "dismiss": "Cerrar aviso",
       "noTitle": "Anuncio sin título disponible",
       "adId": "ID del anuncio: {id}"
+    },
+    "socialPublication": {
+      "facebookComment": "Comentario público de Facebook",
+      "instagramComment": "Comentario público de Instagram",
+      "unknownPost": "Meta o Zernio no entregaron el texto de la publicación.",
+      "paidAd": "Anuncio {id}",
+      "openPost": "Ver publicación"
     },
     "postContext": {
       "story_reply": "Respondió a tu historia",

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createClient } from '@supabase/supabase-js'
 import { compactCallSummary, findLiveCallerCall, loadOwnCallContext, uniqueCallId } from './call-context'
-import { callCustomerPhone, isAiReceptionistTranscript, isUsefulCallTranscript } from './call-party'
+import { callAgentExtension, callCustomerPhone } from './call-party'
 import { parseTranscriptionArchive } from './transcription-archive'
 import { yeastarAiConnection } from './yeastar-ai'
 
@@ -17,23 +17,11 @@ describe('call party and archive identity', () => {
     expect(callCustomerPhone({ type: 'outbound', call_from: '1001', call_to: '+525512345678' })).toBe('+525512345678')
     expect(callCustomerPhone({ type: 'internal', call_from: '1001', call_to: '7000' })).toBeNull()
   })
-  it('labels calls as AI receptionist only when the transcript came from Yeastar AI context', () => {
-    expect(isAiReceptionistTranscript({ transcript_source: 'ai_receptionist' })).toBe(true)
-    expect(isAiReceptionistTranscript({ ai: { context: [{ data: {} }] } })).toBe(true)
-    expect(isAiReceptionistTranscript({ event: { type: 'inbound', call_to: '7000' } })).toBe(false)
-  })
-  it('hides empty unidentified CDR legs while retaining calls with useful transcript context', () => {
-    expect(isUsefulCallTranscript({
-      transcript: null, summary: null, agent_user_id: null,
-      yeastar_payload: { event: { type: 'inbound' } },
-    })).toBe(false)
-    expect(isUsefulCallTranscript({
-      transcript: null, summary: null, agent_user_id: null,
-      yeastar_payload: { transcript_source: 'ai_receptionist' },
-    })).toBe(true)
-    expect(isUsefulCallTranscript({
-      transcript: 'Hola', summary: null, agent_user_id: null, yeastar_payload: {},
-    })).toBe(true)
+  it('extracts PBX extensions even when they are not mapped to a NexoOmni user', () => {
+    expect(callAgentExtension({ type: 'inbound', call_from: '+525512345678', call_to: '7000' })).toBe('7000')
+    expect(callAgentExtension({ type: 'outbound', call_from: 'PJSIP/1008', call_to: '+525512345678' })).toBe('1008')
+    expect(callAgentExtension({ type: 'internal', call_from: '1001', call_to: '1008' })).toBe('1008')
+    expect(callAgentExtension({ type: 'inbound', call_from: '+525512345678', call_to: '+525555555555' })).toBeNull()
   })
   it('imports official AI receptionist export records chronologically', () => {
     const [record] = parseTranscriptionArchive([{
@@ -44,7 +32,10 @@ describe('call party and archive identity', () => {
         { source_number: '7000', content: '¿Qué necesita?', timestamp: 1 },
       ],
     }])
-    expect(record).toMatchObject({ cdrId: 'leg-1', uid: 'cdr-root', direction: 'inbound', phone: '+525512345678' })
+    expect(record).toMatchObject({
+      cdrId: 'leg-1', uid: 'cdr-root', direction: 'inbound',
+      phone: '+525512345678', agentExtension: '7000',
+    })
     expect(record.transcript).toBe('7000: ¿Qué necesita?\n525512345678: Una cita')
     expect(record.startedAt).toBe('2026-10-05T16:00:00.000Z')
     expect(record.event).toEqual({

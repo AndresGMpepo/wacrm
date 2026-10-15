@@ -92,6 +92,12 @@ type MetaCommentDetails = {
   name?: string
 }
 
+type MetaPostDetails = {
+  title?: string
+  url?: string
+  previewUrl?: string
+}
+
 function admin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -206,6 +212,44 @@ async function resolveMetaCommentDetails(connector: Connector, commentId: string
   } catch (error) {
     console.info('[meta] comment text lookup failed without blocking ingestion', {
       provider: connector.provider,
+      error: error instanceof Error ? error.message : 'unknown',
+    })
+    return undefined
+  }
+}
+
+async function resolveMetaPostDetails(connector: Connector, postId: string): Promise<MetaPostDetails | undefined> {
+  if (!connector.meta_access_token || !postId) return undefined
+  try {
+    const token = decrypt(connector.meta_access_token)
+    const fields = connector.provider === 'instagram'
+      ? 'caption,permalink,media_url,thumbnail_url'
+      : 'message,permalink_url,full_picture'
+    const response = await fetch(
+      `https://graph.facebook.com/${graphVersion()}/${encodeURIComponent(postId)}?fields=${fields}`,
+      { headers: { Authorization: 'Bearer ' + token }, signal: AbortSignal.timeout(3_500) },
+    )
+    if (!response.ok) {
+      console.info('[meta] source publication lookup unavailable', {
+        provider: connector.provider,
+        postId,
+        status: response.status,
+      })
+      return undefined
+    }
+    const data = await response.json().catch(() => ({})) as Record<string, unknown>
+    const title = typeof data.caption === 'string'
+      ? data.caption.trim()
+      : typeof data.message === 'string' ? data.message.trim() : ''
+    return {
+      title: title ? title.slice(0, 500) : undefined,
+      url: safeHttpsUrl(data.permalink ?? data.permalink_url),
+      previewUrl: safeHttpsUrl(data.thumbnail_url ?? data.media_url ?? data.full_picture),
+    }
+  } catch (error) {
+    console.info('[meta] source publication lookup failed without blocking comment ingestion', {
+      provider: connector.provider,
+      postId,
       error: error instanceof Error ? error.message : 'unknown',
     })
     return undefined
@@ -593,6 +637,7 @@ async function ingestComment(db: ReturnType<typeof admin>, connector: Connector,
   })
   const parentId = valueText(value, 'parent_id')
   const postId = valueText(value, 'post_id') || valueText(value, 'media_id') || value?.media?.id?.trim() || value?.post?.id?.trim() || ''
+  const postDetails = postId ? await resolveMetaPostDetails(connector, postId) : undefined
   const parentConversation = await findCommentConversation(db, connector, parentId)
   const rootCommentId = parentConversation?.social_comment_id || commentId
   const sessionId = `comment:${rootCommentId}`
@@ -607,10 +652,22 @@ async function ingestComment(db: ReturnType<typeof admin>, connector: Connector,
       connector_id: connector.id, external_session_id: sessionId,
       channel_source_label: `${connector.display_name} · Comentarios públicos`, social_comment_id: rootCommentId,
       social_parent_comment_id: parentId || null, social_post_id: postId || null, queue_id: connector.queue_id,
+      social_post_title: postDetails?.title ?? null,
+      social_post_url: postDetails?.url ?? null,
+      social_post_preview_url: postDetails?.previewUrl ?? null,
     }).select('id, unread_count, social_comment_id').single()
     if (error || !data) throw error ?? new Error('No se pudo crear la conversación del comentario Meta.')
     conversation = data
     created = true
+  }
+  if (!created && postId) {
+    const { error: postUpdateError } = await db.from('conversations').update({
+      social_post_id: postId,
+      social_post_title: postDetails?.title ?? null,
+      social_post_url: postDetails?.url ?? null,
+      social_post_preview_url: postDetails?.previewUrl ?? null,
+    }).eq('id', conversation.id).eq('account_id', connector.account_id)
+    if (postUpdateError) throw postUpdateError
   }
   const contentText = inlineText || details?.text || '[Comentario sin texto]'
   const createdAt = time(entry.time)

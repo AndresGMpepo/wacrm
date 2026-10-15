@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { fetchAiResult, fetchCdrDetail, type JsonRecord } from './yeastar-ai'
 import { analyzeCall } from './call-summary'
-import { callCustomerPhone } from './call-party'
+import { callAgentExtension, callCustomerPhone } from './call-party'
 import { applyContactMemory } from '@/lib/ai/memory'
 import { resolveAuditUserId } from '@/lib/api/v1/contacts'
 import { findOrCreateContactByPhone } from '@/lib/whatsapp/resolve-conversation'
@@ -54,7 +54,8 @@ export async function processCallTranscriptions(db: SupabaseClient) {
         transcript = ai.transcript
         const { error: transcriptError } = await db.from('yeastar_call_transcriptions').update({
           cdr_id: ai.cdrId, transcript, transcription_status: 'completed', error_message: null,
-          yeastar_payload: { event, ai: ai.raw, transcript_source: 'ai_receptionist' },
+          session_call_id: typeof event.uid === 'string' ? event.uid : row.call_id,
+          yeastar_payload: { event, ai: ai.raw, transcript_source: 'yeastar_ai_context' },
         }).eq('id', row.id).eq('account_id', row.account_id)
         if (transcriptError) throw transcriptError
       }
@@ -72,14 +73,19 @@ export async function processCallTranscriptions(db: SupabaseClient) {
         }
       }
       let contactId = row.contact_id
-      const direction = String(event.type ?? event.call_type ?? '').toLowerCase()
-      const extensionNumber = direction === 'inbound' ? event.call_to : direction === 'outbound' ? event.call_from : null
-      if (typeof extensionNumber === 'string') {
+      const extensionNumber = callAgentExtension(event)
+      if (extensionNumber) {
         const { data: agent, error: agentError } = await db.from('telephony_user_configs').select('user_id, extension')
           .eq('account_id', row.account_id).eq('provider', 'yeastar').eq('extension', extensionNumber).maybeSingle()
         if (agentError) throw agentError
         const { error: agentWriteError } = await db.from('yeastar_call_transcriptions')
-          .update({ agent_user_id: agent?.user_id ?? null, agent_extension: agent?.extension ?? extensionNumber })
+          .update({
+            agent_user_id: agent?.user_id ?? null,
+            agent_extension: agent?.extension ?? extensionNumber,
+            agent_name: typeof event.agent_name === 'string'
+              ? event.agent_name
+              : typeof event.extension_name === 'string' ? event.extension_name : null,
+          })
           .eq('id', row.id).eq('account_id', row.account_id)
         if (agentWriteError) throw agentWriteError
       }

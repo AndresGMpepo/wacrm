@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { apiUrl, parsePbxLocalTime, yeastarAiConnection, type JsonRecord } from './yeastar-ai'
-import { callCustomerPhone } from './call-party'
+import { callAgentExtension, callCustomerPhone } from './call-party'
 import { normalizeCallSummary } from './call-summary'
 
 export class TranscriptionArchiveError extends Error {
@@ -22,29 +22,43 @@ export function parseTranscriptionArchive(value: unknown) {
     if (typeof row.leg_id !== 'string' || !row.leg_id.trim() || typeof row.uid !== 'string') {
       throw new Error('El archivo no contiene los identificadores de tramo CDR requeridos.')
     }
-    const turns = Array.isArray(row.ai_transcription) ? row.ai_transcription : []
-    const transcript = turns.filter((turn) => turn && typeof turn === 'object')
-      .map((turn) => turn as JsonRecord)
+    const turns = (Array.isArray(row.ai_transcription) ? row.ai_transcription : [])
+      .filter((turn): turn is JsonRecord => Boolean(turn && typeof turn === 'object'))
+    const transcript = turns
       .filter((turn) => !turn.type || turn.type === 'speak')
       .filter((turn) => typeof turn.content === 'string' && turn.content.trim())
       .sort((a, b) => Number(a.timestamp ?? 0) - Number(b.timestamp ?? 0))
-      .map((turn) => `${typeof turn.source_number === 'string' ? `${turn.source_number}: ` : ''}${String(turn.content).trim()}`)
+      .map((turn) => {
+        const speaker = typeof turn.name === 'string' && turn.name.trim()
+          ? turn.name.trim()
+          : typeof turn.source_number === 'string' ? turn.source_number : ''
+        return `${speaker ? `${speaker}: ` : ''}${String(turn.content).trim()}`
+      })
       .join('\n')
     const direction = String(row.call_type ?? '').toLowerCase()
+    const event = {
+      uid: row.uid, leg_id: row.leg_id, call_note_id: row.leg_id,
+      call_from: row.call_from, call_to: row.call_to, type: direction,
+      time_start: null as string | null, call_duration: row.call_duration,
+    }
+    const agentExtension = callAgentExtension(event)
+    const agentTurn = agentExtension
+      ? turns.find((turn) => String(turn.source_number ?? '').trim() === agentExtension
+        && typeof turn.name === 'string' && turn.name.trim())
+      : undefined
     const startedAt = typeof row.time === 'string' ? parsePbxLocalTime(row.time)?.toISOString() : undefined
+    event.time_start = startedAt ? String(row.time) : null
     return {
       cdrId: row.leg_id, uid: row.uid,
       transcript, summary: typeof row.ai_summary === 'string' ? normalizeCallSummary(row.ai_summary) : null,
       phone: callCustomerPhone({ ...row, type: direction }),
+      agentExtension,
+      agentName: typeof agentTurn?.name === 'string' ? agentTurn.name.trim() : null,
       direction: ['inbound', 'outbound', 'internal'].includes(direction) ? direction : 'unknown',
       startedAt: startedAt ?? null,
       dateUnavailable: Boolean(transcript && !startedAt),
       duration: typeof row.call_duration === 'number' ? row.call_duration : null,
-      event: {
-        uid: row.uid, leg_id: row.leg_id, call_note_id: row.leg_id,
-        call_from: row.call_from, call_to: row.call_to, type: direction,
-        time_start: startedAt ? row.time : null, call_duration: row.call_duration,
-      },
+      event,
     }
   }).filter((row) => row.transcript)
 }
@@ -156,6 +170,7 @@ export async function syncTranscriptionArchive(db: SupabaseClient, accountId: st
     const { error: writeError } = await db.from('yeastar_call_transcriptions').upsert(batch.map((row) => ({
       account_id: accountId, call_id: byCdr.get(row.cdrId)?.call_id ?? `cdr:${row.uid}:${row.cdrId}`,
       cdr_id: row.cdrId, customer_phone: row.phone, direction: row.direction,
+      session_call_id: row.uid, agent_extension: row.agentExtension, agent_name: row.agentName,
       started_at: row.startedAt ?? byCdr.get(row.cdrId)?.started_at ?? null,
       duration_seconds: row.duration, transcript: row.transcript,
       summary: improvedIds.has(row.cdrId) ? null
@@ -172,7 +187,7 @@ export async function syncTranscriptionArchive(db: SupabaseClient, accountId: st
         ? byCdr.get(row.cdrId)?.analysis_status ?? 'pending' : 'pending',
       analysis_error: dateRepairIds.has(row.cdrId) && !improvedIds.has(row.cdrId)
         ? byCdr.get(row.cdrId)?.analysis_error ?? null : null,
-      error_message: null, yeastar_payload: { event: row.event, transcript_source: 'ai_receptionist' },
+      error_message: null, yeastar_payload: { event: row.event, transcript_source: 'yeastar_ai_transcription' },
       memory_applied_at: dateRepairIds.has(row.cdrId) && !improvedIds.has(row.cdrId)
         ? byCdr.get(row.cdrId)?.memory_applied_at ?? null : null,
       next_sync_at: new Date().toISOString(), updated_at: new Date().toISOString(),

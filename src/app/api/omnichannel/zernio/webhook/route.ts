@@ -11,6 +11,7 @@ import { extractZernioMedia, extractZernioReaction, firstZernioContactName, isZe
 import { getZernioParticipantProfile, verifyZernioSignature, type ZernioChannel } from '@/lib/zernio/server'
 import { persistZernioOutbound, zernioOutboundIsHuman } from '@/lib/zernio/outbound-message'
 import { extractZernioPostContext } from '@/lib/zernio/post-context'
+import { parseZernioPublicComment } from '@/lib/zernio/comment-context'
 import { processWebPushOutbox } from '@/lib/notifications/web-push'
 import { isValidStatusTransition } from '@/lib/whatsapp/recipient-status-ladder'
 import { flagBroadcastReplyIfAny } from '@/lib/whatsapp/broadcast-reply-flag'
@@ -585,11 +586,12 @@ async function processZernioWebhook(payload: Json, eventIdHeader: string | null)
 
       const message = record(event.message)
       const comment = record(event.comment)
+      const publicComment = eventType === 'comment.received' ? parseZernioPublicComment(event) : null
+      if (eventType === 'comment.received' && !publicComment) continue
       const reactionEvent = record(event.reaction)
       const incoming = eventType === 'comment.received' ? comment : message
       const conversation = record(event.conversation ?? incoming.conversation)
       const account = record(event.account ?? incoming.account)
-      const post = record(event.post)
       // `conversation.participantId`/`participantName` (documented shape:
       // https://docs.zernio.com/messages/get-inbox-conversation) is the
       // primary contact identity for DM platforms — no nested
@@ -606,7 +608,7 @@ async function processZernioWebhook(payload: Json, eventIdHeader: string | null)
         conversation._id,
         incoming.conversationId,
         event.conversationId,
-        eventType === 'comment.received' && externalUserId ? `comment:${text(post.id, post._id, event.postId)}:${externalUserId}` : '',
+        publicComment ? `comment:${publicComment.rootCommentId}` : '',
       )
       const channel = channelFrom(account.platform ?? account.channel ?? account.type ?? conversation.platform ?? event.channel ?? event.platform ?? incoming.platform ?? incoming.channel ?? conversation.channel ?? payload.channel)
       // Zernio's webhook docs name this field `account.accountId` explicitly
@@ -626,6 +628,14 @@ async function processZernioWebhook(payload: Json, eventIdHeader: string | null)
       if (!connector) continue
       const typed = connector as Connector
       if (!(await registerReceipt(db, typed, externalEventId, eventType, event))) continue
+      if (publicComment?.author.isOwnAccount) {
+        await db.from('zernio_webhook_receipts').update({
+          outcome: 'ignored',
+          detail: 'Respuesta pública propia; ya se guarda al enviarla.',
+          processed_at: new Date().toISOString(),
+        }).eq('connector_id', typed.id).eq('external_message_id', externalEventId)
+        continue
+      }
 
       if (eventType === 'reaction.received') {
         const reaction = extractZernioReaction(reactionEvent)
@@ -776,7 +786,7 @@ async function processZernioWebhook(payload: Json, eventIdHeader: string | null)
       // One lookup covers both gaps: a missing avatar (pre-existing
       // behavior) and a missing name, which Zernio frequently fills in on
       // its side a moment after the webhook was built.
-      const profile = !webhookAvatarUrl || isZernioPlaceholderName(contactName)
+      const profile = !publicComment && (!webhookAvatarUrl || isZernioPlaceholderName(contactName))
         ? await getZernioParticipantProfile(externalConversationId, zernioAccountId).catch((error) => {
           console.error('[zernio] participant profile lookup failed:', error)
           return null
@@ -795,6 +805,20 @@ async function processZernioWebhook(payload: Json, eventIdHeader: string | null)
         contactAvatarUrl ?? undefined,
       )
       const { row: conversationRow, created } = await findOrCreateZernioConversation(db, typed, contactId, auditUserId, externalConversationId)
+      if (publicComment) {
+        const { error: contextError } = await db.from('conversations').update({
+          channel_source_label: `${typed.display_name} · Comentario público`,
+          social_comment_id: publicComment.rootCommentId,
+          social_parent_comment_id: publicComment.parentCommentId,
+          social_post_id: publicComment.platformPostId,
+          social_post_title: publicComment.post.title,
+          social_post_url: publicComment.post.permalink,
+          social_post_preview_url: publicComment.post.imageUrl,
+          social_ad_id: publicComment.ad?.id ?? null,
+          social_ad_title: publicComment.ad?.title ?? null,
+        }).eq('id', conversationRow.id).eq('account_id', typed.account_id)
+        if (contextError) throw contextError
+      }
 
       const now = new Date().toISOString()
       const messageId = `zernio:${typed.id}:${externalMessageId || externalEventId}`
@@ -856,7 +880,7 @@ async function processZernioWebhook(payload: Json, eventIdHeader: string | null)
         platform_message_id: platformMessageId,
         reply_to_message_id: replyToInternalId,
         status: 'delivered',
-        created_at: now,
+        created_at: publicComment?.createdAt ?? now,
         // Which of the contact's numbers actually sent this — only
         // meaningful on WhatsApp, where the participant id IS the phone
         // (see contactPhone above). Migration 131.

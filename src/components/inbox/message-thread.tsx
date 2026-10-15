@@ -44,6 +44,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { MessageBubble } from "./message-bubble";
 import { MessageActions } from "./message-actions";
 import { AdReferralBanner } from "./ad-referral-banner";
+import { SocialPublicationBanner } from "./social-publication-banner";
 import {
   MessageComposer,
   CHAT_MEDIA_BUCKET,
@@ -1202,6 +1203,7 @@ export function MessageThread({
       </div>
 
       {adReferral ? <AdReferralBanner referral={adReferral} /> : null}
+      {conversation.social_comment_id ? <SocialPublicationBanner conversation={conversation} /> : null}
 
       {onOpenMobileContactPanel ? (
         <button

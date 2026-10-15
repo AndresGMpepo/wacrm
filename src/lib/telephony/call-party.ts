@@ -6,17 +6,18 @@ export function callCustomerPhone(payload: JsonRecord): string | null {
   return typeof phone === 'string' && phone.trim() ? phone.trim() : null
 }
 
-export function isAiReceptionistTranscript(payload: JsonRecord | null | undefined): boolean {
-  if (payload?.transcript_source === 'ai_receptionist') return true
-  const ai = payload?.ai
-  return Boolean(ai && typeof ai === 'object' && 'context' in ai)
-}
-
-export function isUsefulCallTranscript(row: {
-  transcript: string | null
-  summary: string | null
-  agent_user_id: string | null
-  yeastar_payload: JsonRecord | null
-}): boolean {
-  return Boolean(row.transcript?.trim() || row.summary?.trim() || row.agent_user_id || isAiReceptionistTranscript(row.yeastar_payload))
+export function callAgentExtension(payload: JsonRecord): string | null {
+  const direction = String(payload.type ?? payload.call_type ?? '').toLowerCase()
+  const raw = direction === 'inbound'
+    ? payload.call_to
+    : direction === 'outbound'
+      ? payload.call_from
+      : direction === 'internal' ? payload.call_to : null
+  if (raw == null) return null
+  const value = String(raw).trim()
+  if (!value) return null
+  const direct = /^\d{2,8}$/.exec(value)
+  if (direct) return direct[0]
+  const wrapped = /(?:^|[^0-9])(\d{2,8})(?![0-9])/.exec(value)
+  return wrapped?.[1] ?? null
 }

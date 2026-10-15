@@ -4,7 +4,7 @@ import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { findExistingContact } from '@/lib/contacts/dedupe'
 import { aiCdrIds, findValue, parsePbxLocalTime, type JsonRecord } from '@/lib/telephony/yeastar-ai'
-import { callCustomerPhone } from '@/lib/telephony/call-party'
+import { callAgentExtension, callCustomerPhone } from '@/lib/telephony/call-party'
 import { sendIncomingCallPush } from '@/lib/notifications/web-push'
 
 export const dynamic = 'force-dynamic'
@@ -230,7 +230,12 @@ export async function POST(request: Request, context: { params: Promise<{ accoun
       const callType = firstNestedText(event.payload, ['type'])
       const fromExtension = resolveExtension(callFrom, knownExtensions)
       const toExtension = resolveExtension(callTo, knownExtensions)
-      const agentExtension = fromExtension ?? toExtension ?? null
+      const agentExtension = fromExtension ?? toExtension ?? callAgentExtension({
+        ...event.payload,
+        type: callType,
+        call_from: callFrom,
+        call_to: callTo,
+      })
       const customerPhone = callCustomerPhone(event.payload)
       const direction = callType && ['inbound', 'outbound', 'internal'].includes(callType.toLowerCase()) ? callType.toLowerCase() : 'unknown'
       const durationValue = firstNestedNumber(event.payload, ['call_duration', 'talk_duration'])
@@ -250,6 +255,7 @@ export async function POST(request: Request, context: { params: Promise<{ accoun
       const { error } = await db.from('yeastar_call_transcriptions').upsert({
         account_id: accountId,
         call_id: existing?.call_id ?? (cdrIds ? `cdr:${firstNestedText(event.payload, ['uid']) ?? event.callId}:${cdrIds}` : event.callId),
+        session_call_id: firstNestedText(event.payload, ['uid']) ?? event.callId,
         cdr_id: cdrIds || null,
         customer_phone: customerPhone ?? contactRow?.phone ?? null,
         customer_name: contactRow?.name ?? null,
@@ -257,6 +263,7 @@ export async function POST(request: Request, context: { params: Promise<{ accoun
         contact_id: contactRow?.id ?? null,
         agent_user_id: agentConfig?.user_id ?? null,
         agent_extension: agentExtension,
+        agent_name: firstNestedText(event.payload, ['agent_name', 'extension_name']),
         direction,
         started_at: startedAt && !Number.isNaN(startedAt.getTime()) ? startedAt.toISOString() : null,
         duration_seconds: durationValue == null ? null : Math.round(durationValue),

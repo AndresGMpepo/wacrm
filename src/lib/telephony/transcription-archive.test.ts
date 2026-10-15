@@ -44,7 +44,9 @@ describe('Yeastar archive synchronization', () => {
     expect(stored.size).toBe(201)
     expect([...stored.values()].every((row) => row.analysis_status === 'pending')).toBe(true)
     expect([...stored.values()].every((row) =>
-      (row.yeastar_payload as { transcript_source: string }).transcript_source === 'ai_receptionist')).toBe(true)
+      (row.yeastar_payload as { transcript_source: string }).transcript_source === 'yeastar_ai_transcription')).toBe(true)
+    expect([...stored.values()].every((row) => row.session_call_id === `root-${String(row.cdr_id).replace('leg-', '')}`)).toBe(true)
+    expect([...stored.values()].every((row) => row.agent_extension === '7000')).toBe(true)
   })
   it('rejects a download on another origin before forwarding credentials', async () => {
     const fetcher = upstream([], 'https://other.example.test/api/download/file')

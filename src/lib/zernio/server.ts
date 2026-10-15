@@ -450,6 +450,21 @@ export async function sendZernioText(conversationId: string, zernioAccountId: st
   return typeof id === 'string' && id.trim() ? id : null
 }
 
+export async function replyToZernioComment(
+  platformPostId: string,
+  zernioAccountId: string,
+  commentId: string,
+  message: string,
+) {
+  const payload = await zernioFetch(`/inbox/comments/${encodeURIComponent(platformPostId)}`, {
+    method: 'POST',
+    headers: { 'Idempotency-Key': crypto.randomUUID() },
+    body: JSON.stringify({ accountId: zernioAccountId, commentId, message }),
+  })
+  const data = record(payload.data)
+  return asText(data.commentId ?? payload.commentId)
+}
+
 /**
  * POST /v1/inbox/conversations/{conversationId}/typing — one-shot, no
  * separate "stop" call: Meta/Zernio auto-expire it (Facebook ~20s,
@@ -710,4 +725,3 @@ export async function sendZernioTemplateMessage(args: {
   if (!messageId) throw new Error('No se recibió el identificador del mensaje enviado.')
   return { messageId, conversationId: asText(data.conversationId) || null }
 }
-

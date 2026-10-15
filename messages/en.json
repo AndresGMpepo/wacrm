@@ -40,6 +40,10 @@
     "transcriptUnavailable": "The transcript was not available within the expected period. Use Import from Yeastar to try recovering it.",
     "memoryNotLinked": "Analysis is ready, but the call was not linked to Nexo Memory because no valid external phone number was available.",
     "aiReceptionist": "AI receptionist",
+    "aiFirstTouch": "Answered first by the AI receptionist and then transferred.",
+    "aiHandoffTitle": "Context provided by the AI receptionist",
+    "aiCustomerNeed": "Need: {need}",
+    "aiNextAction": "Next step: {action}",
     "agentUnidentified": "Agent not identified",
     "extensionAgent": "PBX agent",
     "extensionShort": "Ext.",
@@ -65,7 +69,12 @@
     "importErrorInput": "Check the phone filter format and try again.",
     "analysisPending": "Analysis is in progress. Click Refresh to check its status.",
     "analysisFailed": "Analysis or the Nexo Memory update failed and will be retried.",
-    "analysisUnavailable": "Configure account AI and sync again to generate the summary and Nexo Memory."
+    "analysisUnavailable": "Configure account AI and sync again to generate the summary and Nexo Memory.",
+    "searchPlaceholder": "Search by customer, phone, agent, extension, or text",
+    "search": "Search",
+    "previousPage": "Previous",
+    "nextPage": "Next",
+    "pageStatus": "Page {page} of {pages} · {total} calls"
   },
   "LoginPage": {
     "titleAccept": "Sign in to accept",
@@ -130,6 +139,7 @@
     "automations": "Automations",
     "supervision": "Operational supervision",
     "reports": "Reports",
+    "callTranscriptions": "Call transcriptions",
     "settings": "Settings",
     "openMenu": "Open menu",
     "openAccountMenu": "Open account menu",
@@ -430,6 +440,13 @@
       "dismiss": "Dismiss",
       "noTitle": "No ad title available",
       "adId": "Ad ID: {id}"
+    },
+    "socialPublication": {
+      "facebookComment": "Public Facebook comment",
+      "instagramComment": "Public Instagram comment",
+      "unknownPost": "Meta or Zernio did not provide the post text.",
+      "paidAd": "Ad {id}",
+      "openPost": "View post"
     },
     "postContext": {
       "story_reply": "Replied to your story",

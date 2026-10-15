@@ -4,7 +4,7 @@ description: "Atiende WhatsApp, Facebook, Instagram y Chat web desde una sola vi
 section: "inbox"
 role: ["agent", "supervisor", "admin", "owner"]
 plan: ["basico", "crecimiento", "premium"]
-updated: "2026-10-07"
+updated: "2026-10-14"
 ---
 
 ## ¿Qué es?
@@ -50,6 +50,23 @@ adivinarlo. El aviso solo aparece si el administrador validó la
 conexión de Facebook después de esta actualización (Configuración →
 Redes sociales → **Validar conexión**), para que Meta empiece a
 enviar ese dato.
+
+## Comentarios públicos y publicación de origen
+
+Un comentario público no se mezcla con un mensaje privado de Messenger.
+La lista y el encabezado lo identifican como **Comentario público de
+Facebook** o **Comentario público de Instagram**. Arriba del hilo aparece
+la publicación de origen con su texto, vista previa y botón **Ver
+publicación**, cuando Meta o Zernio entregan esos datos.
+
+Si el comentario pertenece a contenido pagado y el proveedor informa el
+anuncio, también se muestra su identificador o título. Las respuestas que
+escribes desde ese hilo se publican como respuesta al comentario; no se
+envían por Messenger.
+
+Para conexiones Zernio, el administrador debe mantener suscritos
+`message.received` y `comment.received`. Para conexión Meta nativa,
+Facebook requiere la suscripción `feed`.
 
 ## Confirmación de leído en Facebook/Instagram
 
