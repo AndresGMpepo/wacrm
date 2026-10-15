@@ -22,6 +22,9 @@ export async function GET(request: Request) {
     const page = positiveInteger(url.searchParams.get('page'), 1)
     const query = url.searchParams.get('q')?.trim()
     const selectedCallId = url.searchParams.get('call')?.trim()
+    // Every PBX call event creates a row to track sync progress, but most never get a transcript
+    // published by Yeastar. Default to only the ones that actually have transcribed content.
+    const onlyTranscribed = url.searchParams.get('only_transcribed') !== 'false'
     if (query && (query.length > 120 || /[,%()]/.test(query))) {
       return NextResponse.json({ error: 'La búsqueda contiene caracteres no permitidos.' }, { status: 400 })
     }
@@ -33,6 +36,7 @@ export async function GET(request: Request) {
       .order('created_at', { ascending: false })
     if (selectedCallId) requestQuery = requestQuery.eq('id', selectedCallId)
     else {
+      if (onlyTranscribed) requestQuery = requestQuery.eq('transcription_status', 'completed').not('transcript', 'is', null)
       if (query) requestQuery = requestQuery.or(`customer_phone.ilike.%${query}%,customer_name.ilike.%${query}%,customer_email.ilike.%${query}%,agent_extension.ilike.%${query}%,agent_name.ilike.%${query}%,transcript.ilike.%${query}%,summary.ilike.%${query}%`)
       requestQuery = requestQuery.range((page - 1) * pageSize, page * pageSize - 1)
     }

@@ -72,6 +72,8 @@
     "analysisUnavailable": "Configura la IA de la cuenta y vuelve a sincronizar para generar el resumen y Nexo Memory.",
     "searchPlaceholder": "Buscar por cliente, teléfono, agente, extensión o texto",
     "search": "Buscar",
+    "onlyTranscribedLabel": "Mostrar solo llamadas con transcripción real (oculta las que aún no publica Yeastar)",
+    "noTranscribedCalls": "Aún no hay llamadas con transcripción real. Puede que Yeastar no haya publicado ninguna, o que las llamadas guardadas sigan pendientes. Desmarca el filtro para ver todas las llamadas registradas.",
     "previousPage": "Anterior",
     "nextPage": "Siguiente",
     "pageStatus": "Página {page} de {pages} · {total} llamadas"

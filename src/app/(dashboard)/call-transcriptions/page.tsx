@@ -124,6 +124,7 @@ function CallTranscriptionsContent() {
   const [query, setQuery] = useState('')
   const [appliedQuery, setAppliedQuery] = useState('')
   const [page, setPage] = useState(1)
+  const [onlyTranscribed, setOnlyTranscribed] = useState(true)
   const [pagination, setPagination] = useState({ page: 1, page_size: 25, total: 0, total_pages: 1 })
   const requestedCallId = searchParams.get('call')?.trim() ?? ''
   const [loading, setLoading] = useState(true)
@@ -144,6 +145,7 @@ function CallTranscriptionsContent() {
         params.set('page', String(page))
         params.set('page_size', '25')
         if (appliedQuery) params.set('q', appliedQuery)
+        params.set('only_transcribed', String(onlyTranscribed))
       }
       const response = await fetch(`/api/telephony/yeastar/transcriptions${params.size ? `?${params.toString()}` : ''}`, { cache: 'no-store' })
       const payload = await response.json().catch(() => ({}))
@@ -152,7 +154,7 @@ function CallTranscriptionsContent() {
       if (payload.pagination) setPagination(payload.pagination)
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'No se pudieron cargar las transcripciones.') }
     finally { if (!quiet) setLoading(false) }
-  }, [appliedQuery, page, requestedCallId])
+  }, [appliedQuery, onlyTranscribed, page, requestedCallId])
 
   const archiveErrorMessage = (code?: string) => {
     switch (code) {
@@ -221,24 +223,35 @@ function CallTranscriptionsContent() {
       </div>
       <Button variant="outline" onClick={async () => { setRefreshing(true); try { await load(true) } finally { setRefreshing(false) } }} disabled={loading || refreshing}><RefreshCw className={refreshing ? 'size-4 animate-spin' : 'size-4'} />Actualizar</Button>
     </div>
-    {!requestedCallId ? <form className="flex gap-2" onSubmit={(event) => {
-      event.preventDefault()
-      const nextQuery = query.trim()
-      if (page === 1 && nextQuery === appliedQuery) void load()
-      else {
-        setPage(1)
-        setAppliedQuery(nextQuery)
-      }
-    }}>
-      <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t('searchPlaceholder')} />
-      <Button type="submit">{t('search')}</Button>
-    </form> : null}
+    {!requestedCallId ? <div className="space-y-2">
+      <form className="flex gap-2" onSubmit={(event) => {
+        event.preventDefault()
+        const nextQuery = query.trim()
+        if (page === 1 && nextQuery === appliedQuery) void load()
+        else {
+          setPage(1)
+          setAppliedQuery(nextQuery)
+        }
+      }}>
+        <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t('searchPlaceholder')} />
+        <Button type="submit">{t('search')}</Button>
+      </form>
+      <label className="flex items-center gap-2 text-sm text-muted-foreground">
+        <input
+          type="checkbox"
+          className="size-4"
+          checked={onlyTranscribed}
+          onChange={(event) => { setOnlyTranscribed(event.target.checked); setPage(1) }}
+        />
+        {t('onlyTranscribedLabel')}
+      </label>
+    </div> : null}
     {loading
       ? <div className="flex justify-center py-12 text-muted-foreground"><Loader2 className="mr-2 size-5 animate-spin" />Cargando</div>
       : error
         ? <Card><CardContent className="pt-6 text-sm text-red-400">{error}</CardContent></Card>
         : calls.length === 0
-          ? <Card><CardContent className="pt-6 text-sm text-muted-foreground">{requestedCallId ? t('selectedCallNotFound') : 'Aún no hay llamadas sincronizadas. Confirma que Yeastar envía el evento 30012 después de finalizar una llamada.'}</CardContent></Card>
+          ? <Card><CardContent className="pt-6 text-sm text-muted-foreground">{requestedCallId ? t('selectedCallNotFound') : onlyTranscribed ? t('noTranscribedCalls') : 'Aún no hay llamadas sincronizadas. Confirma que Yeastar envía el evento 30012 después de finalizar una llamada.'}</CardContent></Card>
           : <div className="space-y-4">
             {calls.map((call) => <Card key={call.id}>
               <CardHeader>

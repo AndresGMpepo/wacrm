@@ -72,6 +72,8 @@
     "analysisUnavailable": "Configure account AI and sync again to generate the summary and Nexo Memory.",
     "searchPlaceholder": "Search by customer, phone, agent, extension, or text",
     "search": "Search",
+    "onlyTranscribedLabel": "Show only calls with a real transcript (hides ones Yeastar hasn't published yet)",
+    "noTranscribedCalls": "No calls with a real transcript yet. Yeastar may not have published any, or saved calls are still pending. Uncheck the filter to see every recorded call.",
     "previousPage": "Previous",
     "nextPage": "Next",
     "pageStatus": "Page {page} of {pages} · {total} calls"

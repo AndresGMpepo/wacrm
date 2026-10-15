@@ -34,6 +34,16 @@ El listado se carga en páginas de 25 llamadas desde NexoOmni; cambiar de
 página, buscar o abrir una transcripción no vuelve a consultar el PBX.
 Esto evita cargar miles de filas en el navegador y no agrega tráfico a
 Yeastar durante la supervisión diaria.
+
+NexoOmni crea un registro por cada tramo de llamada notificado por el PBX
+para poder rastrear su sincronización, aunque Yeastar nunca publique una
+transcripción para la mayoría de ellos. Por eso el listado muestra, por
+defecto, **solo las llamadas con transcripción real** (estado
+"completado"); el contador de páginas refleja ese total filtrado, no el
+total de llamadas registradas. Desmarca **Mostrar solo llamadas con
+transcripción real** para ver también las que siguen pendientes, fallaron
+o nunca estuvieron disponibles, por ejemplo para diagnosticar por qué el
+PBX no publicó su transcripción.
 El estado del análisis no provoca recargas automáticas. Pulsa
 **Actualizar** cuando quieras consultar los cambios. Si ya hay un resumen
 o Nexo Memory actualizado, no se muestra un aviso de análisis pendiente
@@ -48,6 +58,9 @@ completo de llamadas de la cuenta.
 
 1. Ve a **Transcripciones de llamadas**.
 2. Busca por contacto, teléfono, nombre de agente, extensión o texto.
+   Deja marcado **Mostrar solo llamadas con transcripción real** para ver
+   únicamente las que tienen contenido; desmárcalo solo si necesitas
+   revisar llamadas pendientes, fallidas o no disponibles.
 3. Abre una llamada para ver: resumen, puntos clave, pendientes,
    transcripción completa.
 4. Revisa quién atendió. NexoOmni muestra el nombre del miembro vinculado;
